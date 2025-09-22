@@ -1,0 +1,23 @@
+[project]
+name = "pdf-filling-agent"
+version = "0.1.0"
+description = "AI-powered PDF filling agent using OpenRouter LLM"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+dependencies = [
+    "PyMuPDF>=1.23.0",
+    "openai>=1.0.0",
+    "pydantic>=2.10.6",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = "MIT"
+
+[project.scripts]
+pdf-agent = "pdf_filling_agent.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pdf_filling_agent"]
