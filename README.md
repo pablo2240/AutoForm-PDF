@@ -75,6 +75,38 @@ print(f"Filled PDF saved to: {output_path}")
 
 Place your PDF forms in an `input/` directory, or specify the full path when running the agent.
 
+## Quick Start Testing
+
+Test the PDF filling agent immediately with the included example:
+
+```bash
+# Run the example script with the provided W-9 PDF
+uv run python example.py
+
+# This will:
+# 1. Parse instructions to fill a W-9 form
+# 2. Use the included fw9.pdf as input
+# 3. Generate a filled PDF in the output/ directory
+# 4. Display field mapping and results
+```
+
+The included `input/fw9.pdf` is a sample W-9 tax form that demonstrates the system's capabilities with real-world PDF forms.
+
+### Testing Different Instruction Formats
+
+Use the comprehensive test suite to verify functionality:
+
+```bash
+# Run all tests
+uv run pytest
+
+# Test different instruction parsing scenarios
+uv run python test_general.py
+
+# Test the core agent functionality
+uv run python test_agent.py
+```
+
 ## Project Structure
 
 ```
@@ -85,9 +117,16 @@ pdf-filling-agent/
 │   ├── knowledge_base.py      # Knowledge base management
 │   ├── pdf_processor.py       # PDF manipulation utilities
 │   └── main.py                # CLI interface
+├── input/                     # PDF forms for testing
+│   └── fw9.pdf               # Sample W-9 tax form
+├── output/                    # Generated filled PDFs
+├── tests/                     # Test files
+│   ├── test_general.py       # Instruction format testing
+│   └── test_agent.py         # Core functionality testing
 ├── knowledge_base.md          # Default knowledge base
-├── example.py                 # Usage example
+├── example.py                 # Usage example with fw9.pdf
 ├── .env.example              # Environment template
+├── .gitignore                # Git ignore rules
 ├── README.md                 # This file
 └── pyproject.toml            # Project configuration
 ```
@@ -180,7 +219,20 @@ def handle_checkbox_field(self, widget, value):
 ### Running Tests
 
 ```bash
-uv run python -m pytest
+# Run all tests
+uv run pytest
+
+# Run specific test files
+uv run pytest tests/
+
+# Test different instruction parsing scenarios
+uv run python tests/test_general.py
+
+# Test the core agent functionality
+uv run python tests/test_agent.py
+
+# Run example with provided sample PDF
+uv run python example.py
 ```
 
 ### Code Formatting
