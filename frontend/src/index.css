@@ -753,30 +753,36 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* PDF Canvas */
+/* PDF Canvas Container & Viewport */
+.canvas-wrapper,
 .pdf-canvas-container {
   display: flex;
   flex-direction: column;
   height: 100%;
   width: 100%;
   position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
+.canvas-status-bar,
 .canvas-floating-bar {
   position: absolute;
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 10;
+  z-index: 100;
   display: flex;
   align-items: center;
   gap: 16px;
-  background-color: rgba(30, 41, 59, 0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border-color);
+  background-color: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   padding: 6px 16px;
   border-radius: 30px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
 }
 
 .active-field-indicator {
@@ -826,11 +832,18 @@ body {
 
 .pdf-viewport {
   flex: 1;
-  overflow: auto;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 70px 20px 40px 20px;
+  padding: 70px 24px 60px 24px;
+  box-sizing: border-box;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
 }
 
 .pdf-sheet {
