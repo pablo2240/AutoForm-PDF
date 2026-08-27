@@ -24,7 +24,7 @@ def test_templates():
     assert len(templates) > 0
 
 def test_get_pdf_pages():
-    response = client.get("/api/pdf/formato_conocimiento/pages")
+    response = client.get("/api/pdf/formulario_datos_empresa/pages")
     assert response.status_code == 200
     res_data = response.json()
     assert res_data["total_pages"] > 0
@@ -33,7 +33,7 @@ def test_get_pdf_pages():
 
 def test_save_mapping_and_generate_with_styles():
     mapping_payload = {
-        "template_id": "formato_conocimiento",
+        "template_id": "formulario_datos_empresa",
         "page_width": 612.0,
         "page_height": 792.0,
         "mappings": [
@@ -58,12 +58,12 @@ def test_save_mapping_and_generate_with_styles():
     save_res = client.post("/api/mapping", json=mapping_payload)
     assert save_res.status_code == 200
     
-    gen_res = client.post("/api/generate", json={"template_id": "formato_conocimiento"})
+    gen_res = client.post("/api/generate", json={"template_id": "formulario_datos_empresa"})
     assert gen_res.status_code == 200
     gen_data = gen_res.json()
     assert gen_data["status"] == "success"
     assert gen_data["total_placed"] >= 1
-    assert "filled_formato_conocimiento.pdf" in gen_data["filename"]
+    assert "filled_formulario_datos_empresa.pdf" in gen_data["filename"]
 
 def test_delete_template():
     # 1. Create a dummy test pdf in input/

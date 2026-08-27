@@ -103,8 +103,53 @@ function flattenToCompanyData(
   return flat;
 }
 
-const STORAGE_PROFILES_KEY = 'autoform_employer_profiles_v1';
-const STORAGE_COMPANY_KEY = 'autoform_categorized_company_v1';
+export const DEFAULT_INITIAL_COMPANY_CATEGORIES: CategorizedCompanyData = {
+  id: [
+    { id: 'f-id-1', key: 'razon_social', label: 'Razón Social', value: 'Ingeniería Asistida Por Computador S.A.S', category: 'id' },
+    { id: 'f-id-2', key: 'nit', label: 'NIT', value: '8110047212', category: 'id' },
+    { id: 'f-id-3', key: 'representante_legal', label: 'Representante Legal', value: 'Guillermo Humberto Cañón Sarria', category: 'id' },
+    { id: 'f-id-4', key: 'representante_nombre', label: 'Representante Nombre', value: 'Guillermo Humberto', category: 'id' },
+    { id: 'f-id-5', key: 'representante_apellido', label: 'Representante Apellido', value: 'Cañón Sarria', category: 'id' },
+    { id: 'f-id-6', key: 'tipo_documento', label: 'Tipo de Documento', value: 'C.C', category: 'id' },
+    { id: 'f-id-7', key: 'numero_cedula', label: 'Número de Cédula', value: '98555384', category: 'id' },
+    { id: 'f-id-8', key: 'lugar_expedicion_rep', label: 'Lugar de Expedición Rep', value: 'Envigado', category: 'id' },
+    { id: 'f-id-9', key: 'correo_rep', label: 'Correo Rep', value: 'guillermo.canon@iaclatam.com', category: 'id' },
+    { id: 'f-id-10', key: 'celular_rep', label: 'Celular Rep', value: '3104120217', category: 'id' },
+    { id: 'f-id-11', key: 'ciudad', label: 'Ciudad', value: 'Medellin', category: 'id' },
+    { id: 'f-id-12', key: 'departamento', label: 'Departamento', value: 'Antioquia', category: 'id' },
+    { id: 'f-id-13', key: 'pais', label: 'País', value: 'Colombia', category: 'id' },
+  ],
+  contacto: [
+    { id: 'f-con-1', key: 'telefono', label: 'Teléfono', value: '2656868', category: 'contacto' },
+    { id: 'f-con-2', key: 'direccion_principal', label: 'Dirección Principal', value: 'Carrera 63 B # 32 E -25 OFC 206', category: 'contacto' },
+    { id: 'f-con-3', key: 'pagina_web', label: 'Página Web', value: 'iaclatam.com', category: 'contacto' },
+  ],
+  banco: [
+    { id: 'f-ban-1', key: 'entidad_bancaria', label: 'Entidad Bancaria', value: 'BANCOLOMBIA', category: 'banco' },
+    { id: 'f-ban-2', key: 'numero_cuenta', label: 'Número de Cuenta', value: '00300833888', category: 'banco' },
+    { id: 'f-ban-3', key: 'tipo_cuenta', label: 'Tipo de Cuenta', value: 'Ahorros', category: 'banco' },
+  ],
+  otros: [],
+};
+
+export const DEFAULT_INITIAL_EMPLOYER_PROFILES: EmployerProfile[] = [
+  {
+    id: 'prof-guillermo-1',
+    profileName: 'Guillermo Cañón',
+    nombre: 'Guillermo Humberto',
+    apellido: 'Cañón Sarria',
+    email: 'guillermo.canon@iaclatam.com',
+    celular: '3104120217',
+    customFields: [
+      { id: 'cf-g1', key: 'Cédula', value: '98555384' },
+      { id: 'cf-g2', key: 'Expedición', value: 'Envigado' },
+      { id: 'cf-g3', key: 'Cargo', value: 'Representante Legal' },
+    ],
+  },
+];
+
+const STORAGE_PROFILES_KEY = 'autoform_employer_profiles_v2';
+const STORAGE_COMPANY_KEY = 'autoform_categorized_company_v2';
 const STORAGE_SIGNATURE_KEY = 'autoform_global_signature_v1';
 
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({
@@ -121,7 +166,10 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         return JSON.parse(saved);
       } catch {}
     }
-    return categorizeFlatCompanyData(initialCompanyData);
+    if (initialCompanyData && Object.keys(initialCompanyData).length > 0) {
+      return categorizeFlatCompanyData(initialCompanyData);
+    }
+    return DEFAULT_INITIAL_COMPANY_CATEGORIES;
   });
 
   const [profiles, setProfiles] = useState<EmployerProfile[]>(() => {
@@ -131,21 +179,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         return JSON.parse(saved);
       } catch {}
     }
-    // Default initial mock profile
-    return [
-      {
-        id: 'prof-1',
-        profileName: 'Fernando Gozo',
-        nombre: 'Fernando',
-        apellido: 'Gozo',
-        email: 'fernando.gozo@gmail.com',
-        celular: '+57 310 987 6543',
-        customFields: [
-          { id: 'cf-1', key: 'Cargo', value: 'Representante Legal' },
-          { id: 'cf-2', key: 'Cédula', value: '80.123.456' },
-        ],
-      },
-    ];
+    return DEFAULT_INITIAL_EMPLOYER_PROFILES;
   });
 
   const [signature, setSignature] = useState<GlobalSignature | null>(() => {

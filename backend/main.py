@@ -81,19 +81,33 @@ def get_company_data():
     path = os.path.join(DATA_DIR, "company_data.json")
     if not os.path.exists(path):
         default_data = {
-            "razon_social": "Tech Solutions LTDA",
-            "nit": "900.123.456-7",
-            "representante_legal": "Maria Gomez",
-            "cedula_representante": "52.987.654",
-            "direccion": "Calle 123 # 45-67, Bogotá",
-            "telefono": "601 555-1234",
-            "email": "contacto@techsolutions.com",
-            "ciudad": "Bogotá D.C.",
-            "actividad_economica": "6201 - Desarrollo de software",
-            "primer_apellido": "Gomez",
-            "segundo_apellido": "Perez",
-            "primer_nombre": "Maria",
-            "otros_nombres": "Fernanda"
+            "razon_social": "Ingeniería Asistida Por Computador S.A.S",
+            "nit": "8110047212",
+            "representante_legal": "Guillermo Humberto Cañón Sarria",
+            "representante_nombre": "Guillermo Humberto",
+            "representante_apellido": "Cañón Sarria",
+            "tipo_documento": "C.C",
+            "numero_cedula": "98555384",
+            "cedula": "98555384",
+            "cedula_representante": "98555384",
+            "lugar_expedicion_rep": "Envigado",
+            "correo_rep": "guillermo.canon@iaclatam.com",
+            "email": "guillermo.canon@iaclatam.com",
+            "celular_rep": "3104120217",
+            "celular": "3104120217",
+            "telefono": "2656868",
+            "direccion_principal": "Carrera 63 B # 32 E -25 OFC 206",
+            "direccion": "Carrera 63 B # 32 E -25 OFC 206",
+            "pagina_web": "iaclatam.com",
+            "web": "iaclatam.com",
+            "ciudad": "Medellin",
+            "departamento": "Antioquia",
+            "pais": "Colombia",
+            "entidad_bancaria": "BANCOLOMBIA",
+            "banco": "BANCOLOMBIA",
+            "numero_cuenta": "00300833888",
+            "cuenta": "00300833888",
+            "tipo_cuenta": "Ahorros"
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(default_data, f, indent=2)
