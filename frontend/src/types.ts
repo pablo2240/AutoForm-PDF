@@ -78,6 +78,7 @@ export interface ItemStyle {
   font_size?: number;
   bold?: boolean;
   color?: string;
+  align?: 'left' | 'center' | 'right';
   custom_text?: string;
   image_base64?: string;
   item_type?: 'text' | 'image';

@@ -557,17 +557,25 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                     className="mapped-box-image"
                   />
                 ) : (
-                  <div 
-                    className="box-value-text"
-                    style={{
-                      fontFamily: fontFam,
-                      fontWeight: isBold ? 700 : 500,
-                      color: textColor,
-                      fontSize: fontSize,
-                    }}
-                  >
-                    {String(textVal)}
-                  </div>
+                  (() => {
+                    const textAlign = item.style?.align || ((textVal === 'X' || textVal === 'x') ? 'center' : 'left');
+                    const justifyVal = textAlign === 'center' ? 'center' : (textAlign === 'right' ? 'flex-end' : 'flex-start');
+                    return (
+                      <div 
+                        className={`box-value-text align-${textAlign}`}
+                        style={{
+                          fontFamily: fontFam,
+                          fontWeight: isBold ? 700 : 500,
+                          color: textColor,
+                          fontSize: fontSize,
+                          justifyContent: justifyVal,
+                          textAlign: textAlign,
+                        }}
+                      >
+                        {String(textVal)}
+                      </div>
+                    );
+                  })()
                 )}
 
                 {/* 8 RESIZE HANDLES when selected */}

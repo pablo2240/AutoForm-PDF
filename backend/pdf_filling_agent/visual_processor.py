@@ -25,6 +25,7 @@ class VisualPlacement:
     font_family: str = "Arial"
     bold: bool = False
     color_rgb: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    align: str = "left"  # "left", "center", "right"
     item_type: str = "text"  # "text", "checkbox", "image"
     image_base64: Optional[str] = None
     field_description: str = ""
@@ -103,7 +104,7 @@ class VisualPDFProcessor:
                           fontname: str = "helv",
                           max_font_size: float = 11.0, min_font_size: float = 4.0) -> float:
         """
-        Find the largest font size that fits the text cleanly within the rect.
+        Find the optimal font size that fits the text cleanly within the rect.
         Smoothly scales down for small or narrow boxes.
         """
         if not text:
@@ -125,10 +126,11 @@ class VisualPDFProcessor:
 
     def apply_cell_placement(self, page: fitz.Page, rect: List[float], text: str, 
                              font_size: float = 10.0, is_checkbox: bool = False,
+                             align: str = "left",
                              fontname: str = "helv", color: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None:
         """
-        Place text cleanly in a cell rectangle with auto-fitting and resilient fallback rendering.
-        Even if the user draws a very small, narrow or compact rectangle, the text will ALWAYS be printed.
+        Place text cleanly in a cell rectangle with WYSIWYG alignment (Left, Center, Right)
+        and auto-fitting. Ensures 1:1 match between screen drawing and final PDF output.
         """
         if not text:
             return
@@ -139,13 +141,20 @@ class VisualPDFProcessor:
         x1 = max(rect[0], rect[2])
         y1 = max(rect[1], rect[3])
         
-        # Ensure minimum dimensions (at least 6pt wide, 4pt high)
-        if (x1 - x0) < 6:
-            x1 = x0 + 6
+        if (x1 - x0) < 4:
+            x1 = x0 + 4
         if (y1 - y0) < 4:
             y1 = y0 + 4
             
         r = fitz.Rect(x0, y0, x1, y1)
+
+        # PyMuPDF align values: 0 = Left, 1 = Center, 2 = Right
+        if is_checkbox or align == "center":
+            align_mode = 1
+        elif align == "right":
+            align_mode = 2
+        else:
+            align_mode = 0
 
         if is_checkbox:
             opt_size = min(r.width, r.height) * 0.8
@@ -159,9 +168,10 @@ class VisualPDFProcessor:
                 color=color
             )
             if rc < 0:
-                # Fallback direct insertion
+                text_w = fitz.get_text_length(text, fontname="hebo", fontsize=opt_size)
+                start_x = max(r.x0, r.x0 + (r.width - text_w) / 2)
                 page.insert_text(
-                    fitz.Point(r.x0 + (r.width * 0.2), r.y0 + (r.height * 0.8)),
+                    fitz.Point(start_x, r.y0 + (r.height * 0.8)),
                     text,
                     fontsize=opt_size,
                     fontname="hebo",
@@ -170,34 +180,39 @@ class VisualPDFProcessor:
         else:
             fitted_size = self._fit_text_to_rect(page, r, text, fontname=fontname, max_font_size=font_size, min_font_size=4.0)
             
-            # Try inserting textbox with small margin
             rc = page.insert_textbox(
                 r,
                 text,
                 fontsize=fitted_size,
                 fontname=fontname,
-                align=0,  # left-aligned
+                align=align_mode,
                 color=color
             )
             
-            # If rc < 0, PyMuPDF could not fit the text in the bounding box (e.g. user drew a small/tight box)
+            # If rc < 0, PyMuPDF could not fit the text in the bounding box
             if rc < 0:
-                # Try with smaller font size down to 4.0
                 curr_size = fitted_size
                 success = False
                 while curr_size >= 4.0:
                     curr_size -= 0.5
-                    rc2 = page.insert_textbox(r, text, fontsize=curr_size, fontname=fontname, align=0, color=color)
+                    rc2 = page.insert_textbox(r, text, fontsize=curr_size, fontname=fontname, align=align_mode, color=color)
                     if rc2 >= 0:
                         success = True
                         break
                 
-                # If still unable to fit in box constraints, use resilient insert_text directly on the baseline
+                # If still unable to fit in box constraints, use resilient insert_text with exact alignment
                 if not success:
-                    # Calculate baseline: y0 + fitted_size or vertically centered
-                    baseline_y = min(r.y1 - 1, r.y0 + max(fitted_size * 0.85, r.height * 0.8))
+                    text_w = fitz.get_text_length(text, fontname=fontname, fontsize=fitted_size)
+                    if align_mode == 1:
+                        start_x = max(r.x0, r.x0 + (r.width - text_w) / 2)
+                    elif align_mode == 2:
+                        start_x = max(r.x0, r.x1 - text_w - 2)
+                    else:
+                        start_x = r.x0 + 2
+                    
+                    baseline_y = min(r.y1 - 1, r.y0 + max(fitted_size * 0.85, (r.height + fitted_size * 0.7) / 2))
                     page.insert_text(
-                        fitz.Point(r.x0, baseline_y),
+                        fitz.Point(start_x, baseline_y),
                         text,
                         fontsize=max(4.5, fitted_size),
                         fontname=fontname,
@@ -264,6 +279,7 @@ class VisualPDFProcessor:
                     text=text,
                     font_size=placement.font_size,
                     is_checkbox=is_checkbox,
+                    align=placement.align,
                     fontname=fontname,
                     color=color
                 )

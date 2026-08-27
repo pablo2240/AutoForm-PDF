@@ -4,6 +4,9 @@ import {
   Type, 
   ALargeSmall, 
   Bold, 
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
   Palette, 
   Edit3, 
   Image as ImageIcon,
@@ -66,6 +69,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const currentFont = currentStyle.font_family || 'Arial';
   const currentSize = currentStyle.font_size || 10;
   const isBold = currentStyle.bold || false;
+  const currentAlign = currentStyle.align || 'left';
   const currentColor = currentStyle.color || '#000000';
 
   return (
@@ -129,7 +133,39 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="toolbar-divider" />
 
-      {/* 4. Color */}
+      {/* 4. Alineación Horizontal (Izquierda, Centro, Derecha) */}
+      <div className="toolbar-section">
+        <div className="toolbar-btn-group" title="Alineación del texto">
+          <button 
+            type="button"
+            className={`btn-toolbar-toggle ${currentAlign === 'left' ? 'active' : ''}`}
+            onClick={() => onStyleChange({ align: 'left' })}
+            title="Alinear a la izquierda"
+          >
+            <AlignLeft size={15} />
+          </button>
+          <button 
+            type="button"
+            className={`btn-toolbar-toggle ${currentAlign === 'center' ? 'active' : ''}`}
+            onClick={() => onStyleChange({ align: 'center' })}
+            title="Centrar texto"
+          >
+            <AlignCenter size={15} />
+          </button>
+          <button 
+            type="button"
+            className={`btn-toolbar-toggle ${currentAlign === 'right' ? 'active' : ''}`}
+            onClick={() => onStyleChange({ align: 'right' })}
+            title="Alinear a la derecha"
+          >
+            <AlignRight size={15} />
+          </button>
+        </div>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      {/* 5. Color */}
       <div className="toolbar-section">
         <div className="toolbar-item" title="Color del texto">
           <Palette size={16} className="toolbar-icon" />
@@ -157,7 +193,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="toolbar-divider" />
 
-      {/* 5. Editar Texto */}
+      {/* 6. Editar Texto */}
       <div className="toolbar-section flex-grow">
         <div className="toolbar-item w-full" title="Editar texto del recuadro">
           <Edit3 size={15} className="toolbar-icon" />
@@ -179,7 +215,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="toolbar-divider" />
 
-      {/* 6. Agregar Imagen / Firma */}
+      {/* 7. Agregar Imagen / Firma */}
       <div className="toolbar-section">
         <input 
           type="file" 

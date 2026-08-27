@@ -37,6 +37,7 @@ class ItemStyle(BaseModel):
     font_size: Optional[float] = 10.0
     bold: Optional[bool] = False
     color: Optional[str] = "#000000"
+    align: Optional[str] = "left"
     custom_text: Optional[str] = None
     image_base64: Optional[str] = None
     item_type: Optional[str] = "text"
@@ -281,6 +282,7 @@ def generate_pdf(req: GenerateRequest):
                 bold = bool(style.get("bold", False))
                 color_rgb = hex_to_rgb_tuple(style.get("color", "#000000"))
 
+                align = style.get("align", "left") or "left"
                 placements.append(
                     VisualPlacement(
                         page=item["page_number"],
@@ -290,6 +292,7 @@ def generate_pdf(req: GenerateRequest):
                         font_family=font_fam,
                         bold=bold,
                         color_rgb=color_rgb,
+                        align=align,
                         item_type="text",
                         field_description=item.get("label", field_key)
                     )

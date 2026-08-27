@@ -25,6 +25,7 @@
         "font_size": 11.0,
         "bold": true,
         "color": "#000000",
+        "align": "left",
         "custom_text": null,
         "image_base64": null,
         "item_type": "text"
