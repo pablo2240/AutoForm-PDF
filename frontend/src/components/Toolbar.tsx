@@ -109,7 +109,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span className="font-size-display">{currentSize} pt</span>
           <button 
             className="btn-toolbar-stepper"
-            onClick={() => onStyleChange({ font_size: Math.min(24, currentSize + 1) })}
+            onClick={() => onStyleChange({ font_size: Math.min(36, currentSize + 1) })}
             title="Aumentar tamaño"
           >
             <Plus size={12} />

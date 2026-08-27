@@ -100,37 +100,14 @@ class VisualPDFProcessor:
         doc.close()
         return images
 
-    def _fit_text_to_rect(self, page: fitz.Page, rect: fitz.Rect, text: str, 
-                          fontname: str = "helv",
-                          max_font_size: float = 11.0, min_font_size: float = 4.0) -> float:
-        """
-        Find the optimal font size that fits the text cleanly within the rect.
-        Smoothly scales down for small or narrow boxes.
-        """
-        if not text:
-            return min_font_size
-        
-        font_size = max_font_size
-        while font_size >= min_font_size:
-            text_width = fitz.get_text_length(text, fontname=fontname, fontsize=font_size)
-            cell_width = rect.width
-            cell_height = rect.height
-            line_height = font_size * 1.05
-            
-            # Allow text to fit tightly in narrow boxes
-            if text_width <= max(cell_width * 1.05, 10.0) and line_height <= max(cell_height * 1.15, 6.0):
-                return font_size
-            font_size -= 0.5
-        
-        return max(min_font_size, 4.0)
-
     def apply_cell_placement(self, page: fitz.Page, rect: List[float], text: str, 
                              font_size: float = 10.0, is_checkbox: bool = False,
                              align: str = "left",
                              fontname: str = "helv", color: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None:
         """
         Place text cleanly in a cell rectangle with WYSIWYG alignment (Left, Center, Right)
-        and auto-fitting. Ensures 1:1 match between screen drawing and final PDF output.
+        and EXACT user-chosen font sizing. Ensures 1:1 match between screen drawing 
+        and final PDF output.
         """
         if not text:
             return
@@ -178,46 +155,44 @@ class VisualPDFProcessor:
                     color=color
                 )
         else:
-            fitted_size = self._fit_text_to_rect(page, r, text, fontname=fontname, max_font_size=font_size, min_font_size=4.0)
+            # Respect user's chosen font size directly without downscaling
+            actual_size = float(font_size) if (font_size and font_size > 0) else 10.0
+            
+            # Ensure target rect has enough vertical room for the requested font size
+            min_height_needed = actual_size * 1.3
+            target_rect = r
+            if r.height < min_height_needed:
+                extra_h = (min_height_needed - r.height) / 2.0
+                target_rect = fitz.Rect(r.x0, r.y0 - extra_h, max(r.x1, r.x0 + 10), r.y1 + extra_h)
             
             rc = page.insert_textbox(
-                r,
+                target_rect,
                 text,
-                fontsize=fitted_size,
+                fontsize=actual_size,
                 fontname=fontname,
                 align=align_mode,
                 color=color
             )
             
-            # If rc < 0, PyMuPDF could not fit the text in the bounding box
+            # If insert_textbox fails for any reason (e.g. narrow text bounds), use resilient insert_text at the EXACT font_size
             if rc < 0:
-                curr_size = fitted_size
-                success = False
-                while curr_size >= 4.0:
-                    curr_size -= 0.5
-                    rc2 = page.insert_textbox(r, text, fontsize=curr_size, fontname=fontname, align=align_mode, color=color)
-                    if rc2 >= 0:
-                        success = True
-                        break
+                text_w = fitz.get_text_length(text, fontname=fontname, fontsize=actual_size)
+                if align_mode == 1:
+                    start_x = r.x0 + (r.width - text_w) / 2
+                elif align_mode == 2:
+                    start_x = r.x1 - text_w - 2
+                else:
+                    start_x = r.x0 + 2
                 
-                # If still unable to fit in box constraints, use resilient insert_text with exact alignment
-                if not success:
-                    text_w = fitz.get_text_length(text, fontname=fontname, fontsize=fitted_size)
-                    if align_mode == 1:
-                        start_x = max(r.x0, r.x0 + (r.width - text_w) / 2)
-                    elif align_mode == 2:
-                        start_x = max(r.x0, r.x1 - text_w - 2)
-                    else:
-                        start_x = r.x0 + 2
-                    
-                    baseline_y = min(r.y1 - 1, r.y0 + max(fitted_size * 0.85, (r.height + fitted_size * 0.7) / 2))
-                    page.insert_text(
-                        fitz.Point(start_x, baseline_y),
-                        text,
-                        fontsize=max(4.5, fitted_size),
-                        fontname=fontname,
-                        color=color
-                    )
+                # Baseline calculated to center text vertically in the bounding box
+                baseline_y = r.y0 + (r.height + actual_size * 0.75) / 2
+                page.insert_text(
+                    fitz.Point(start_x, baseline_y),
+                    text,
+                    fontsize=actual_size,
+                    fontname=fontname,
+                    color=color
+                )
 
     def apply_visual_placements(self, input_pdf_path: str, placements: List[VisualPlacement], 
                                 output_path: Optional[str] = None) -> str:
