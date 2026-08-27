@@ -132,24 +132,10 @@ export const DEFAULT_INITIAL_COMPANY_CATEGORIES: CategorizedCompanyData = {
   otros: [],
 };
 
-export const DEFAULT_INITIAL_EMPLOYER_PROFILES: EmployerProfile[] = [
-  {
-    id: 'prof-guillermo-1',
-    profileName: 'Guillermo Cañón',
-    nombre: 'Guillermo Humberto',
-    apellido: 'Cañón Sarria',
-    email: 'guillermo.canon@iaclatam.com',
-    celular: '3104120217',
-    customFields: [
-      { id: 'cf-g1', key: 'Cédula', value: '98555384' },
-      { id: 'cf-g2', key: 'Expedición', value: 'Envigado' },
-      { id: 'cf-g3', key: 'Cargo', value: 'Representante Legal' },
-    ],
-  },
-];
+export const DEFAULT_INITIAL_EMPLOYER_PROFILES: EmployerProfile[] = [];
 
-const STORAGE_PROFILES_KEY = 'autoform_employer_profiles_v2';
-const STORAGE_COMPANY_KEY = 'autoform_categorized_company_v2';
+const STORAGE_PROFILES_KEY = 'autoform_employer_profiles_v3';
+const STORAGE_COMPANY_KEY = 'autoform_categorized_company_v3';
 const STORAGE_SIGNATURE_KEY = 'autoform_global_signature_v1';
 
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({
