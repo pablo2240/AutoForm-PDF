@@ -59,6 +59,7 @@ class TemplateMapping(BaseModel):
 class GenerateRequest(BaseModel):
     template_id: str
     mappings: Optional[List[MappingItem]] = None
+    is_temporary: Optional[bool] = False
 
 def hex_to_rgb_tuple(hex_color: Optional[str]) -> Tuple[float, float, float]:
     """Convert hex color (#000000) to normalized RGB float tuple (0.0 to 1.0)."""
@@ -73,7 +74,7 @@ def hex_to_rgb_tuple(hex_color: Optional[str]) -> Tuple[float, float, float]:
 
 @app.get("/")
 def read_root():
-    return {"message": "AutoForm PDF API is running", "version": "1.1.0"}
+    return {"message": "AutoForm PDF API is running", "version": "1.2.0"}
 
 @app.get("/api/company-data")
 def get_company_data():
@@ -125,7 +126,7 @@ def list_templates():
 @app.post("/api/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        raise HTTPException(status_code=400, detail="Solo se admiten archivos PDF")
     dest_path = os.path.join(INPUT_DIR, file.filename)
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -134,6 +135,41 @@ async def upload_pdf(file: UploadFile = File(...)):
         "status": "success",
         "template_id": template_id,
         "filename": file.filename
+    }
+
+@app.delete("/api/templates/{template_id}")
+def delete_template(template_id: str):
+    deleted_files = []
+    
+    # Remove PDF candidates from input/
+    pdf_candidates = [
+        os.path.join(INPUT_DIR, f"{template_id}.pdf"),
+        os.path.join(INPUT_DIR, template_id)
+    ]
+    for p in pdf_candidates:
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+                deleted_files.append(os.path.basename(p))
+            except Exception as e:
+                print(f"[ERROR] Removing PDF {p}: {e}")
+
+    # Remove mapping JSON from backend/data/
+    map_path = os.path.join(DATA_DIR, f"{template_id}_mapping.json")
+    if os.path.exists(map_path):
+        try:
+            os.remove(map_path)
+            deleted_files.append(os.path.basename(map_path))
+        except Exception as e:
+            print(f"[ERROR] Removing mapping {map_path}: {e}")
+
+    if not deleted_files:
+        raise HTTPException(status_code=404, detail=f"Plantilla '{template_id}' no encontrada en el sistema")
+
+    return {
+        "status": "success",
+        "message": f"Plantilla '{template_id}' eliminada exitosamente",
+        "deleted": deleted_files
     }
 
 @app.get("/api/pdf/{template_id}/pages")
@@ -261,11 +297,23 @@ def generate_pdf(req: GenerateRequest):
     out_path = os.path.join(OUTPUT_DIR, out_filename)
     processor.apply_visual_placements(pdf_path, placements, output_path=out_path)
 
+    # 5. If temporary session requested, cleanup base template and mapping
+    if req.is_temporary:
+        try:
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            mapping_path = os.path.join(DATA_DIR, f"{req.template_id}_mapping.json")
+            if os.path.exists(mapping_path):
+                os.remove(mapping_path)
+        except Exception as e:
+            print(f"[WARNING] Temporary cleanup warning: {e}")
+
     return {
         "status": "success",
         "filename": out_filename,
         "download_url": f"/api/download/{out_filename}",
-        "total_placed": len(placements)
+        "total_placed": len(placements),
+        "is_temporary": req.is_temporary
     }
 
 @app.get("/api/download/{filename}")

@@ -2924,5 +2924,112 @@ body {
   border-top: 1px solid #23314d;
 }
 
+/* ==========================================================================
+   TEMPLATE DELETION & TEMPORARY QUICK-FILL SESSION
+   ========================================================================== */
+
+.btn-delete-template {
+  background-color: #172036;
+  border: 1px solid #2e3d5b;
+  color: #94a3b8;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-delete-template:hover {
+  background-color: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+  color: #f87171;
+}
+
+.btn-quick-fill {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.25) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+}
+
+.btn-quick-fill:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.3) 0%, rgba(217, 119, 6, 0.4) 100%);
+  border-color: #f59e0b;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+}
+
+.zap-icon {
+  color: #fbbf24;
+}
+
+.quick-fill-badge-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  animation: pulse 2s infinite;
+}
+
+.btn-warning-gradient {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  color: #fff;
+  border: 1px solid #f59e0b;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
+}
+
+.btn-warning-gradient:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.5);
+}
+
+.temp-cleaned-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fcd34d;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.cleanup-action-box {
+  margin-top: 10px;
+}
+
+.btn-outline-warning {
+  background: transparent;
+  border: 1.5px dashed #f59e0b;
+  color: #fbbf24;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.btn-outline-warning:hover {
+  background-color: rgba(245, 158, 11, 0.15);
+  border-color: #fbbf24;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.35);
+}
+
+
 
 

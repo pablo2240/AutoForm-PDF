@@ -20,6 +20,17 @@ export async function uploadPdfTemplate(file: File): Promise<{ template_id: stri
   return res.json();
 }
 
+export async function deleteTemplate(templateId: string): Promise<{ status: string; message: string; deleted: string[] }> {
+  const res = await fetch(`${API_BASE}/api/templates/${encodeURIComponent(templateId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al eliminar la plantilla');
+  }
+  return res.json();
+}
+
 export async function fetchPdfPages(templateId: string): Promise<{ template_id: string; total_pages: number; pages: PDFPage[] }> {
   const res = await fetch(`${API_BASE}/api/pdf/${encodeURIComponent(templateId)}/pages`);
   if (!res.ok) throw new Error(`Error al renderizar páginas del PDF: ${res.statusText}`);
@@ -58,14 +69,16 @@ export async function saveTemplateMapping(mapping: TemplateMapping): Promise<voi
 
 export async function generateFilledPdf(
   templateId: string,
-  mappings?: MappingItem[]
-): Promise<{ status: string; filename: string; download_url: string; total_placed: number }> {
+  mappings?: MappingItem[],
+  isTemporary: boolean = false
+): Promise<{ status: string; filename: string; download_url: string; total_placed: number; is_temporary?: boolean }> {
   const res = await fetch(`${API_BASE}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       template_id: templateId,
       mappings: mappings && mappings.length > 0 ? mappings : undefined,
+      is_temporary: isTemporary,
     }),
   });
   if (!res.ok) {

@@ -9,24 +9,28 @@ import {
   ChevronRight, 
   RotateCcw,
   Building2,
-  FileCheck
+  FileCheck,
+  Trash2,
+  Zap
 } from 'lucide-react';
 
 interface NavbarProps {
   templates: TemplateInfo[];
   selectedTemplate: string;
   onSelectTemplate: (templateId: string) => void;
-  onUploadTemplate: (file: File) => void;
+  onUploadTemplate: (file: File, isTemporary?: boolean) => void;
+  onDeleteTemplate: (templateId: string) => void;
   currentPage: number;
   totalPages: number;
   onChangePage: (page: number) => void;
   onSaveMapping: () => void;
-  onGeneratePdf: () => void;
+  onGeneratePdf: (isTemporary?: boolean) => void;
   onClearMappings: () => void;
   onOpenCompanyData: () => void;
   isSaving: boolean;
   isGenerating: boolean;
   mappingsCount: number;
+  isTemporarySession?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -34,6 +38,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   selectedTemplate,
   onSelectTemplate,
   onUploadTemplate,
+  onDeleteTemplate,
   currentPage,
   totalPages,
   onChangePage,
@@ -44,12 +49,24 @@ export const Navbar: React.FC<NavbarProps> = ({
   isSaving,
   isGenerating,
   mappingsCount,
+  isTemporarySession = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tempFileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, isTemp: boolean = false) => {
     if (e.target.files && e.target.files[0]) {
-      onUploadTemplate(e.target.files[0]);
+      onUploadTemplate(e.target.files[0], isTemp);
+    }
+    if (e.target) e.target.value = '';
+  };
+
+  const handleDeleteCurrentTemplate = () => {
+    if (!selectedTemplate) return;
+    const currentTpl = templates.find((t) => t.id === selectedTemplate);
+    const filename = currentTpl?.filename || selectedTemplate;
+    if (window.confirm(`¿Estás seguro de eliminar la plantilla "${filename}" y sus mapeos? Esta acción no se puede deshacer.`)) {
+      onDeleteTemplate(selectedTemplate);
     }
   };
 
@@ -66,7 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       <div className="navbar-controls">
-        {/* Template Selector */}
+        {/* Template Selector & Action Buttons */}
         <div className="control-group">
           <FileText className="control-icon" size={16} />
           <select 
@@ -74,7 +91,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             value={selectedTemplate} 
             onChange={(e) => onSelectTemplate(e.target.value)}
           >
-            <option value="" disabled>Selecciona una plantilla PDF</option>
+            {templates.length === 0 && (
+              <option value="" disabled>No hay plantillas disponibles</option>
+            )}
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.filename} ({t.size_kb} KB)
@@ -82,22 +101,62 @@ export const Navbar: React.FC<NavbarProps> = ({
             ))}
           </select>
 
+          {/* Delete Template Button */}
+          {selectedTemplate && (
+            <button
+              type="button"
+              className="btn btn-icon-only btn-delete-template"
+              onClick={handleDeleteCurrentTemplate}
+              title={`Eliminar plantilla "${templates.find(t => t.id === selectedTemplate)?.filename || selectedTemplate}"`}
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
+
+          {/* Hidden Regular Upload */}
           <input 
             type="file" 
             ref={fileInputRef} 
             style={{ display: 'none' }} 
             accept="application/pdf" 
-            onChange={handleFileChange}
+            onChange={(e) => handleFileChange(e, false)}
           />
+
+          {/* Hidden Quick/Temporary Upload */}
+          <input 
+            type="file" 
+            ref={tempFileInputRef} 
+            style={{ display: 'none' }} 
+            accept="application/pdf" 
+            onChange={(e) => handleFileChange(e, true)}
+          />
+
           <button 
             className="btn btn-secondary btn-icon"
             onClick={() => fileInputRef.current?.click()}
-            title="Subir nuevo PDF"
+            title="Subir PDF como plantilla permanente"
           >
-            <Upload size={16} />
+            <Upload size={15} />
             <span>Subir PDF</span>
           </button>
+
+          <button 
+            className="btn btn-secondary btn-icon btn-quick-fill"
+            onClick={() => tempFileInputRef.current?.click()}
+            title="Subir PDF para llenado rápido de un solo uso (sesión temporal sin acumular archivos)"
+          >
+            <Zap size={14} className="zap-icon" />
+            <span>Llenado Rápido</span>
+          </button>
         </div>
+
+        {/* Temporary Session Badge */}
+        {isTemporarySession && (
+          <div className="quick-fill-badge-indicator" title="Esta plantilla es temporal y se limpiará al descargar">
+            <Zap size={12} />
+            <span>Sesión Temporal (1 solo uso)</span>
+          </div>
+        )}
 
         {/* Page Switcher */}
         {totalPages > 1 && (
@@ -129,7 +188,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button 
           className="btn btn-secondary" 
           onClick={onOpenCompanyData}
-          title="Editar datos de la empresa"
+          title="Editar datos de la empresa y perfiles"
         >
           <Building2 size={16} />
           <span>Datos Empresa</span>
@@ -156,13 +215,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         <button 
-          className="btn btn-primary" 
-          onClick={onGeneratePdf}
+          className={`btn ${isTemporarySession ? 'btn-warning-gradient' : 'btn-primary'}`} 
+          onClick={() => onGeneratePdf(isTemporarySession)}
           disabled={isGenerating || mappingsCount === 0}
-          title="Generar PDF estampado"
+          title={isTemporarySession ? "Generar, descargar y limpiar plantilla temporal" : "Generar PDF estampado"}
         >
-          <Play size={16} />
-          <span>{isGenerating ? 'Generando...' : `Generar PDF (${mappingsCount})`}</span>
+          {isTemporarySession ? <Zap size={16} /> : <Play size={16} />}
+          <span>
+            {isGenerating 
+              ? 'Generando...' 
+              : isTemporarySession 
+                ? `Descargar y Limpiar (${mappingsCount})` 
+                : `Generar PDF (${mappingsCount})`}
+          </span>
         </button>
       </div>
     </header>

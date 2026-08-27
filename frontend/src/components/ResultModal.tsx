@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Download, CheckCircle, FileText, ExternalLink } from 'lucide-react';
+import { X, Download, CheckCircle, FileText, ExternalLink, Trash2, Zap } from 'lucide-react';
 import { getDownloadUrl } from '../api';
 
 interface ResultModalProps {
@@ -8,13 +8,16 @@ interface ResultModalProps {
   result: {
     filename: string;
     total_placed: number;
+    is_temporary?: boolean;
   } | null;
+  onDownloadAndCleanup?: () => void;
 }
 
 export const ResultModal: React.FC<ResultModalProps> = ({
   isOpen,
   onClose,
   result,
+  onDownloadAndCleanup,
 }) => {
   if (!isOpen || !result) return null;
 
@@ -43,6 +46,13 @@ export const ResultModal: React.FC<ResultModalProps> = ({
             Se estamparon <strong>{result.total_placed}</strong> campos con auto-ajuste tipográfico sobre el formulario original.
           </p>
 
+          {result.is_temporary && (
+            <div className="temp-cleaned-badge">
+              <Zap size={14} />
+              <span>Plantilla temporal de 1 solo uso procesada y lista para descargar</span>
+            </div>
+          )}
+
           <div className="result-actions">
             <a 
               href={downloadUrl} 
@@ -63,6 +73,20 @@ export const ResultModal: React.FC<ResultModalProps> = ({
               <span>Descargar PDF Lleno</span>
             </a>
           </div>
+
+          {onDownloadAndCleanup && (
+            <div className="cleanup-action-box">
+              <button
+                type="button"
+                className="btn btn-outline-warning btn-large w-full"
+                onClick={onDownloadAndCleanup}
+                title="Descarga el PDF y elimina la plantilla temporal del servidor"
+              >
+                <Trash2 size={16} />
+                <span>⚡ Descargar y Limpiar Plantilla de la Sesión</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="modal-footer">

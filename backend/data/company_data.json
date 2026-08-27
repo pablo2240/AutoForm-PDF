@@ -1,9 +1,8 @@
 {
   "empresa_id": "EMP-001",
-  "razon_social": "Tech Solutions LTDA",
+  "razon_social": "Tech Solutions",
   "nit": "900.123.456-7",
   "direccion": "Calle 123 # 45-67, Bogot\u00e1",
-  "telefono": "555-1234",
   "email": "contacto@techsolutions.com",
   "representante_legal": "Maria Gomez",
   "fernando_gozo_nombre": "Fernando",

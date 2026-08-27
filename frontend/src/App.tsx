@@ -13,12 +13,14 @@ import type {
 import { 
   fetchTemplates, 
   uploadPdfTemplate, 
+  deleteTemplate,
   fetchPdfPages, 
   fetchCompanyData, 
   saveCompanyData, 
   fetchTemplateMapping, 
   saveTemplateMapping, 
-  generateFilledPdf 
+  generateFilledPdf,
+  getDownloadUrl
 } from './api';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
@@ -35,6 +37,7 @@ export const App: React.FC = () => {
   const [companyData, setCompanyData] = useState<CompanyData>({});
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [mappings, setMappings] = useState<MappingItem[]>([]);
+  const [isTemporarySession, setIsTemporarySession] = useState<boolean>(false);
   
   // Global Signature State
   const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(() => {
@@ -64,7 +67,7 @@ export const App: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState<boolean>(false);
-  const [resultModalData, setResultModalData] = useState<{ filename: string; total_placed: number } | null>(null);
+  const [resultModalData, setResultModalData] = useState<{ filename: string; total_placed: number; is_temporary?: boolean } | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToastMessage({ text, type });
@@ -99,7 +102,11 @@ export const App: React.FC = () => {
 
   // When selected template changes
   useEffect(() => {
-    if (!selectedTemplate) return;
+    if (!selectedTemplate) {
+      setPages([]);
+      setMappings([]);
+      return;
+    }
 
     async function loadTemplateData() {
       try {
@@ -147,16 +154,49 @@ export const App: React.FC = () => {
     }
   }, [selectedBoxId, mappings]);
 
-  const handleUploadTemplate = async (file: File) => {
+  const handleUploadTemplate = async (file: File, isTemp: boolean = false) => {
     try {
       setIsLoading(true);
       const res = await uploadPdfTemplate(file);
-      showToast(`Archivo "${res.filename}" subido exitosamente`, 'success');
+      setIsTemporarySession(isTemp);
+      
       const updatedTemplates = await fetchTemplates();
       setTemplates(updatedTemplates);
       setSelectedTemplate(res.template_id);
+
+      if (isTemp) {
+        showToast(`⚡ Llenado Rápido: "${res.filename}" listo para estampar`, 'info');
+      } else {
+        showToast(`Plantilla "${res.filename}" subida exitosamente`, 'success');
+      }
     } catch (err: any) {
       showToast(`Error al subir archivo: ${err.message}`, 'error');
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    try {
+      setIsLoading(true);
+      await deleteTemplate(templateId);
+      
+      const remaining = templates.filter((t) => t.id !== templateId);
+      setTemplates(remaining);
+
+      if (selectedTemplate === templateId) {
+        if (remaining.length > 0) {
+          setSelectedTemplate(remaining[0].id);
+        } else {
+          setSelectedTemplate('');
+          setPages([]);
+          setMappings([]);
+        }
+      }
+      setIsTemporarySession(false);
+      showToast('Plantilla y mapeos eliminados del almacenamiento', 'info');
+    } catch (err: any) {
+      showToast(`Error al eliminar plantilla: ${err.message}`, 'error');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -280,11 +320,11 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleGeneratePdf = async () => {
+  const handleGeneratePdf = async (isTemp: boolean = false) => {
     if (!selectedTemplate) return;
     try {
       setIsGenerating(true);
-      if (pages.length > 0) {
+      if (pages.length > 0 && !isTemp) {
         const pageData = pages[0];
         const payload: TemplateMapping = {
           template_id: selectedTemplate,
@@ -294,17 +334,47 @@ export const App: React.FC = () => {
         };
         await saveTemplateMapping(payload).catch(() => {});
       }
-      const res = await generateFilledPdf(selectedTemplate, mappings);
+
+      const res = await generateFilledPdf(selectedTemplate, mappings, isTemp);
+      
       setResultModalData({
         filename: res.filename,
         total_placed: res.total_placed,
+        is_temporary: isTemp,
       });
-      showToast('¡PDF generado exitosamente!', 'success');
+
+      if (isTemp) {
+        // Remove from templates list as it was deleted in backend
+        setTemplates((prev) => prev.filter((t) => t.id !== selectedTemplate));
+        setIsTemporarySession(false);
+        showToast('⚡ PDF generado y plantilla temporal eliminada del almacenamiento', 'success');
+      } else {
+        showToast('¡PDF generado exitosamente!', 'success');
+      }
     } catch (err: any) {
       showToast(`Error al generar PDF: ${err.message}`, 'error');
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleDownloadAndCleanup = async () => {
+    if (!resultModalData) return;
+    
+    // Trigger download
+    const url = getDownloadUrl(resultModalData.filename);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = resultModalData.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    // If template is still active, clean it up
+    if (selectedTemplate) {
+      await handleDeleteTemplate(selectedTemplate);
+    }
+    setResultModalData(null);
   };
 
   const handleSaveCompanyData = async (
@@ -346,6 +416,7 @@ export const App: React.FC = () => {
         selectedTemplate={selectedTemplate}
         onSelectTemplate={setSelectedTemplate}
         onUploadTemplate={handleUploadTemplate}
+        onDeleteTemplate={handleDeleteTemplate}
         currentPage={currentPage}
         totalPages={pages.length}
         onChangePage={setCurrentPage}
@@ -356,6 +427,7 @@ export const App: React.FC = () => {
         isSaving={isSaving}
         isGenerating={isGenerating}
         mappingsCount={mappings.length}
+        isTemporarySession={isTemporarySession}
       />
 
       {/* Secondary Toolbar (Font, Size, Bold, Color, Text Edit, Add Image) */}
@@ -402,6 +474,10 @@ export const App: React.FC = () => {
               <div className="spinner-large"></div>
               <p>Cargando documento y mapeos...</p>
             </div>
+          ) : !activePage ? (
+            <div className="canvas-empty-state">
+              <p>No hay ninguna plantilla seleccionada. Sube un PDF o selecciona uno en la barra superior.</p>
+            </div>
           ) : (
             <PDFCanvas 
               page={activePage}
@@ -435,6 +511,7 @@ export const App: React.FC = () => {
         isOpen={!!resultModalData}
         onClose={() => setResultModalData(null)}
         result={resultModalData}
+        onDownloadAndCleanup={isTemporarySession || selectedTemplate ? handleDownloadAndCleanup : undefined}
       />
     </div>
   );
