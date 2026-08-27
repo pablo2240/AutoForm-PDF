@@ -32,6 +32,17 @@ interface DragBoxState {
   initialBoxPct: BoxPct;
 }
 
+type ResizeDir = 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w';
+
+interface ResizeBoxState {
+  id: string;
+  dir: ResizeDir;
+  startClientX: number;
+  startClientY: number;
+  initialBox: BoxCoords;
+  initialBoxPct: BoxPct;
+}
+
 export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   page,
   selectedField,
@@ -50,20 +61,20 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   const imageRef = useRef<HTMLImageElement>(null);
   const [drawing, setDrawing] = useState<DrawingRect | null>(null);
   const [dragBoxState, setDragBoxState] = useState<DragBoxState | null>(null);
+  const [resizeBoxState, setResizeBoxState] = useState<ResizeBoxState | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
-  // Global mouse up for smooth dragging release
+  // Global mouse up for smooth dragging and resizing release
   useEffect(() => {
     const handleGlobalMouseUp = () => {
-      if (dragBoxState) {
-        setDragBoxState(null);
-      }
+      if (dragBoxState) setDragBoxState(null);
+      if (resizeBoxState) setResizeBoxState(null);
     };
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => {
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [dragBoxState]);
+  }, [dragBoxState, resizeBoxState]);
 
   if (!page) {
     return (
@@ -85,7 +96,6 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Left click
     if (e.button !== 0) return;
     
     // Deselect if clicking on empty space
@@ -103,49 +113,94 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
     });
   };
 
-  const handleBoxMouseDown = (e: React.MouseEvent<HTMLDivElement>, item: MappingItem) => {
-    // Select box on click
+  const handleBoxMouseDown = (e: React.MouseEvent, item: MappingItem) => {
+    e.stopPropagation();
     onSelectBox(item.id);
 
-    // Right click (e.button === 2) OR Left Click when not in drawing mode initiates dragging
-    if (e.button === 2 || (!selectedField && !activeImage && e.button === 0)) {
-      e.preventDefault();
-      e.stopPropagation();
-
+    // Left or right click drag support for repositioning
+    if (imageRef.current) {
       const x0_pct = item.box_pct?.x0_pct ?? (item.box.x0 / page.page_width_pts);
       const y0_pct = item.box_pct?.y0_pct ?? (item.box.y0 / page.page_height_pts);
       const x1_pct = item.box_pct?.x1_pct ?? (item.box.x1 / page.page_width_pts);
       const y1_pct = item.box_pct?.y1_pct ?? (item.box.y1 / page.page_height_pts);
-
-      const initialBoxPct: BoxPct = { x0_pct, y0_pct, x1_pct, y1_pct };
 
       setDragBoxState({
         id: item.id,
         startClientX: e.clientX,
         startClientY: e.clientY,
         initialBox: { ...item.box },
-        initialBoxPct,
+        initialBoxPct: { x0_pct, y0_pct, x1_pct, y1_pct },
       });
     }
   };
 
+  const handleResizeMouseDown = (e: React.MouseEvent, item: MappingItem, dir: ResizeDir) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onSelectBox(item.id);
+
+    const x0_pct = item.box_pct?.x0_pct ?? (item.box.x0 / page.page_width_pts);
+    const y0_pct = item.box_pct?.y0_pct ?? (item.box.y0 / page.page_height_pts);
+    const x1_pct = item.box_pct?.x1_pct ?? (item.box.x1 / page.page_width_pts);
+    const y1_pct = item.box_pct?.y1_pct ?? (item.box.y1 / page.page_height_pts);
+
+    setResizeBoxState({
+      id: item.id,
+      dir,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      initialBox: { ...item.box },
+      initialBoxPct: { x0_pct, y0_pct, x1_pct, y1_pct },
+    });
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Handle dragging/repositioning existing box
+    // 1. Handle resizing box
+    if (resizeBoxState && imageRef.current) {
+      const rect = imageRef.current.getBoundingClientRect();
+      const deltaX = (e.clientX - resizeBoxState.startClientX) / rect.width;
+      const deltaY = (e.clientY - resizeBoxState.startClientY) / rect.height;
+
+      let { x0_pct, y0_pct, x1_pct, y1_pct } = resizeBoxState.initialBoxPct;
+
+      if (resizeBoxState.dir.includes('e')) {
+        x1_pct = Math.max(x0_pct + 0.015, Math.min(1.0, resizeBoxState.initialBoxPct.x1_pct + deltaX));
+      } else if (resizeBoxState.dir.includes('w')) {
+        x0_pct = Math.min(x1_pct - 0.015, Math.max(0.0, resizeBoxState.initialBoxPct.x0_pct + deltaX));
+      }
+
+      if (resizeBoxState.dir.includes('s')) {
+        y1_pct = Math.max(y0_pct + 0.01, Math.min(1.0, resizeBoxState.initialBoxPct.y1_pct + deltaY));
+      } else if (resizeBoxState.dir.includes('n')) {
+        y0_pct = Math.min(y1_pct - 0.01, Math.max(0.0, resizeBoxState.initialBoxPct.y0_pct + deltaY));
+      }
+
+      const newBoxPct: BoxPct = { x0_pct, y0_pct, x1_pct, y1_pct };
+      const newBox: BoxCoords = {
+        x0: x0_pct * page.page_width_pts,
+        y0: y0_pct * page.page_height_pts,
+        x1: x1_pct * page.page_width_pts,
+        y1: y1_pct * page.page_height_pts,
+      };
+
+      onUpdateMapping(resizeBoxState.id, newBox, newBoxPct);
+      return;
+    }
+
+    // 2. Handle dragging box position
     if (dragBoxState && imageRef.current) {
       const rect = imageRef.current.getBoundingClientRect();
-      const dx_px = e.clientX - dragBoxState.startClientX;
-      const dy_px = e.clientY - dragBoxState.startClientY;
+      const deltaX = (e.clientX - dragBoxState.startClientX) / rect.width;
+      const deltaY = (e.clientY - dragBoxState.startClientY) / rect.height;
 
-      const dx_pct = dx_px / rect.width;
-      const dy_pct = dy_px / rect.height;
+      const initPct = dragBoxState.initialBoxPct;
+      const boxWidthPct = initPct.x1_pct - initPct.x0_pct;
+      const boxHeightPct = initPct.y1_pct - initPct.y0_pct;
 
-      const width_pct = dragBoxState.initialBoxPct.x1_pct - dragBoxState.initialBoxPct.x0_pct;
-      const height_pct = dragBoxState.initialBoxPct.y1_pct - dragBoxState.initialBoxPct.y0_pct;
-
-      const new_x0_pct = Math.max(0, Math.min(1 - width_pct, dragBoxState.initialBoxPct.x0_pct + dx_pct));
-      const new_y0_pct = Math.max(0, Math.min(1 - height_pct, dragBoxState.initialBoxPct.y0_pct + dy_pct));
-      const new_x1_pct = new_x0_pct + width_pct;
-      const new_y1_pct = new_y0_pct + height_pct;
+      let new_x0_pct = Math.max(0, Math.min(1 - boxWidthPct, initPct.x0_pct + deltaX));
+      let new_y0_pct = Math.max(0, Math.min(1 - boxHeightPct, initPct.y0_pct + deltaY));
+      let new_x1_pct = new_x0_pct + boxWidthPct;
+      let new_y1_pct = new_y0_pct + boxHeightPct;
 
       const newBoxPct: BoxPct = {
         x0_pct: new_x0_pct,
@@ -165,7 +220,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
       return;
     }
 
-    // Handle drawing new box
+    // 3. Handle drawing new box
     if (!drawing) return;
     const coords = getPointerCoords(e);
     setDrawing((prev) => prev ? { ...prev, currentX: coords.x, currentY: coords.y } : null);
@@ -174,6 +229,10 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   const handleMouseUp = () => {
     if (dragBoxState) {
       setDragBoxState(null);
+      return;
+    }
+    if (resizeBoxState) {
+      setResizeBoxState(null);
       return;
     }
 
@@ -255,7 +314,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
           </div>
         ) : (
           <div className="active-field-indicator idle">
-            <span>Selecciona un dato o usa la barra superior para cambiar fuente, color y tamaño</span>
+            <span>Selecciona un dato o usa la barra superior para cambiar fuente, color, tamaño o firma</span>
           </div>
         )}
 
@@ -288,7 +347,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
       {/* PDF Viewport */}
       <div className="pdf-viewport">
         <div 
-          className={`pdf-sheet ${isDrawingMode ? 'is-drawing-mode' : ''} ${dragBoxState ? 'is-dragging-box' : ''}`}
+          className={`pdf-sheet ${isDrawingMode ? 'is-drawing-mode' : ''} ${dragBoxState ? 'is-dragging-box' : ''} ${resizeBoxState ? 'is-resizing-box' : ''}`}
           style={{ width: `${zoomLevel}%` }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -322,7 +381,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                 <img 
                   src={activeImage.base64} 
                   alt="Preview" 
-                  className="drawing-image-img"
+                  className="drawing-image-img" 
                 />
               )}
               {!activeImage && Math.abs(drawing.currentY - drawing.startY) > 14 && (
@@ -377,12 +436,12 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                 }}
                 onMouseDown={(e) => handleBoxMouseDown(e, item)}
                 onContextMenu={(e) => e.preventDefault()}
-                title={`${formatLabel(item.field_key)} (Clic para editar, Clic derecho para mover)`}
+                title={`${formatLabel(item.field_key)} (Clic para seleccionar/redimensionar, arrastra para mover)`}
               >
                 <div className="box-header-badge">
                   <Move size={10} className="move-icon" />
                   <span className="box-key-title">
-                    {isImage ? 'Imagen/Firma' : (item.label || formatLabel(item.field_key))}
+                    {isImage ? (item.label || 'Firma / Imagen') : (item.label || formatLabel(item.field_key))}
                   </span>
                   <button 
                     className="box-delete-btn"
@@ -414,6 +473,52 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                   >
                     {String(textVal)}
                   </div>
+                )}
+
+                {/* 8 RESIZE HANDLES when selected */}
+                {isSelected && !isBeingDragged && (
+                  <>
+                    <div 
+                      className="canvas-resize-handle handle-nw" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'nw')} 
+                      title="Redimensionar esquina superior izquierda"
+                    />
+                    <div 
+                      className="canvas-resize-handle handle-ne" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'ne')} 
+                      title="Redimensionar esquina superior derecha"
+                    />
+                    <div 
+                      className="canvas-resize-handle handle-se" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'se')} 
+                      title="Redimensionar esquina inferior derecha"
+                    />
+                    <div 
+                      className="canvas-resize-handle handle-sw" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'sw')} 
+                      title="Redimensionar esquina inferior izquierda"
+                    />
+                    <div 
+                      className="canvas-resize-handle handle-n" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'n')} 
+                      title="Estirar arriba"
+                    />
+                    <div 
+                      className="canvas-resize-handle handle-s" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 's')} 
+                      title="Estirar abajo"
+                    />
+                    <div 
+                      className="canvas-resize-handle handle-e" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'e')} 
+                      title="Estirar derecha"
+                    />
+                    <div 
+                      className="canvas-resize-handle handle-w" 
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'w')} 
+                      title="Estirar izquierda"
+                    />
+                  </>
                 )}
               </div>
             );

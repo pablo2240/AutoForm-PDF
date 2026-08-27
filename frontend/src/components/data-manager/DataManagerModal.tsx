@@ -211,6 +211,34 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     });
   };
 
+  // Update Company Field (In-line Edit)
+  const handleUpdateCompanyField = (
+    category: CompanyCategory,
+    id: string,
+    newLabel: string,
+    newValue: string
+  ) => {
+    setCategorizedCompany(prev => {
+      const list = prev[category] || [];
+      const updatedList = list.map(item => {
+        if (item.id === id) {
+          return {
+            ...item,
+            label: newLabel,
+            value: newValue,
+          };
+        }
+        return item;
+      });
+      const next = {
+        ...prev,
+        [category]: updatedList,
+      };
+      localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
   // Delete Company Field
   const handleDeleteCompanyField = (category: CompanyCategory, id: string) => {
     setCategorizedCompany(prev => {
@@ -245,6 +273,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         updated = [...prev, newProf];
       }
 
+      localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Update Employer Profile (In-line Edit)
+  const handleUpdateProfile = (id: string, updatedProfile: EmployerProfile) => {
+    setProfiles(prev => {
+      const updated = prev.map(p => (p.id === id ? updatedProfile : p));
       localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(updated));
       return updated;
     });
@@ -321,7 +358,9 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
               profiles={profiles}
               signature={signature}
               onDeleteCompanyField={handleDeleteCompanyField}
+              onUpdateCompanyField={handleUpdateCompanyField}
               onDeleteProfile={handleDeleteProfile}
+              onUpdateProfile={handleUpdateProfile}
               onSaveSignature={handleSaveSignature}
             />
           </div>

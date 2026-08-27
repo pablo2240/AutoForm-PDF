@@ -39,6 +39,8 @@ export interface GlobalSignature {
   base64: string;
   filename: string;
   position?: { x: number; y: number };
+  size?: { width: number; height: number };
+  scale?: number;
   updatedAt?: string;
 }
 
