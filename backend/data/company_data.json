@@ -1,0 +1,16 @@
+{
+  "empresa_id": "EMP-001",
+  "razon_social": "Tech Solutions LTDA",
+  "nit": "900.123.456-7",
+  "direccion": "Calle 123 # 45-67, Bogot\u00e1",
+  "telefono": "555-1234",
+  "email": "contacto@techsolutions.com",
+  "representante_legal": "Maria Gomez",
+  "fernando_gozo_nombre": "Fernando",
+  "fernando_gozo_apellido": "Gozo",
+  "fernando_gozo_nombre_completo": "Fernando Gozo",
+  "fernando_gozo_email": "fernando.gozo@gmail.com",
+  "fernando_gozo_celular": "+57 310 987 6543",
+  "fernando_gozo_cargo": "Representante Legal",
+  "fernando_gozo_cedula": "80.123.456"
+}

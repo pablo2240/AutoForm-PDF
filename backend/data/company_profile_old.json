@@ -1,0 +1,82 @@
+{
+  "company_name": "Ingeniería Asistida Por Computador S.A.S",
+  "trade_name": "IAC",
+  "nit": "811004721-2",
+  "nit_digits": "811004721",
+  "nit_dv": "2",
+  "address": "Carrera 63 B # 32 E -25 OFC 206",
+  "city": "Medellín",
+  "department": "Antioquia",
+  "country": "Colombia",
+  "phone": "6042656868",
+  "phone_short": "2656868",
+  "email": "guillermo.canon@iaclatam.com",
+  "website": "iaclatam.com",
+  "legal_representative": {
+    "full_name": "Guillermo Humberto Cañón Sarria",
+    "first_names": "Guillermo Humberto",
+    "last_names": "Cañón Sarria",
+    "id_type": "CC",
+    "id_number": "98555384",
+    "id_expedition": "Envigado",
+    "nationality": "Colombiana"
+  },
+  "beneficial_owner": {
+    "name": "Guillermo Humberto Cañón Sarria",
+    "id_type": "CC",
+    "id_number": "98555384",
+    "participation_percent": 100
+  },
+  "ciiu_primary": {
+    "code": "4741",
+    "description": "Comercio al por menor de computadores, equipos periféricos, programas de informática y equipos de telecomunicaciones en establecimientos especializados"
+  },
+  "ciiu_secondary": {
+    "code": "7112",
+    "description": "Actividades de ingeniería y otras actividades conexas de consultoría técnica"
+  },
+  "tax_residence": "Colombia",
+  "social_media": "Facebook, Instagram y Página Web",
+  "contact_person": {
+    "name": "Natalia Wchima",
+    "email": "Natalia.wchima@iac.com.co"
+  },
+  "business_group": false,
+  "interacts_public_officials": false,
+  "requires_subcontracting": false,
+  "financials": {
+    "monthly_income": 968508268,
+    "monthly_expenses": 741022426,
+    "other_monthly_income": 0,
+    "other_monthly_expenses": 0,
+    "total_assets": 20980260950,
+    "total_liabilities": 5043721053,
+    "total_equity": 15936539897
+  },
+  "international_operations": true,
+  "international_countries": ["Estados Unidos de América"],
+  "ccb_relationships": {
+    "worked_at_ccb": false,
+    "blood_relation_ccb": false,
+    "commercial_agreement_ccb_member": false
+  },
+  "compliance": {
+    "subject_to_laft": false,
+    "subject_to_ptee": false,
+    "sagrilaft_accepted": true,
+    "ptee_accepted": true
+  },
+  "data_treatment_authorized": true,
+  "bank_account": {
+    "bank": "Bancolombia",
+    "account_number": "00300833888",
+    "account_type": "Ahorros",
+    "branch": "Bancolombia"
+  },
+  "required_documents": {
+    "certificate_of_existence": true,
+    "tax_registration_cert": true,
+    "id_copy_representative": true,
+    "financial_statements": true
+  }
+}

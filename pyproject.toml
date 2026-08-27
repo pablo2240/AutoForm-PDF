@@ -1,24 +1,30 @@
 [project]
-name = "pdf-filling-agent"
-version = "0.1.0"
-description = "AI-powered PDF filling agent using OpenRouter LLM"
+name = "smartformai"
+version = "1.0.0"
+description = "AutoForm PDF: WYSIWYG Form Filler & Progressive Disclosure Data Manager"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "SmartFormAI Team"}
 ]
 dependencies = [
     "PyMuPDF>=1.23.0",
-    "openai>=1.0.0",
-    "pydantic>=2.10.6",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "pydantic>=2.10.0",
+    "python-multipart>=0.0.9",
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",
+    "httpx>=0.27.0",
     "pytest>=8.0.0",
+    "opencv-python-headless>=4.8.0",
+    "numpy>=1.24.0",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 readme = "README.md"
 license = "MIT"
 
-[project.scripts]
-pdf-agent = "pdf_filling_agent.main:main"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pdf_filling_agent"]
+packages = ["backend"]

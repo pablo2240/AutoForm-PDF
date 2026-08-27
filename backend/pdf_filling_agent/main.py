@@ -21,6 +21,8 @@ def main():
     parser.add_argument("--api-key", help="OpenRouter API key")
     parser.add_argument("--model", default="qwen/qwen3-max",
                        help="Model to use for code generation")
+    parser.add_argument("--mode", default="auto", choices=["auto", "widget", "visual"],
+                       help="Form filling mode: auto, widget (AcroForm), or visual (flat PDF)")
 
     args = parser.parse_args()
 
@@ -41,17 +43,19 @@ def main():
         # Fill the PDF
         print(f"Processing PDF: {args.pdf_path}")
         print(f"Instructions: {args.instructions}")
+        print(f"Mode: {args.mode}")
 
         output_path = agent.fill_pdf(
             args.pdf_path,
             args.instructions,
-            args.output_dir
+            args.output_dir,
+            mode=args.mode
         )
 
-        print(f"✅ Successfully filled PDF: {output_path}")
+        print(f"[SUCCESS] Successfully filled PDF: {output_path}")
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] Error: {e}")
         sys.exit(1)
 
 

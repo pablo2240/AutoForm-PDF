@@ -1,0 +1,663 @@
+"""
+AI Agent for PDF filling using OpenRouter API.
+Supports:
+- Interactive AcroForm PDFs (widgets)
+- Flat/non-interactive PDFs with text layer (visual overlay via text blocks)
+- Scanned/image PDFs (vision mode via multimodal LLM)
+- Static form maps for deterministic filling of known company forms
+"""
+
+import os
+import json
+import re
+import base64
+from datetime import datetime
+from typing import Dict, Any, Optional, List, Union
+from dotenv import load_dotenv
+from openai import OpenAI
+from pydantic import BaseModel, Field
+
+load_dotenv()
+
+from .knowledge_base import KnowledgeBase
+from .pdf_processor import PDFProcessor
+from .visual_processor import VisualPDFProcessor, VisualPlacement, PageImage
+
+
+class FieldMapping(BaseModel):
+    """Model for field mapping decisions."""
+    pdf_field_name: str = Field(description="The actual PDF field name")
+    user_value: str = Field(description="The value to assign to this field")
+    confidence: float = Field(default=1.0, description="Confidence score 0.0-1.0")
+    reasoning: str = Field(default="", description="Why this field should get this value")
+
+
+class VisualPlacementsResult(BaseModel):
+    """Model for structured visual placement generation."""
+    placements: List[VisualPlacement] = Field(default_factory=list)
+    explanation: Optional[str] = Field(default="")
+
+
+class StaticFormField(BaseModel):
+    """Model for a field in a static form map."""
+    id: str
+    label: str
+    page: int
+    rect: List[float]
+    type: str  # text, number, date, checkbox, radio
+    maps_to: Optional[str] = None
+    format: Optional[str] = None
+    options: Optional[List[str]] = None
+    value_when_true: Optional[str] = None
+    default: Optional[bool] = None
+
+
+class StaticFormMap(BaseModel):
+    """Model for a static form map."""
+    form_name: str
+    pdf_name: str
+    aliases: List[str] = Field(default_factory=list)
+    pages: int
+    description: Optional[str] = ""
+    fields: List[StaticFormField] = Field(default_factory=list)
+
+
+class PDFAgent:
+    """AI agent that generates and executes PDF filling for multiple form types."""
+
+    def __init__(self,
+                 api_key: Optional[str] = None,
+                 base_url: str = "https://openrouter.ai/api/v1",
+                 model: Optional[str] = None,
+                 knowledge_base: Optional[KnowledgeBase] = None,
+                 company_profile_path: Optional[str] = None,
+                 forms_dir: Optional[str] = None):
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        self.base_url = base_url or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        self.model = model or os.getenv("OPENROUTER_MODEL", "qwen/qwen3-max")
+
+        if not self.api_key:
+            raise ValueError("OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable.")
+
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url
+        )
+
+        self.knowledge_base = knowledge_base or KnowledgeBase()
+        self.pdf_processor = PDFProcessor()
+        self.visual_processor = VisualPDFProcessor()
+
+        # Load company profile
+        self.company_profile = self._load_company_profile(company_profile_path)
+
+        # Load static form maps
+        self.forms_dir = forms_dir or os.path.join(os.path.dirname(__file__), "..", "forms")
+        self.form_maps: Dict[str, StaticFormMap] = {}
+        self._load_form_maps()
+
+    def _load_company_profile(self, profile_path: Optional[str]) -> Dict[str, Any]:
+        """Load company profile from JSON file."""
+        if profile_path is None:
+            # Default path
+            base_dir = os.path.dirname(os.path.dirname(__file__))
+            profile_path = os.path.join(base_dir, "company_profile.json")
+
+        if os.path.exists(profile_path):
+            with open(profile_path, 'r', encoding='utf-8') as f:
+                profile = json.load(f)
+            print(f"[INFO] Loaded company profile: {profile.get('company_name', 'Unknown')}")
+            return profile
+        else:
+            print(f"[WARN] Company profile not found at {profile_path}")
+            return {}
+
+    def _load_form_maps(self):
+        """Load all static form maps from the forms directory."""
+        if not os.path.exists(self.forms_dir):
+            print(f"[INFO] Forms directory not found: {self.forms_dir}")
+            return
+
+        for filename in os.listdir(self.forms_dir):
+            if filename.endswith('.json'):
+                filepath = os.path.join(self.forms_dir, filename)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    form_map = StaticFormMap(**data)
+                    # Index by pdf_name (without extension) and form_name
+                    key = form_map.pdf_name.replace('.pdf', '').lower().replace(' ', '_')
+                    self.form_maps[key] = form_map
+                    print(f"[INFO] Loaded form map: {form_map.form_name} (key: {key})")
+                except Exception as e:
+                    print(f"[WARN] Failed to load form map {filename}: {e}")
+
+    def _find_form_map(self, pdf_path: str) -> Optional[StaticFormMap]:
+        """Find a matching static form map for the given PDF."""
+        pdf_name = os.path.basename(pdf_path).replace('.pdf', '').lower().replace(' ', '_')
+        # Try exact match first
+        if pdf_name in self.form_maps:
+            return self.form_maps[pdf_name]
+        # Try partial match on keys
+        for key, form_map in self.form_maps.items():
+            if key in pdf_name or pdf_name in key:
+                return form_map
+        # Try matching against aliases
+        for form_map in self.form_maps.values():
+            for alias in form_map.aliases:
+                alias_norm = alias.lower().replace(' ', '_')
+                if alias_norm in pdf_name or pdf_name in alias_norm:
+                    return form_map
+            # Also match by form_name keywords
+            form_keywords = form_map.form_name.lower().replace(' ', '_').replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+            if any(kw in pdf_name for kw in form_keywords.split('_') if len(kw) > 3):
+                return form_map
+        return None
+
+    def _resolve_value(self, maps_to: Optional[str], profile: Dict[str, Any]) -> Optional[str]:
+        """Resolve a value from the company profile using dot notation path."""
+        if not maps_to or not profile:
+            return None
+
+        # Special cases
+        if maps_to == "current_date":
+            return datetime.now().strftime("%d/%m/%Y")
+        if maps_to == "current_date_ddmmyyyy":
+            return datetime.now().strftime("%d/%m/%Y")
+        if maps_to == "current_date_mmddyyyy":
+            return datetime.now().strftime("%m/%d/%Y")
+
+        # Navigate nested dict with dot notation
+        keys = maps_to.split('.')
+        value = profile
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+
+        if value is None:
+            return None
+
+        # Format based on type
+        if isinstance(value, bool):
+            return "X" if value else ""
+        if isinstance(value, (int, float)):
+            # Format numbers with thousand separators for Colombian format
+            return f"{value:,}".replace(",", ".")
+        if isinstance(value, list):
+            return ", ".join(str(v) for v in value)
+
+        return str(value)
+
+    def _get_raw_profile_value(self, maps_to: str, profile: Dict[str, Any]) -> Any:
+        """Get raw value from profile without formatting (for checkbox boolean logic)."""
+        if not maps_to or not profile:
+            return None
+        keys = maps_to.split('.')
+        value = profile
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+        return value
+
+    def _fill_with_static_map(self, pdf_path: str, form_map: StaticFormMap, user_instructions: str) -> str:
+        """Fill PDF using a static form map (deterministic coordinates)."""
+        print(f"[INFO] Using static form map: {form_map.form_name}")
+
+        # Build field values from company profile + user instructions
+        field_values: Dict[str, Any] = {}
+
+        # First, extract any explicit values from user instructions
+        explicit_values = self._parse_explicit_values(user_instructions)
+
+        for field in form_map.fields:
+            value = None
+
+            # 1. Check explicit user instruction
+            if field.id in explicit_values:
+                value = explicit_values[field.id]
+            # 2. Check if maps_to company profile
+            elif field.maps_to:
+                value = self._resolve_value(field.maps_to, self.company_profile)
+            # 3. Check checkbox defaults
+            elif field.type == "checkbox" and field.default is not None:
+                value = field.value_when_true if field.default else ""
+
+            # Store the raw value (could be bool, str, int, etc.)
+            if value is not None and value != "":
+                field_values[field.id] = value
+                print(f"  [MAP] {field.id} ({field.label}) = {value}")
+
+        if not field_values:
+            print("[WARN] No field values resolved from static map")
+            return self._fill_visual(pdf_path, user_instructions)
+
+        # Convert to VisualPlacement objects
+        placements = []
+        for field in form_map.fields:
+            if field.id in field_values:
+                val = field_values[field.id]
+                if field.type == "checkbox":
+                    # Determine if checkbox should be checked
+                    checked = False
+                    
+                    # Special handling: if field maps_to a boolean in profile, 
+                    # check SI/YES when true, NO when false
+                    raw_bool = None
+                    if field.maps_to:
+                        raw_bool = self._get_raw_profile_value(field.maps_to, self.company_profile)
+                    
+                    if isinstance(raw_bool, bool):
+                        # Boolean profile field: check based on value_when_true
+                        if raw_bool and field.value_when_true and field.value_when_true.upper() in ["SI", "YES", "X", "TRUE"]:
+                            checked = True
+                        elif not raw_bool and field.value_when_true and field.value_when_true.upper() in ["NO", "FALSE"]:
+                            checked = True
+                    elif field.value_when_true is not None:
+                        # Compare resolved value with expected value
+                        checked = str(val).strip().upper() == field.value_when_true.strip().upper()
+                    elif isinstance(val, bool):
+                        checked = val
+                    elif isinstance(val, str):
+                        checked = val.upper() in ["X", "SI", "TRUE", "YES", "1"]
+                    
+                    if checked:
+                        placements.append(VisualPlacement(
+                            page=field.page,
+                            rect=field.rect,
+                            text="X",
+                            font_size=10,
+                            align=1,
+                            field_description=field.label
+                        ))
+                else:
+                    placements.append(VisualPlacement(
+                        page=field.page,
+                        rect=field.rect,
+                        text=str(val),
+                        font_size=8.5,
+                        align=0,
+                        field_description=field.label
+                    ))
+
+        print(f"[INFO] Applying {len(placements)} placements from static map")
+        return self.visual_processor.apply_visual_placements(pdf_path, placements)
+
+    def _parse_explicit_values(self, instructions: str) -> Dict[str, str]:
+        """Parse explicit field=value pairs from user instructions."""
+        values = {}
+        # Pattern: "field_id: value" or "field_id = value"
+        patterns = [
+            r'(\w+)\s*[:=]\s*([^\n,]+)',
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, instructions):
+                key = match.group(1).strip().lower()
+                val = match.group(2).strip()
+                values[key] = val
+        return values
+
+    def fill_pdf(self,
+                 pdf_path: str,
+                 user_instructions: str,
+                 output_dir: Optional[str] = None,
+                 mode: str = "auto") -> str:
+        """
+        Fill a PDF based on user instructions with hybrid mode support.
+
+        Args:
+            pdf_path: Path to the input PDF file
+            user_instructions: Natural language instructions for filling the PDF
+            output_dir: Output directory (optional)
+            mode: 'auto', 'widget', 'visual', 'vision', 'static'
+        """
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+        if output_dir:
+            self.pdf_processor.output_dir = output_dir
+            self.visual_processor.output_dir = output_dir
+
+        # Check for static form map first (highest priority for known forms)
+        form_map = self._find_form_map(pdf_path)
+        if form_map and mode in ["auto", "static"]:
+            print(f"[INFO] Static form map found. Using deterministic filling.")
+            return self._fill_with_static_map(pdf_path, form_map, user_instructions)
+
+        # Inspect PDF widgets
+        fields = self.pdf_processor.get_pdf_fields(pdf_path)
+        has_widgets = len(fields) > 0
+
+        if mode == "widget" or (mode == "auto" and has_widgets):
+            print(f"[INFO] Interactive form detected ({len(fields)} fields). Using AcroForm mode.")
+            return self._fill_acroform(pdf_path, fields, user_instructions)
+
+        # For flat PDFs, check if pages have text layer
+        layouts = self.visual_processor.extract_page_layouts(pdf_path)
+        pages_with_text = sum(1 for l in layouts if l["blocks"])
+        total_pages = len(layouts)
+
+        if mode == "vision" or (mode == "auto" and pages_with_text == 0):
+            print(f"[INFO] Scanned/image PDF detected (no text layer). Using Vision mode.")
+            return self._fill_vision(pdf_path, user_instructions)
+        else:
+            print(f"[INFO] Flat PDF with text layer ({pages_with_text}/{total_pages} pages). Using Visual Overlay mode.")
+            return self._fill_visual(pdf_path, user_instructions)
+
+    def _fill_acroform(self, pdf_path: str, fields: Dict[str, str], user_instructions: str) -> str:
+        """Fill an interactive PDF form with AcroForm widgets using LLM mapping."""
+        fields_info = "\n".join([f"- {name} (type: {ftype})" for name, ftype in fields.items()])
+
+        system_instructions = self.knowledge_base.get_system_instructions()
+        prompt = f"""
+Given the following interactive PDF form fields:
+{fields_info}
+
+User Instructions:
+{user_instructions}
+
+Determine the exact field names and the values that should be filled in.
+Return ONLY a valid JSON object mapping the exact PDF field names to their assigned string values.
+Example:
+{{
+    "topmostSubform[0].Page1[0].f1_01[0]": "John Doe",
+    "topmostSubform[0].Page1[0].f1_02[0]": "ACME Corp"
+}}
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_instructions},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=1000
+            )
+            raw_text = response.choices[0].message.content.strip()
+            json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if json_match:
+                field_values = json.loads(json_match.group(0))
+            else:
+                field_values = json.loads(raw_text)
+
+            print(f"[INFO] Mapped field values: {field_values}")
+            return self.pdf_processor.fill_pdf(pdf_path, field_values)
+
+        except Exception as e:
+            print(f"[WARN] LLM AcroForm mapping error: {e}. Attempting direct heuristic fallback.")
+            return self._heuristic_acroform_fill(pdf_path, user_instructions)
+
+    def _fill_visual(self, pdf_path: str, user_instructions: str) -> str:
+        """Fill a flat PDF by extracting layout and asking LLM to position text/marks page by page."""
+        layouts = self.visual_processor.extract_page_layouts(pdf_path)
+        all_placements: List[VisualPlacement] = []
+
+        system_instructions = (
+            "You are an expert AI PDF filling assistant. You are given the visual layout of a page from a flat PDF "
+            "document with coordinates [x0, y0, x1, y1] for all text labels and cells. "
+            "Your task is to place user-requested information and checkbox marks ('X') in the exact matching cell coordinates for this page. "
+            "If no information applies to this page, return an empty placements list."
+        )
+
+        # Build context with company profile
+        profile_context = ""
+        if self.company_profile:
+            profile_context = f"\n\nCOMPANY PROFILE (use these values when instructions reference 'datos de la empresa'):\n"
+            profile_context += json.dumps(self.company_profile, ensure_ascii=False, indent=2)
+
+        # Extract keywords from user instructions to identify relevant pages
+        keywords = [w.lower() for w in re.findall(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ]{4,}', user_instructions)]
+
+        for page_layout in layouts:
+            page_no = page_layout["page"]
+            w, h = page_layout["width"], page_layout["height"]
+
+            page_text = " ".join([b['text'].lower() for b in page_layout["blocks"]])
+            is_relevant = any(k in page_text for k in keywords) or page_no == 0
+
+            if not is_relevant:
+                print(f"[INFO] Skipping page {page_no} (no matching fields in instructions).")
+                continue
+
+            print(f"[INFO] Analyzing page {page_no} for visual field placements...")
+
+            blocks_text = []
+            for b in page_layout["blocks"]:
+                txt = b['text'].replace('\n', ' ')
+                if len(txt) > 60:
+                    txt = txt[:60] + "..."
+                bbox_str = f"[{b['bbox'][0]}, {b['bbox'][1]}, {b['bbox'][2]}, {b['bbox'][3]}]"
+                blocks_text.append(f"  BBOX {bbox_str}: {txt}")
+
+            layout_summary = f"PAGE {page_no} (Dimensions: {w} x {h}):\n" + "\n".join(blocks_text)
+
+            prompt = f"""
+Visual layout for PAGE {page_no} [x0, y0, x1, y1]:
+{layout_summary}
+
+User Instructions for filling the form:
+{user_instructions}
+{profile_context}
+
+Please analyze each field label on this page, find the corresponding empty cell/space, and generate placements for any fields that belong on PAGE {page_no}.
+For each field or checkbox mark to insert on this page, provide:
+- "page": {page_no}
+- "rect": [x0, y0, x1, y1] bounding box where text should fit (give adequate width and height)
+- "text": the text string to insert (or "X" for checkboxes)
+- "font_size": 8.5
+- "align": 0 (left) or 1 (center)
+
+Return ONLY a valid JSON object with key "placements". If nothing needs to be filled on this page, return {{"placements": []}}.
+Example format:
+{{
+  "placements": [
+    {{
+      "page": {page_no},
+      "rect": [125.0, 195.0, 480.0, 209.4],
+      "text": "Empresa Ejemplo S.A.S",
+      "font_size": 8.5,
+      "align": 0
+    }}
+  ]
+}}
+"""
+            raw_text = None
+            for token_limit in [600, 250]:
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_instructions},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.1,
+                        max_tokens=token_limit
+                    )
+                    raw_text = response.choices[0].message.content.strip()
+                    break
+                except Exception as err:
+                    if "402" in str(err) and token_limit > 250:
+                        print(f"[WARN] Credit constraint on {self.model}, retrying with fewer tokens...")
+                        continue
+                    else:
+                        print(f"[WARN] Error analyzing page {page_no} with {self.model}: {err}")
+                        break
+
+            if raw_text:
+                data = self._safe_parse_json(raw_text)
+                placements_data = data.get("placements", []) if isinstance(data, dict) else []
+                for p in placements_data:
+                    if isinstance(p, dict) and "text" in p and "rect" in p:
+                        p["page"] = page_no
+                        all_placements.append(VisualPlacement(**p))
+
+        print(f"[INFO] Total generated {len(all_placements)} visual placements across {len(layouts)} pages.")
+        for p in all_placements:
+            print(f"  - Page {p.page}: '{p.text}' at rect {p.rect}")
+
+        return self.visual_processor.apply_visual_placements(pdf_path, all_placements)
+
+    def _fill_vision(self, pdf_path: str, user_instructions: str, dpi: int = 150) -> str:
+        """Fill a scanned/image PDF by rendering pages and using multimodal LLM."""
+        print(f"[INFO] Vision mode: rendering pages at {dpi} DPI and analyzing with multimodal model")
+
+        all_placements: List[VisualPlacement] = []
+
+        system_instructions = (
+            "You are an expert AI PDF filling assistant. You are given an IMAGE of a scanned PDF page. "
+            "Your task is to locate the form fields on this page and determine where to place the user-requested information. "
+            "Return placements in IMAGE PIXEL COORDINATES [x0, y0, x1, y1] (origin top-left). "
+            "I will convert them to PDF points. "
+            "For checkboxes, use text 'X'. Return ONLY valid JSON with 'placements' key."
+        )
+
+        # Build company profile context
+        profile_context = ""
+        if self.company_profile:
+            profile_context = f"\n\nCOMPANY PROFILE (use these values for 'datos de la empresa'):\n"
+            profile_context += json.dumps(self.company_profile, ensure_ascii=False, indent=2)
+
+        # Render all pages to images
+        page_images = self.visual_processor.render_all_pages(pdf_path, dpi=dpi)
+
+        for page_image in page_images:
+            page_no = page_image.page
+            print(f"[INFO] Vision analysis of page {page_no} ({page_image.width_px}x{page_image.height_px}px)...")
+
+            # Prepare image for API
+            image_url = f"data:image/png;base64,{page_image.image_base64}"
+
+            prompt = f"""
+Page {page_no} of a scanned form (image coordinates: origin top-left, {page_image.width_px}x{page_image.height_px}px).
+
+User Instructions:
+{user_instructions}
+{profile_context}
+
+Analyze the form image and identify where to place each requested piece of information.
+For each field or checkbox to fill on THIS PAGE, provide:
+- "page": {page_no}
+- "rect_px": [x0, y0, x1, y1] in IMAGE PIXELS (top-left origin)
+- "text": the text to insert (or "X" for checkboxes)
+- "font_size": 8.5
+- "align": 0 (left) or 1 (center)
+
+Return ONLY a valid JSON object with key "placements". If nothing on this page, return {{"placements": []}}.
+Example:
+{{
+  "placements": [
+    {{
+      "page": {page_no},
+      "rect_px": [125, 195, 480, 220],
+      "text": "Empresa Ejemplo S.A.S",
+      "font_size": 8.5,
+      "align": 0
+    }}
+  ]
+}}
+"""
+
+            raw_text = None
+            for token_limit in [800, 400]:
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_instructions},
+                            {"role": "user", "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {"url": image_url}}
+                            ]}
+                        ],
+                        temperature=0.1,
+                        max_tokens=token_limit
+                    )
+                    raw_text = response.choices[0].message.content.strip()
+                    break
+                except Exception as err:
+                    if "402" in str(err) and token_limit > 400:
+                        print(f"[WARN] Credit constraint, retrying with fewer tokens...")
+                        continue
+                    else:
+                        print(f"[WARN] Vision error on page {page_no}: {err}")
+                        break
+
+            if raw_text:
+                data = self._safe_parse_json(raw_text)
+                placements_data = data.get("placements", []) if isinstance(data, dict) else []
+                for p in placements_data:
+                    if isinstance(p, dict) and "text" in p and "rect_px" in p:
+                        # Convert pixel coordinates to PDF points
+                        rect_pts = self.visual_processor.rect_pixels_to_points(page_image, p["rect_px"])
+                        all_placements.append(VisualPlacement(
+                            page=page_no,
+                            rect=rect_pts,
+                            text=p["text"],
+                            font_size=p.get("font_size", 8.5),
+                            align=p.get("align", 0),
+                            field_description=p.get("field_description", "")
+                        ))
+
+        print(f"[INFO] Vision mode: total {len(all_placements)} placements generated")
+        for p in all_placements:
+            print(f"  - Page {p.page}: '{p.text}' at rect {p.rect}")
+
+        return self.visual_processor.apply_visual_placements(pdf_path, all_placements)
+
+    def _safe_parse_json(self, raw_text: str) -> Dict[str, Any]:
+        """Safely extract and parse JSON from LLM response text."""
+        clean = re.sub(r'^```(?:json)?\s*', '', raw_text.strip(), flags=re.MULTILINE)
+        clean = re.sub(r'\s*```$', '', clean.strip(), flags=re.MULTILINE)
+
+        try:
+            return json.loads(clean)
+        except Exception:
+            pass
+
+        match = re.search(r'\{.*\}', clean, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                candidate = match.group(0)
+                last_obj_idx = candidate.rfind('}')
+                if last_obj_idx != -1:
+                    repaired = candidate[:last_obj_idx + 1] + "\n]}"
+                    try:
+                        return json.loads(repaired)
+                    except Exception:
+                        pass
+        return {}
+
+    def _heuristic_acroform_fill(self, pdf_path: str, user_instructions: str) -> str:
+        """Fallback method for standard AcroForm fields."""
+        patterns = [
+            (r'name[:\s]+([^\n,]+)', 'name'),
+            (r'business name[:\s]+([^\n,]+)', 'business_name'),
+            (r'address[:\s]+([^\n,]+)', 'address'),
+            (r'tax id[:\s]+([^\n,]+)', 'tax_id'),
+            (r'ssn[:\s]+([^\n,]+)', 'ssn'),
+            (r'phone[:\s]+([^\n,]+)', 'phone'),
+            (r'email[:\s]+([^\n,]+)', 'email'),
+        ]
+        extracted = {}
+        for pattern, k in patterns:
+            m = re.search(pattern, user_instructions, re.IGNORECASE)
+            if m:
+                extracted[k] = m.group(1).strip()
+
+        mappings = {
+            'name': 'topmostSubform[0].Page1[0].f1_01[0]',
+            'business_name': 'topmostSubform[0].Page1[0].f1_02[0]',
+            'address': 'topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_07[0]',
+            'tax_id': 'topmostSubform[0].Page1[0].f1_05[0]',
+            'ssn': 'topmostSubform[0].Page1[0].f1_05[0]',
+            'phone': 'topmostSubform[0].Page1[0].f1_14[0]',
+            'email': 'topmostSubform[0].Page1[0].f1_15[0]',
+        }
+        field_values = {mappings[k]: v for k, v in extracted.items() if k in mappings}
+        return self.pdf_processor.fill_pdf(pdf_path, field_values)
