@@ -438,9 +438,9 @@ export const App: React.FC = () => {
   const activePage = pages[currentPage] || null;
   const selectedBox = mappings.find((m) => m.id === selectedBoxId);
   const selectedBoxText = selectedBox
-    ? (selectedBox.style?.custom_text !== undefined 
+    ? (selectedBox.style?.custom_text != null && selectedBox.style.custom_text !== ''
         ? selectedBox.style.custom_text 
-        : String(companyData[selectedBox.field_key] || ''))
+        : (companyData[selectedBox.field_key] != null ? String(companyData[selectedBox.field_key]) : ''))
     : '';
 
   const isSignatureActive = !!(
