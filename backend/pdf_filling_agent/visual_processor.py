@@ -1,42 +1,11 @@
-"""
-Visual PDF processor for handling flat / non-interactive PDFs.
-Extracts geometry, coordinates, overlays text, formatting, marks, and images/signatures.
-"""
-
-import os
-import base64
-import io
-import re
-from typing import Dict, Any, List, Optional, Tuple
 import fitz  # PyMuPDF
-from pydantic import BaseModel, Field
-from .cv_detector import CVFormDetector, DetectedBox
+import base64
+import os
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass, field
 
-
-class VisualPlacement(BaseModel):
-    """Model representing where and how to place text or images on a flat PDF."""
-    page: int = Field(description="0-indexed page number where text should be placed")
-    rect: Optional[List[float]] = Field(
-        default=None,
-        description="[x0, y0, x1, y1] bounding rectangle where text or image should be fitted"
-    )
-    point: Optional[List[float]] = Field(
-        default=None,
-        description="[x, y] coordinates for text insertion if rect is not used"
-    )
-    text: str = Field(default="", description="Text value or mark (e.g., 'X') to insert")
-    font_size: float = Field(default=10.0, description="Font size for inserted text")
-    font_family: Optional[str] = Field(default="Arial", description="Font family name (Arial, Calibri, Helvetica, Times New Roman, Courier)")
-    bold: bool = Field(default=False, description="Whether text should be bold")
-    color_rgb: Tuple[float, float, float] = Field(default=(0.0, 0.0, 0.0), description="RGB color tuple normalized 0.0 to 1.0")
-    align: int = Field(default=0, description="0=Left, 1=Center, 2=Right alignment")
-    field_description: Optional[str] = Field(default="", description="Description of the field being filled")
-    item_type: str = Field(default="text", description="'text' or 'image'")
-    image_base64: Optional[str] = Field(default=None, description="Base64 encoded image or signature")
-
-
-class PageImage(BaseModel):
-    """Model representing a rendered page image with metadata."""
+@dataclass
+class PageImage:
     page: int
     image_base64: str
     width_px: int
@@ -47,56 +16,36 @@ class PageImage(BaseModel):
     scale_y: float
     dpi: int
 
+@dataclass
+class VisualPlacement:
+    page: int
+    rect: Optional[List[float]] = None  # [x0, y0, x1, y1] in PDF points
+    text: str = ""
+    font_size: float = 10.0
+    font_family: str = "Arial"
+    bold: bool = False
+    color_rgb: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    item_type: str = "text"  # "text", "checkbox", "image"
+    image_base64: Optional[str] = None
+    field_description: str = ""
 
 class VisualPDFProcessor:
-    """Handles text extraction with coordinates, font matching, and visual overlay onto PDFs."""
-
     def __init__(self, output_dir: str = "output", dpi: int = 150):
         self.output_dir = output_dir
         self.dpi = dpi
-        os.makedirs(output_dir, exist_ok=True)
-        self.detector = CVFormDetector(dpi=dpi)
+        os.makedirs(self.output_dir, exist_ok=True)
 
-    def detect_dominant_font(self, page: fitz.Page) -> str:
+    def map_font_family(self, font_family: Optional[str], is_bold: bool = False) -> str:
         """
-        Detects the dominant font family of existing text in the PDF
-        and maps it to standard Base-14 PDF fonts ('helv', 'hebo', 'times', 'tibo', 'couri', 'cobo').
+        Map CSS font names to standard PDF Base-14 font names in PyMuPDF.
+        helv (Helvetica/Arial), times (Times-Roman), couri (Courier), etc.
         """
-        try:
-            text_page = page.get_text("dict")
-            font_counts: Dict[str, int] = {}
-            for block in text_page.get("blocks", []):
-                if "lines" in block:
-                    for line in block["lines"]:
-                        for span in line.get("spans", []):
-                            font_name = span.get("font", "").lower()
-                            t_len = len(span.get("text", "").strip())
-                            if t_len > 0:
-                                font_counts[font_name] = font_counts.get(font_name, 0) + t_len
-
-            if not font_counts:
-                return "helv"
-
-            dom_font = max(font_counts, key=font_counts.get)
-            is_bold = any(w in dom_font for w in ["bold", "black", "heavy", "medium"])
-
-            if any(w in dom_font for w in ["times", "roman", "serif", "cambria", "garamond"]):
-                return "tibo" if is_bold else "times"
-            elif any(w in dom_font for w in ["courier", "mono", "consolas", "typewriter"]):
-                return "cobo" if is_bold else "couri"
-            else:
-                return "hebo" if is_bold else "helv"
-        except Exception:
-            return "helv"
-
-    def map_font_family(self, font_name: Optional[str], is_bold: bool = False) -> str:
-        """Map user font family to Base-14 PDF font name."""
-        if not font_name:
+        if not font_family:
             return "hebo" if is_bold else "helv"
         
-        fn = font_name.lower()
+        fn = font_family.lower()
         if "times" in fn or "roman" in fn or "serif" in fn:
-            return "tibo" if is_bold else "times"
+            return "tibo" if is_bold else "tiro"
         elif "courier" in fn or "mono" in fn:
             return "cobo" if is_bold else "couri"
         else:
@@ -152,9 +101,10 @@ class VisualPDFProcessor:
 
     def _fit_text_to_rect(self, page: fitz.Page, rect: fitz.Rect, text: str, 
                           fontname: str = "helv",
-                          max_font_size: float = 11.0, min_font_size: float = 5.5) -> float:
+                          max_font_size: float = 11.0, min_font_size: float = 4.0) -> float:
         """
-        Find the largest font size that fits the text within the rect.
+        Find the largest font size that fits the text cleanly within the rect.
+        Smoothly scales down for small or narrow boxes.
         """
         if not text:
             return min_font_size
@@ -164,29 +114,43 @@ class VisualPDFProcessor:
             text_width = fitz.get_text_length(text, fontname=fontname, fontsize=font_size)
             cell_width = rect.width
             cell_height = rect.height
-            line_height = font_size * 1.15
+            line_height = font_size * 1.05
             
-            if text_width <= cell_width * 0.98 and line_height <= cell_height * 0.95:
+            # Allow text to fit tightly in narrow boxes
+            if text_width <= max(cell_width * 1.05, 10.0) and line_height <= max(cell_height * 1.15, 6.0):
                 return font_size
             font_size -= 0.5
         
-        return min_font_size
+        return max(min_font_size, 4.0)
 
     def apply_cell_placement(self, page: fitz.Page, rect: List[float], text: str, 
                              font_size: float = 10.0, is_checkbox: bool = False,
                              fontname: str = "helv", color: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None:
         """
-        Place text cleanly in a cell rectangle with font-size fitting and selected font.
+        Place text cleanly in a cell rectangle with auto-fitting and resilient fallback rendering.
+        Even if the user draws a very small, narrow or compact rectangle, the text will ALWAYS be printed.
         """
         if not text:
             return
         
-        r = fitz.Rect(rect)
+        # Normalize rectangle coordinates
+        x0 = min(rect[0], rect[2])
+        y0 = min(rect[1], rect[3])
+        x1 = max(rect[0], rect[2])
+        y1 = max(rect[1], rect[3])
+        
+        # Ensure minimum dimensions (at least 6pt wide, 4pt high)
+        if (x1 - x0) < 6:
+            x1 = x0 + 6
+        if (y1 - y0) < 4:
+            y1 = y0 + 4
+            
+        r = fitz.Rect(x0, y0, x1, y1)
 
         if is_checkbox:
-            opt_size = min(r.width, r.height) * 0.75
-            opt_size = max(8.5, min(opt_size, 14.0))
-            page.insert_textbox(
+            opt_size = min(r.width, r.height) * 0.8
+            opt_size = max(7.0, min(opt_size, 16.0))
+            rc = page.insert_textbox(
                 r,
                 text,
                 fontsize=opt_size,
@@ -194,16 +158,51 @@ class VisualPDFProcessor:
                 align=1,  # center
                 color=color
             )
+            if rc < 0:
+                # Fallback direct insertion
+                page.insert_text(
+                    fitz.Point(r.x0 + (r.width * 0.2), r.y0 + (r.height * 0.8)),
+                    text,
+                    fontsize=opt_size,
+                    fontname="hebo",
+                    color=color
+                )
         else:
-            fitted_size = self._fit_text_to_rect(page, r, text, fontname=fontname, max_font_size=font_size, min_font_size=5.5)
-            page.insert_textbox(
+            fitted_size = self._fit_text_to_rect(page, r, text, fontname=fontname, max_font_size=font_size, min_font_size=4.0)
+            
+            # Try inserting textbox with small margin
+            rc = page.insert_textbox(
                 r,
                 text,
                 fontsize=fitted_size,
                 fontname=fontname,
-                align=0,  # left-aligned with padding
+                align=0,  # left-aligned
                 color=color
             )
+            
+            # If rc < 0, PyMuPDF could not fit the text in the bounding box (e.g. user drew a small/tight box)
+            if rc < 0:
+                # Try with smaller font size down to 4.0
+                curr_size = fitted_size
+                success = False
+                while curr_size >= 4.0:
+                    curr_size -= 0.5
+                    rc2 = page.insert_textbox(r, text, fontsize=curr_size, fontname=fontname, align=0, color=color)
+                    if rc2 >= 0:
+                        success = True
+                        break
+                
+                # If still unable to fit in box constraints, use resilient insert_text directly on the baseline
+                if not success:
+                    # Calculate baseline: y0 + fitted_size or vertically centered
+                    baseline_y = min(r.y1 - 1, r.y0 + max(fitted_size * 0.85, r.height * 0.8))
+                    page.insert_text(
+                        fitz.Point(r.x0, baseline_y),
+                        text,
+                        fontsize=max(4.5, fitted_size),
+                        fontname=fontname,
+                        color=color
+                    )
 
     def apply_visual_placements(self, input_pdf_path: str, placements: List[VisualPlacement], 
                                 output_path: Optional[str] = None) -> str:
@@ -222,7 +221,19 @@ class VisualPDFProcessor:
                 continue
 
             page = doc[placement.page]
-            r = fitz.Rect(placement.rect) if placement.rect and len(placement.rect) == 4 else None
+            
+            # Normalize rect
+            r = None
+            if placement.rect and len(placement.rect) == 4:
+                x0 = min(placement.rect[0], placement.rect[2])
+                y0 = min(placement.rect[1], placement.rect[3])
+                x1 = max(placement.rect[0], placement.rect[2])
+                y1 = max(placement.rect[1], placement.rect[3])
+                if (x1 - x0) < 4:
+                    x1 = x0 + 4
+                if (y1 - y0) < 4:
+                    y1 = y0 + 4
+                r = fitz.Rect(x0, y0, x1, y1)
 
             # Handle Image/Signature Placement
             if placement.item_type == "image" and placement.image_base64 and r:
@@ -238,7 +249,10 @@ class VisualPDFProcessor:
                 continue
 
             # Handle Text Placement
-            text = placement.text
+            text = str(placement.text or "")
+            if not text:
+                continue
+
             fontname = self.map_font_family(placement.font_family, placement.bold)
             color = placement.color_rgb
 
@@ -246,23 +260,14 @@ class VisualPDFProcessor:
                 is_checkbox = (text.strip() == "X" or text.strip() == "x")
                 self.apply_cell_placement(
                     page=page,
-                    rect=placement.rect,
+                    rect=[r.x0, r.y0, r.x1, r.y1],
                     text=text,
                     font_size=placement.font_size,
                     is_checkbox=is_checkbox,
                     fontname=fontname,
                     color=color
                 )
-            elif placement.point and len(placement.point) == 2:
-                p = fitz.Point(placement.point)
-                page.insert_text(
-                    p,
-                    text,
-                    fontsize=placement.font_size,
-                    fontname=fontname,
-                    color=color
-                )
 
-        doc.save(output_path, incremental=False)
+        doc.save(output_path, garbage=3, deflate=True)
         doc.close()
         return output_path

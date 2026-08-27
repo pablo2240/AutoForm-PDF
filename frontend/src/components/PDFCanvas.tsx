@@ -253,8 +253,8 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
     const widthPx = maxX - minX;
     const heightPx = maxY - minY;
 
-    // Ignore tiny accidental clicks (less than 8px)
-    if (widthPx > 8 && heightPx > 6) {
+    // Allow even small or narrow boxes (e.g. checkboxes, tight fields)
+    if (widthPx > 3 && heightPx > 3) {
       const x0_pct = minX / imgWidth;
       const x1_pct = maxX / imgWidth;
       const y0_pct = minY / imgHeight;
