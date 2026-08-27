@@ -1,6 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { PDFPage, MappingItem, CompanyData, BoxCoords, BoxPct, ItemStyle } from '../types';
 import { X, ZoomIn, ZoomOut, Maximize2, Crosshair, Image as ImageIcon } from 'lucide-react';
+import { 
+  calculateSnapping, 
+  toSnapRect, 
+  type GuideLine, 
+  type SpacingIndicator,
+  type ResizeDirection 
+} from '../utils/snapping';
+import { SmartGuidesOverlay } from './SmartGuidesOverlay';
 
 interface PDFCanvasProps {
   page: PDFPage | null;
@@ -57,18 +65,29 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   onUpdateMapping,
   onDeleteMapping,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [drawing, setDrawing] = useState<DrawingRect | null>(null);
   const [dragBoxState, setDragBoxState] = useState<DragBoxState | null>(null);
   const [resizeBoxState, setResizeBoxState] = useState<ResizeBoxState | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
+  // Smart Guides State
+  const [activeGuides, setActiveGuides] = useState<GuideLine[]>([]);
+  const [activeSpacings, setActiveSpacings] = useState<SpacingIndicator[]>([]);
+
   // Global mouse up for smooth dragging and resizing release
   useEffect(() => {
     const handleGlobalMouseUp = () => {
-      if (dragBoxState) setDragBoxState(null);
-      if (resizeBoxState) setResizeBoxState(null);
+      if (dragBoxState) {
+        setDragBoxState(null);
+        setActiveGuides([]);
+        setActiveSpacings([]);
+      }
+      if (resizeBoxState) {
+        setResizeBoxState(null);
+        setActiveGuides([]);
+        setActiveSpacings([]);
+      }
     };
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => {
@@ -98,7 +117,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     
-    // Deselect if clicking on empty space
+    // Clicking empty space deselects current box
     if (!selectedField && !activeImage) {
       onSelectBox(null);
       return;
@@ -155,7 +174,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    // 1. Handle resizing box
+    // 1. Handle resizing box with Smart Guides & Snapping
     if (resizeBoxState && imageRef.current) {
       const rect = imageRef.current.getBoundingClientRect();
       const deltaX = (e.clientX - resizeBoxState.startClientX) / rect.width;
@@ -164,30 +183,64 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
       let { x0_pct, y0_pct, x1_pct, y1_pct } = resizeBoxState.initialBoxPct;
 
       if (resizeBoxState.dir.includes('e')) {
-        x1_pct = Math.max(x0_pct + 0.015, Math.min(1.0, resizeBoxState.initialBoxPct.x1_pct + deltaX));
+        x1_pct = Math.max(x0_pct + 0.01, Math.min(1.0, resizeBoxState.initialBoxPct.x1_pct + deltaX));
       } else if (resizeBoxState.dir.includes('w')) {
-        x0_pct = Math.min(x1_pct - 0.015, Math.max(0.0, resizeBoxState.initialBoxPct.x0_pct + deltaX));
+        x0_pct = Math.min(x1_pct - 0.01, Math.max(0.0, resizeBoxState.initialBoxPct.x0_pct + deltaX));
       }
 
       if (resizeBoxState.dir.includes('s')) {
-        y1_pct = Math.max(y0_pct + 0.01, Math.min(1.0, resizeBoxState.initialBoxPct.y1_pct + deltaY));
+        y1_pct = Math.max(y0_pct + 0.008, Math.min(1.0, resizeBoxState.initialBoxPct.y1_pct + deltaY));
       } else if (resizeBoxState.dir.includes('n')) {
-        y0_pct = Math.min(y1_pct - 0.01, Math.max(0.0, resizeBoxState.initialBoxPct.y0_pct + deltaY));
+        y0_pct = Math.min(y1_pct - 0.008, Math.max(0.0, resizeBoxState.initialBoxPct.y0_pct + deltaY));
       }
 
-      const newBoxPct: BoxPct = { x0_pct, y0_pct, x1_pct, y1_pct };
+      // Convert to SnapRect and apply magnetic edge snapping
+      const activeSnapRect = toSnapRect(resizeBoxState.id, { x0_pct, y0_pct, x1_pct, y1_pct }, rect.width, rect.height);
+      const otherSnapRects = currentMappings
+        .filter((m) => m.id !== resizeBoxState.id)
+        .map((m) => {
+          const m_x0 = m.box_pct?.x0_pct ?? (m.box.x0 / page.page_width_pts);
+          const m_y0 = m.box_pct?.y0_pct ?? (m.box.y0 / page.page_height_pts);
+          const m_x1 = m.box_pct?.x1_pct ?? (m.box.x1 / page.page_width_pts);
+          const m_y1 = m.box_pct?.y1_pct ?? (m.box.y1 / page.page_height_pts);
+          return toSnapRect(m.id, { x0_pct: m_x0, y0_pct: m_y0, x1_pct: m_x1, y1_pct: m_y1 }, rect.width, rect.height);
+        });
+
+      const snapResult = calculateSnapping(
+        activeSnapRect,
+        otherSnapRects,
+        { width: rect.width, height: rect.height },
+        6,
+        resizeBoxState.dir as ResizeDirection
+      );
+
+      setActiveGuides(snapResult.guides);
+      setActiveSpacings(snapResult.spacings);
+
+      const final_x0_pct = Math.max(0, snapResult.snappedLeft / rect.width);
+      const final_y0_pct = Math.max(0, snapResult.snappedTop / rect.height);
+      const final_x1_pct = Math.min(1, (snapResult.snappedLeft + snapResult.snappedWidth) / rect.width);
+      const final_y1_pct = Math.min(1, (snapResult.snappedTop + snapResult.snappedHeight) / rect.height);
+
+      const newBoxPct: BoxPct = {
+        x0_pct: final_x0_pct,
+        y0_pct: final_y0_pct,
+        x1_pct: final_x1_pct,
+        y1_pct: final_y1_pct,
+      };
+
       const newBox: BoxCoords = {
-        x0: x0_pct * page.page_width_pts,
-        y0: y0_pct * page.page_height_pts,
-        x1: x1_pct * page.page_width_pts,
-        y1: y1_pct * page.page_height_pts,
+        x0: final_x0_pct * page.page_width_pts,
+        y0: final_y0_pct * page.page_height_pts,
+        x1: final_x1_pct * page.page_width_pts,
+        y1: final_y1_pct * page.page_height_pts,
       };
 
       onUpdateMapping(resizeBoxState.id, newBox, newBoxPct);
       return;
     }
 
-    // 2. Handle dragging box position
+    // 2. Handle dragging box position with Smart Guides & Snapping (60 FPS)
     if (dragBoxState && imageRef.current) {
       const rect = imageRef.current.getBoundingClientRect();
       const deltaX = (e.clientX - dragBoxState.startClientX) / rect.width;
@@ -197,23 +250,56 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
       const boxWidthPct = initPct.x1_pct - initPct.x0_pct;
       const boxHeightPct = initPct.y1_pct - initPct.y0_pct;
 
-      let new_x0_pct = Math.max(0, Math.min(1 - boxWidthPct, initPct.x0_pct + deltaX));
-      let new_y0_pct = Math.max(0, Math.min(1 - boxHeightPct, initPct.y0_pct + deltaY));
-      let new_x1_pct = new_x0_pct + boxWidthPct;
-      let new_y1_pct = new_y0_pct + boxHeightPct;
+      const raw_x0_pct = Math.max(0, Math.min(1 - boxWidthPct, initPct.x0_pct + deltaX));
+      const raw_y0_pct = Math.max(0, Math.min(1 - boxHeightPct, initPct.y0_pct + deltaY));
+      const raw_x1_pct = raw_x0_pct + boxWidthPct;
+      const raw_y1_pct = raw_y0_pct + boxHeightPct;
+
+      // Convert to SnapRect and apply magnetic snapping
+      const activeSnapRect = toSnapRect(dragBoxState.id, {
+        x0_pct: raw_x0_pct,
+        y0_pct: raw_y0_pct,
+        x1_pct: raw_x1_pct,
+        y1_pct: raw_y1_pct,
+      }, rect.width, rect.height);
+
+      const otherSnapRects = currentMappings
+        .filter((m) => m.id !== dragBoxState.id)
+        .map((m) => {
+          const m_x0 = m.box_pct?.x0_pct ?? (m.box.x0 / page.page_width_pts);
+          const m_y0 = m.box_pct?.y0_pct ?? (m.box.y0 / page.page_height_pts);
+          const m_x1 = m.box_pct?.x1_pct ?? (m.box.x1 / page.page_width_pts);
+          const m_y1 = m.box_pct?.y1_pct ?? (m.box.y1 / page.page_height_pts);
+          return toSnapRect(m.id, { x0_pct: m_x0, y0_pct: m_y0, x1_pct: m_x1, y1_pct: m_y1 }, rect.width, rect.height);
+        });
+
+      const snapResult = calculateSnapping(
+        activeSnapRect,
+        otherSnapRects,
+        { width: rect.width, height: rect.height },
+        7
+      );
+
+      setActiveGuides(snapResult.guides);
+      setActiveSpacings(snapResult.spacings);
+
+      const final_x0_pct = Math.max(0, Math.min(1 - boxWidthPct, snapResult.snappedLeft / rect.width));
+      const final_y0_pct = Math.max(0, Math.min(1 - boxHeightPct, snapResult.snappedTop / rect.height));
+      const final_x1_pct = final_x0_pct + boxWidthPct;
+      const final_y1_pct = final_y0_pct + boxHeightPct;
 
       const newBoxPct: BoxPct = {
-        x0_pct: new_x0_pct,
-        y0_pct: new_y0_pct,
-        x1_pct: new_x1_pct,
-        y1_pct: new_y1_pct,
+        x0_pct: final_x0_pct,
+        y0_pct: final_y0_pct,
+        x1_pct: final_x1_pct,
+        y1_pct: final_y1_pct,
       };
 
       const newBox: BoxCoords = {
-        x0: new_x0_pct * page.page_width_pts,
-        y0: new_y0_pct * page.page_height_pts,
-        x1: new_x1_pct * page.page_width_pts,
-        y1: new_y1_pct * page.page_height_pts,
+        x0: final_x0_pct * page.page_width_pts,
+        y0: final_y0_pct * page.page_height_pts,
+        x1: final_x1_pct * page.page_width_pts,
+        y1: final_y1_pct * page.page_height_pts,
       };
 
       onUpdateMapping(dragBoxState.id, newBox, newBoxPct);
@@ -229,10 +315,14 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   const handleMouseUp = () => {
     if (dragBoxState) {
       setDragBoxState(null);
+      setActiveGuides([]);
+      setActiveSpacings([]);
       return;
     }
     if (resizeBoxState) {
       setResizeBoxState(null);
+      setActiveGuides([]);
+      setActiveSpacings([]);
       return;
     }
 
@@ -299,9 +389,9 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
   const isDrawingMode = !!(selectedField || activeImage);
 
   return (
-    <div className="pdf-canvas-container" ref={containerRef}>
-      {/* Canvas Toolbar */}
-      <div className="canvas-floating-bar">
+    <div className="canvas-wrapper">
+      {/* Canvas Header info & Zoom */}
+      <div className="canvas-status-bar">
         {activeImage ? (
           <div className="active-field-indicator image-indicator">
             <ImageIcon size={15} className="animate-pulse" />
@@ -314,7 +404,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
           </div>
         ) : (
           <div className="active-field-indicator idle">
-            <span>Selecciona un dato o usa la barra superior para cambiar fuente, color, tamaño o firma</span>
+            <span>✨ Guías Magnéticas activas: Arrastra o redimensiona para alinear con precisión</span>
           </div>
         )}
 
@@ -396,6 +486,14 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
             </div>
           )}
 
+          {/* Smart Guides & Distance Markers Overlay */}
+          <SmartGuidesOverlay 
+            guides={activeGuides}
+            spacings={activeSpacings}
+            width={imageRef.current?.clientWidth || 800}
+            height={imageRef.current?.clientHeight || 1100}
+          />
+
           {/* Existing Mapped Rectangles */}
           {currentMappings.map((item) => {
             const isBeingDragged = dragBoxState?.id === item.id;
@@ -437,7 +535,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                 }}
                 onMouseDown={(e) => handleBoxMouseDown(e, item)}
                 onContextMenu={(e) => e.preventDefault()}
-                title={`${formatLabel(item.field_key)} (Clic para seleccionar/redimensionar, arrastra para mover)`}
+                title={`${formatLabel(item.field_key)} (Clic para seleccionar/redimensionar, arrastra para mover con guías inteligentes)`}
               >
                 {/* Delete Button (Only X icon, no variable name) */}
                 <button 
@@ -477,43 +575,43 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                   <>
                     <div 
                       className="canvas-resize-handle handle-nw" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'nw')} 
-                      title="Redimensionar esquina superior izquierda"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'nw')}
+                      title="Redimensionar Arriba-Izquierda"
                     />
                     <div 
                       className="canvas-resize-handle handle-ne" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'ne')} 
-                      title="Redimensionar esquina superior derecha"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'ne')}
+                      title="Redimensionar Arriba-Derecha"
                     />
                     <div 
                       className="canvas-resize-handle handle-se" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'se')} 
-                      title="Redimensionar esquina inferior derecha"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'se')}
+                      title="Redimensionar Abajo-Derecha"
                     />
                     <div 
                       className="canvas-resize-handle handle-sw" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'sw')} 
-                      title="Redimensionar esquina inferior izquierda"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'sw')}
+                      title="Redimensionar Abajo-Izquierda"
                     />
                     <div 
                       className="canvas-resize-handle handle-n" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'n')} 
-                      title="Estirar arriba"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'n')}
+                      title="Redimensionar Arriba"
                     />
                     <div 
                       className="canvas-resize-handle handle-s" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 's')} 
-                      title="Estirar abajo"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 's')}
+                      title="Redimensionar Abajo"
                     />
                     <div 
                       className="canvas-resize-handle handle-e" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'e')} 
-                      title="Estirar derecha"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'e')}
+                      title="Redimensionar Derecha"
                     />
                     <div 
                       className="canvas-resize-handle handle-w" 
-                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'w')} 
-                      title="Estirar izquierda"
+                      onMouseDown={(e) => handleResizeMouseDown(e, item, 'w')}
+                      title="Redimensionar Izquierda"
                     />
                   </>
                 )}
@@ -525,3 +623,5 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
     </div>
   );
 };
+
+export default PDFCanvas;
