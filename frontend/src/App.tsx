@@ -28,6 +28,18 @@ import { Sidebar } from './components/Sidebar';
 import { PDFCanvas } from './components/PDFCanvas';
 import { DataManagerModal } from './components/data-manager/DataManagerModal';
 import { ResultModal } from './components/ResultModal';
+import { ConfirmModal } from './components/ConfirmModal';
+
+interface ConfirmModalState {
+  isOpen: boolean;
+  title: string;
+  subtitle?: string;
+  itemName?: string;
+  itemMeta?: string;
+  confirmText?: string;
+  type?: 'danger' | 'warning' | 'info';
+  onConfirm: () => void;
+}
 
 export const App: React.FC = () => {
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
@@ -38,6 +50,9 @@ export const App: React.FC = () => {
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [mappings, setMappings] = useState<MappingItem[]>([]);
   const [isTemporarySession, setIsTemporarySession] = useState<boolean>(false);
+
+  // Custom Confirm Dialog State
+  const [confirmModalData, setConfirmModalData] = useState<ConfirmModalState | null>(null);
   
   // Global Signature State
   const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(() => {
@@ -175,7 +190,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleDeleteTemplate = async (templateId: string) => {
+  const executeDeleteTemplate = async (templateId: string) => {
     try {
       setIsLoading(true);
       await deleteTemplate(templateId);
@@ -193,12 +208,29 @@ export const App: React.FC = () => {
         }
       }
       setIsTemporarySession(false);
-      showToast('Plantilla y mapeos eliminados del almacenamiento', 'info');
+      showToast('Plantilla y mapeos eliminados exitosamente', 'info');
     } catch (err: any) {
       showToast(`Error al eliminar plantilla: ${err.message}`, 'error');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Open sleek confirmation dialog for deleting template
+  const handleRequestDeleteTemplate = (templateId: string) => {
+    const tpl = templates.find((t) => t.id === templateId);
+    const filename = tpl?.filename || templateId;
+
+    setConfirmModalData({
+      isOpen: true,
+      title: '¿Eliminar plantilla PDF?',
+      subtitle: 'Esta acción borrará el documento y sus coordenadas mapeadas.',
+      itemName: filename,
+      itemMeta: tpl?.size_kb ? `${tpl.size_kb} KB` : undefined,
+      confirmText: 'Sí, Eliminar Plantilla',
+      type: 'danger',
+      onConfirm: () => executeDeleteTemplate(templateId),
+    });
   };
 
   const handleAddBox = (box: BoxCoords, boxPct: BoxPct, customStyle?: ItemStyle) => {
@@ -292,12 +324,21 @@ export const App: React.FC = () => {
     }
   };
 
+  // Open sleek confirmation dialog for clearing mappings
   const handleClearMappings = () => {
-    if (window.confirm('¿Estás seguro de que deseas borrar todos los cuadros dibujados para esta plantilla?')) {
-      setMappings([]);
-      setSelectedBoxId(null);
-      showToast('Mapeos eliminados', 'info');
-    }
+    if (mappings.length === 0) return;
+    setConfirmModalData({
+      isOpen: true,
+      title: '¿Borrar todos los recuadros?',
+      subtitle: 'Se limpiarán todos los cuadros dibujados para la plantilla actual.',
+      confirmText: 'Sí, Limpiar Lienzo',
+      type: 'warning',
+      onConfirm: () => {
+        setMappings([]);
+        setSelectedBoxId(null);
+        showToast('Mapeos eliminados', 'info');
+      },
+    });
   };
 
   const handleSaveMapping = async () => {
@@ -372,7 +413,7 @@ export const App: React.FC = () => {
 
     // If template is still active, clean it up
     if (selectedTemplate) {
-      await handleDeleteTemplate(selectedTemplate);
+      await executeDeleteTemplate(selectedTemplate);
     }
     setResultModalData(null);
   };
@@ -416,7 +457,7 @@ export const App: React.FC = () => {
         selectedTemplate={selectedTemplate}
         onSelectTemplate={setSelectedTemplate}
         onUploadTemplate={handleUploadTemplate}
-        onDeleteTemplate={handleDeleteTemplate}
+        onDeleteTemplate={handleRequestDeleteTemplate}
         currentPage={currentPage}
         totalPages={pages.length}
         onChangePage={setCurrentPage}
@@ -513,6 +554,21 @@ export const App: React.FC = () => {
         result={resultModalData}
         onDownloadAndCleanup={isTemporarySession || selectedTemplate ? handleDownloadAndCleanup : undefined}
       />
+
+      {/* Custom Modern Confirmation Modal */}
+      {confirmModalData && (
+        <ConfirmModal 
+          isOpen={confirmModalData.isOpen}
+          onClose={() => setConfirmModalData(null)}
+          onConfirm={confirmModalData.onConfirm}
+          title={confirmModalData.title}
+          subtitle={confirmModalData.subtitle}
+          itemName={confirmModalData.itemName}
+          itemMeta={confirmModalData.itemMeta}
+          confirmText={confirmModalData.confirmText}
+          type={confirmModalData.type}
+        />
+      )}
     </div>
   );
 };

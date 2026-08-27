@@ -63,11 +63,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const handleDeleteCurrentTemplate = () => {
     if (!selectedTemplate) return;
-    const currentTpl = templates.find((t) => t.id === selectedTemplate);
-    const filename = currentTpl?.filename || selectedTemplate;
-    if (window.confirm(`¿Estás seguro de eliminar la plantilla "${filename}" y sus mapeos? Esta acción no se puede deshacer.`)) {
-      onDeleteTemplate(selectedTemplate);
-    }
+    onDeleteTemplate(selectedTemplate);
   };
 
   return (
