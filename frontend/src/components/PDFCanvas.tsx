@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { PDFPage, MappingItem, CompanyData, BoxCoords, BoxPct, ItemStyle } from '../types';
-import { X, ZoomIn, ZoomOut, Maximize2, Crosshair, Move, Image as ImageIcon } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, Maximize2, Crosshair, Image as ImageIcon } from 'lucide-react';
 
 interface PDFCanvasProps {
   page: PDFPage | null;
@@ -374,9 +374,6 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                 height: `${Math.abs(drawing.currentY - drawing.startY)}px`,
               }}
             >
-              <span className="box-preview-label">
-                {activeImage ? activeImage.filename : formatLabel(selectedField || '')}
-              </span>
               {activeImage && (
                 <img 
                   src={activeImage.base64} 
@@ -438,22 +435,18 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                 onContextMenu={(e) => e.preventDefault()}
                 title={`${formatLabel(item.field_key)} (Clic para seleccionar/redimensionar, arrastra para mover)`}
               >
-                <div className="box-header-badge">
-                  <Move size={10} className="move-icon" />
-                  <span className="box-key-title">
-                    {isImage ? (item.label || 'Firma / Imagen') : (item.label || formatLabel(item.field_key))}
-                  </span>
-                  <button 
-                    className="box-delete-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteMapping(item.id);
-                    }}
-                    title="Eliminar este recuadro"
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
+                {/* Delete Button (Only X icon, no variable name) */}
+                <button 
+                  type="button"
+                  className="box-delete-btn-solo"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteMapping(item.id);
+                  }}
+                  title={`Eliminar recuadro (${item.label || formatLabel(item.field_key)})`}
+                >
+                  <X size={11} />
+                </button>
 
                 {isImage && item.style?.image_base64 ? (
                   <img 

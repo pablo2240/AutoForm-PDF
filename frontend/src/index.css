@@ -940,52 +940,30 @@ body {
   box-shadow: 0 4px 10px rgba(2, 132, 199, 0.5) !important;
 }
 
-.box-header-badge {
+.box-delete-btn-solo {
   position: absolute;
-  top: -22px;
-  left: -2px;
-  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
-  color: #fff;
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.35);
-  opacity: 0.95;
-  line-height: 1.2;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  user-select: none;
-}
-
-.move-icon {
-  opacity: 0.75;
-  flex-shrink: 0;
-}
-
-.mapped-box-overlay:hover .box-header-badge {
-  opacity: 1;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-}
-
-.box-delete-btn {
-  background: rgba(255, 255, 255, 0.15);
-  border: none;
-  color: #fff;
+  top: -9px;
+  right: -9px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border: 1.5px solid #ffffff;
+  color: #ffffff;
   cursor: pointer;
   display: flex;
   align-items: center;
-  padding: 2px;
-  border-radius: 2px;
-  transition: background-color 0.1s ease;
+  justify-content: center;
+  z-index: 35;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+  transition: transform 0.12s ease, background-color 0.12s ease;
+  padding: 0;
 }
 
-.box-delete-btn:hover {
-  background-color: #ef4444;
-  color: #fff;
+.box-delete-btn-solo:hover {
+  transform: scale(1.2);
+  background: #b91c1c;
+  box-shadow: 0 3px 8px rgba(239, 68, 68, 0.5);
 }
 
 .box-value-text {
