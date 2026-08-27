@@ -4,7 +4,8 @@ import type {
   CompanyCategory, 
   CategorizedCompanyData, 
   CompanyFieldItem, 
-  EmployerProfile 
+  EmployerProfile,
+  GlobalSignature 
 } from '../../types';
 import { DataEntryPanel } from './DataEntryPanel';
 import { DataAccordionViewer } from './DataAccordionViewer';
@@ -14,7 +15,8 @@ interface DataManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialCompanyData: CompanyData;
-  onSaveData: (flatData: CompanyData, profiles: EmployerProfile[]) => void;
+  globalSignature: GlobalSignature | null;
+  onSaveData: (flatData: CompanyData, profiles: EmployerProfile[], signature: GlobalSignature | null) => void;
 }
 
 // Initial fallback categorization helper
@@ -64,7 +66,8 @@ function categorizeFlatCompanyData(data: CompanyData): CategorizedCompanyData {
 // Flatten back to key-value record for form stamping
 function flattenToCompanyData(
   categorized: CategorizedCompanyData,
-  profiles: EmployerProfile[]
+  profiles: EmployerProfile[],
+  signature: GlobalSignature | null
 ): CompanyData {
   const flat: CompanyData = {};
 
@@ -92,16 +95,23 @@ function flattenToCompanyData(
     }
   });
 
+  // Add global signature reference
+  if (signature) {
+    flat['firma_global'] = signature.filename;
+  }
+
   return flat;
 }
 
 const STORAGE_PROFILES_KEY = 'autoform_employer_profiles_v1';
 const STORAGE_COMPANY_KEY = 'autoform_categorized_company_v1';
+const STORAGE_SIGNATURE_KEY = 'autoform_global_signature_v1';
 
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   isOpen,
   onClose,
   initialCompanyData,
+  globalSignature,
   onSaveData,
 }) => {
   const [categorizedCompany, setCategorizedCompany] = useState<CategorizedCompanyData>(() => {
@@ -138,6 +148,17 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     ];
   });
 
+  const [signature, setSignature] = useState<GlobalSignature | null>(() => {
+    if (globalSignature) return globalSignature;
+    const saved = localStorage.getItem(STORAGE_SIGNATURE_KEY);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return null;
+  });
+
   // Sync if initial data changes
   useEffect(() => {
     if (initialCompanyData && Object.keys(initialCompanyData).length > 0) {
@@ -147,6 +168,12 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       }
     }
   }, [initialCompanyData]);
+
+  useEffect(() => {
+    if (globalSignature !== undefined) {
+      setSignature(globalSignature);
+    }
+  }, [globalSignature]);
 
   if (!isOpen) return null;
 
@@ -232,12 +259,27 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     });
   };
 
+  // Save Signature
+  const handleSaveSignature = (sig: GlobalSignature | null) => {
+    setSignature(sig);
+    if (sig) {
+      localStorage.setItem(STORAGE_SIGNATURE_KEY, JSON.stringify(sig));
+    } else {
+      localStorage.removeItem(STORAGE_SIGNATURE_KEY);
+    }
+  };
+
   // Save everything and sync
   const handleFinalSaveAndClose = () => {
-    const flat = flattenToCompanyData(categorizedCompany, profiles);
+    const flat = flattenToCompanyData(categorizedCompany, profiles, signature);
     localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(categorizedCompany));
     localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(profiles));
-    onSaveData(flat, profiles);
+    if (signature) {
+      localStorage.setItem(STORAGE_SIGNATURE_KEY, JSON.stringify(signature));
+    } else {
+      localStorage.removeItem(STORAGE_SIGNATURE_KEY);
+    }
+    onSaveData(flat, profiles, signature);
     onClose();
   };
 
@@ -251,9 +293,9 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
               <Layers size={18} />
             </div>
             <div>
-              <h3 className="dm-modal-title">Gestor de Datos y Perfiles de Empleador</h3>
+              <h3 className="dm-modal-title">Gestor de Datos, Perfiles y Firma</h3>
               <p className="dm-modal-sub">
-                Interfaz modular con revelación progresiva para alimentar formularios automáticamente.
+                Interfaz modular con revelación progresiva para alimentar formularios y estampados automáticamente.
               </p>
             </div>
           </div>
@@ -277,8 +319,10 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
             <DataAccordionViewer
               companyData={categorizedCompany}
               profiles={profiles}
+              signature={signature}
               onDeleteCompanyField={handleDeleteCompanyField}
               onDeleteProfile={handleDeleteProfile}
+              onSaveSignature={handleSaveSignature}
             />
           </div>
         </div>

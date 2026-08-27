@@ -2106,3 +2106,398 @@ body {
   color: #e0f2fe;
 }
 
+/* ==========================================================================
+   GLOBAL SIGNATURE MODULE (DRAG & DROP + 3-DOTS MENU)
+   ========================================================================== */
+
+.accordion-card.signature-card {
+  border-left: 4px solid #10b981;
+}
+
+.header-icon-box.signature {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.sig-status-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sig-status-badge.active {
+  background-color: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+}
+
+.sig-status-badge.empty {
+  background-color: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #94a3b8;
+}
+
+.sig-menu-container {
+  position: relative;
+}
+
+.btn-three-dots {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-three-dots:hover,
+.btn-three-dots.active {
+  background-color: #263353;
+  color: #fff;
+  border-color: #3b4d75;
+}
+
+.signature-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 220px;
+  background-color: #151d30;
+  border: 1px solid #2e3d5b;
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7);
+  z-index: 60;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: fadeIn 0.15s ease;
+}
+
+.dropdown-menu-header {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 5px 8px;
+  border-bottom: 1px solid #222e49;
+  margin-bottom: 2px;
+}
+
+.dropdown-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.dropdown-menu-item:hover {
+  background-color: #212c4b;
+  color: #fff;
+}
+
+.dropdown-menu-item.danger {
+  color: #f87171;
+}
+
+.dropdown-menu-item.danger:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.dropdown-menu-item .item-icon {
+  flex-shrink: 0;
+}
+
+.dropdown-menu-item .item-icon.success {
+  color: #34d399;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background-color: #222e49;
+  margin: 4px 0;
+}
+
+.signature-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.signature-toast-mini {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
+  animation: fadeIn 0.15s ease;
+}
+
+.signature-toast-mini.success {
+  background-color: rgba(16, 185, 129, 0.15);
+  border: 1px solid #059669;
+  color: #6ee7b7;
+}
+
+.signature-toast-mini.info {
+  background-color: rgba(59, 130, 246, 0.15);
+  border: 1px solid #2563eb;
+  color: #93c5fd;
+}
+
+.signature-interactive-stage {
+  min-height: 145px;
+  background-color: #0b101c;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 14px 14px;
+  border: 1px solid #23314d;
+  border-radius: var(--radius-md);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.signature-interactive-stage.is-file-over {
+  border-color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.1);
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.35);
+}
+
+.signature-empty-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px;
+  text-align: center;
+  gap: 6px;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.dropzone-icon-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: rgba(16, 185, 129, 0.12);
+  border: 1px dashed #10b981;
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+.dropzone-prompt {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  max-width: 320px;
+}
+
+.dropzone-prompt strong {
+  color: #38bdf8;
+}
+
+.dropzone-hint {
+  font-size: 0.68rem;
+  color: #64748b;
+}
+
+.btn-select-file-mini {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  color: #fff;
+  border: 1px solid #10b981;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-select-file-mini:hover {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+}
+
+.signature-draggable-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1.5px dashed rgba(16, 185, 129, 0.6);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.signature-draggable-item:hover {
+  border-color: #34d399;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+}
+
+.signature-draggable-item.is-dragging {
+  cursor: grabbing !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.4) !important;
+}
+
+.sig-drag-indicator {
+  position: absolute;
+  top: -18px;
+  background-color: #0f172a;
+  border: 1px solid #10b981;
+  color: #6ee7b7;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.signature-preview-img {
+  max-height: 85px;
+  max-width: 220px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  pointer-events: none;
+}
+
+.signature-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+  border-top: 1px solid #23314d;
+}
+
+.sig-file-info {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.sig-btn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-sig-action-outline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid #2e3d5b;
+  color: #cbd5e1;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.btn-sig-action-outline:hover {
+  background-color: #1e293b;
+  border-color: #475569;
+  color: #fff;
+}
+
+.btn-sig-action-outline.danger {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.btn-sig-action-outline.danger:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+}
+
+/* ----------------- SIDEBAR GLOBAL SIGNATURE CARD ----------------- */
+.variable-card.signature-highlight-card {
+  border: 1.5px solid #10b981;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 78, 59, 0.18) 100%);
+  margin-bottom: 10px;
+}
+
+.variable-card.signature-highlight-card:hover {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 78, 59, 0.3) 100%);
+  border-color: #34d399;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+
+.variable-card.signature-highlight-card.selected {
+  border-color: #34d399;
+  box-shadow: 0 0 0 2px #34d399, 0 0 14px rgba(16, 185, 129, 0.4);
+}
+
+.status-icon.sig-icon {
+  color: #34d399;
+}
+
+.signature-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  gap: 8px;
+}
+
+.sidebar-sig-thumb {
+  height: 28px;
+  max-width: 100px;
+  object-fit: contain;
+  background-color: rgba(255, 255, 255, 0.85);
+  padding: 2px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.sig-click-hint {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #6ee7b7;
+}
+
+

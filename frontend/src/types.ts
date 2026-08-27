@@ -35,6 +35,13 @@ export interface CategorizedCompanyData {
   otros: CompanyFieldItem[];
 }
 
+export interface GlobalSignature {
+  base64: string;
+  filename: string;
+  position?: { x: number; y: number };
+  updatedAt?: string;
+}
+
 export interface TemplateInfo {
   id: string;
   filename: string;

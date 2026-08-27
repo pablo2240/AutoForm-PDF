@@ -7,7 +7,8 @@ import type {
   TemplateMapping,
   BoxCoords,
   BoxPct,
-  ItemStyle 
+  ItemStyle,
+  GlobalSignature 
 } from './types';
 import { 
   fetchTemplates, 
@@ -35,6 +36,17 @@ export const App: React.FC = () => {
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [mappings, setMappings] = useState<MappingItem[]>([]);
   
+  // Global Signature State
+  const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(() => {
+    const saved = localStorage.getItem('autoform_global_signature_v1');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return null;
+  });
+
   // Style and editing states
   const [currentStyle, setCurrentStyle] = useState<ItemStyle>({
     font_family: 'Arial',
@@ -151,8 +163,9 @@ export const App: React.FC = () => {
 
   const handleAddBox = (box: BoxCoords, boxPct: BoxPct, customStyle?: ItemStyle) => {
     const isImage = customStyle?.item_type === 'image';
-    const fieldKey = isImage ? 'firma_o_imagen' : (selectedField || 'campo_personalizado');
-    const label = isImage ? (activeImage?.filename || 'Imagen / Firma') : (selectedField || 'Campo');
+    const isGlobalSig = isImage && activeImage?.filename === (globalSignature?.filename || 'Firma Global');
+    const fieldKey = isGlobalSig ? 'firma_global' : (isImage ? 'firma_o_imagen' : (selectedField || 'campo_personalizado'));
+    const label = isGlobalSig ? '✍️ Firma Global' : (isImage ? (activeImage?.filename || 'Imagen / Firma') : (selectedField || 'Campo'));
 
     const newItem: MappingItem = {
       id: `box-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -168,7 +181,7 @@ export const App: React.FC = () => {
     setSelectedBoxId(newItem.id);
 
     if (activeImage) {
-      showToast(`Imagen "${activeImage.filename}" estampada`, 'success');
+      showToast(`Estampado "${label}" colocado`, 'success');
       setActiveImage(null);
     } else {
       showToast(`Campo "${fieldKey}" asignado`, 'success');
@@ -220,7 +233,23 @@ export const App: React.FC = () => {
     setActiveImage({ base64, filename });
     setSelectedField(null);
     setSelectedBoxId(null);
-    showToast(`Imagen cargada. Haz clic y arrastra sobre el PDF para colocarla`, 'info');
+    showToast(`Imagen "${filename}" lista. Dibuja el marco en el PDF para colocarla`, 'info');
+  };
+
+  const handleSelectSignatureToStamp = () => {
+    if (!globalSignature) return;
+    if (activeImage && activeImage.filename === globalSignature.filename) {
+      setActiveImage(null);
+      showToast('Modo firma desactivado', 'info');
+    } else {
+      setActiveImage({
+        base64: globalSignature.base64,
+        filename: globalSignature.filename,
+      });
+      setSelectedField(null);
+      setSelectedBoxId(null);
+      showToast('✍️ Firma Global activa: Dibuja el recuadro sobre el PDF para estamparla', 'info');
+    }
   };
 
   const handleClearMappings = () => {
@@ -278,11 +307,18 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSaveCompanyData = async (updatedData: CompanyData, _profiles?: any) => {
+  const handleSaveCompanyData = async (
+    updatedData: CompanyData, 
+    _profiles?: any, 
+    signature?: GlobalSignature | null
+  ) => {
     try {
       await saveCompanyData(updatedData);
       setCompanyData(updatedData);
-      showToast('Datos de empresa y perfiles actualizados', 'success');
+      if (signature !== undefined) {
+        setGlobalSignature(signature);
+      }
+      showToast('Datos de empresa, perfiles y firma guardados exitosamente', 'success');
     } catch (err: any) {
       showToast(`Error al guardar datos: ${err.message}`, 'error');
     }
@@ -295,6 +331,12 @@ export const App: React.FC = () => {
         ? selectedBox.style.custom_text 
         : String(companyData[selectedBox.field_key] || ''))
     : '';
+
+  const isSignatureActive = !!(
+    activeImage && 
+    globalSignature && 
+    activeImage.filename === globalSignature.filename
+  );
 
   return (
     <div className="app-layout">
@@ -337,7 +379,7 @@ export const App: React.FC = () => {
 
       {/* Main Workspace */}
       <div className="workspace-main">
-        {/* Left Sidebar */}
+        {/* Left Sidebar (Variables + Global Signature) */}
         <Sidebar 
           companyData={companyData}
           selectedField={selectedField}
@@ -348,6 +390,9 @@ export const App: React.FC = () => {
           mappings={mappings}
           currentPage={currentPage}
           onDeleteMapping={handleDeleteMapping}
+          globalSignature={globalSignature}
+          onSelectSignature={handleSelectSignatureToStamp}
+          isSignatureActive={isSignatureActive}
         />
 
         {/* Center Canvas */}
@@ -376,11 +421,12 @@ export const App: React.FC = () => {
         </main>
       </div>
 
-      {/* Progressive Disclosure Data Manager Modal (Company & Employer Profiles) */}
+      {/* Progressive Disclosure Data Manager Modal (Company, Employer Profiles & Global Signature) */}
       <DataManagerModal 
         isOpen={isCompanyModalOpen}
         onClose={() => setIsCompanyModalOpen(false)}
         initialCompanyData={companyData}
+        globalSignature={globalSignature}
         onSaveData={handleSaveCompanyData}
       />
 

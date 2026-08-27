@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import type { CompanyCategory, CategorizedCompanyData, EmployerProfile } from '../../types';
+import type { CompanyCategory, CategorizedCompanyData, EmployerProfile, GlobalSignature } from '../../types';
+import { SignatureSection } from './SignatureSection';
 import { 
   Building2, 
   User, 
@@ -15,8 +16,10 @@ import {
 interface DataAccordionViewerProps {
   companyData: CategorizedCompanyData;
   profiles: EmployerProfile[];
+  signature: GlobalSignature | null;
   onDeleteCompanyField: (category: CompanyCategory, id: string) => void;
   onDeleteProfile: (id: string) => void;
+  onSaveSignature: (sig: GlobalSignature | null) => void;
 }
 
 const TABS: { id: CompanyCategory; label: string; icon: string }[] = [
@@ -29,8 +32,10 @@ const TABS: { id: CompanyCategory; label: string; icon: string }[] = [
 export const DataAccordionViewer: React.FC<DataAccordionViewerProps> = ({
   companyData,
   profiles,
+  signature,
   onDeleteCompanyField,
   onDeleteProfile,
+  onSaveSignature,
 }) => {
   // Accordion state
   const [isCompanyOpen, setIsCompanyOpen] = useState<boolean>(true);
@@ -255,6 +260,18 @@ export const DataAccordionViewer: React.FC<DataAccordionViewerProps> = ({
             );
           })
         )}
+
+        {/* 3. SECCIÓN FINAL: FIRMA GLOBAL (DRAG & DROP + CONFIGURACIÓN) */}
+        <div className="profiles-section-divider">
+          <span className="divider-label">
+            ✍️ Firma del Sistema
+          </span>
+        </div>
+
+        <SignatureSection 
+          signature={signature}
+          onSaveSignature={onSaveSignature}
+        />
       </div>
     </div>
   );
