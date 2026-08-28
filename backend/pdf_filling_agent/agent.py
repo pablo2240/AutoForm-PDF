@@ -78,10 +78,11 @@ class PDFAgent:
         # Configure endpoints for OpenAI or OpenRouter
         if os.getenv("OPENAI_API_KEY"):
             self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
         else:
             self.base_url = base_url or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-            self.model = model or os.getenv("OPENROUTER_MODEL", "qwen/qwen3-max")
+            self.model = model or os.getenv("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
+
 
         if not self.api_key:
             raise ValueError("API key not found. Please set OPENAI_API_KEY or OPENROUTER_API_KEY in your environment or .env file.")
@@ -121,6 +122,29 @@ class PDFAgent:
         else:
             print(f"[WARN] Company profile not found at {profile_path}")
             return {}
+
+    def _call_llm(self, messages: List[Dict[str, Any]], token_limit: int = 2000) -> str:
+        """Call LLM with auto-compatibility for both max_completion_tokens (GPT-5.x/o-series) and max_tokens."""
+        # 1. Try max_completion_tokens (standard for GPT-5.6 / modern OpenAI models)
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_completion_tokens=token_limit
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e1:
+            err_msg = str(e1)
+            # If model does not support max_completion_tokens, fallback to max_tokens + temperature
+            if "max_completion_tokens" in err_msg or "unsupported_parameter" in err_msg.lower():
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=token_limit,
+                    temperature=0.1
+                )
+                return response.choices[0].message.content.strip()
+            raise e1
 
     def _load_form_maps(self):
         """Load all static form maps from the forms directory."""
@@ -378,16 +402,10 @@ Example:
 }}
 """
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_instructions},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=2000
-            )
-            raw_text = response.choices[0].message.content.strip()
+            raw_text = self._call_llm([
+                {"role": "system", "content": system_instructions},
+                {"role": "user", "content": prompt}
+            ], token_limit=2000)
             json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
             if json_match:
                 field_values = json.loads(json_match.group(0))
@@ -473,21 +491,15 @@ Example:
 }}
 """
             raw_text = None
-            for token_limit in [2000, 1000]:
+            for token_limit in [4000, 2500]:
                 try:
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": system_instructions},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.1,
-                        max_tokens=token_limit
-                    )
-                    raw_text = response.choices[0].message.content.strip()
+                    raw_text = self._call_llm([
+                        {"role": "system", "content": system_instructions},
+                        {"role": "user", "content": prompt}
+                    ], token_limit=token_limit)
                     break
                 except Exception as err:
-                    if "402" in str(err) and token_limit > 1000:
+                    if "402" in str(err) and token_limit > 2500:
                         print(f"[WARN] Credit constraint on {self.model}, retrying with fewer tokens...")
                         continue
                     else:
@@ -498,9 +510,18 @@ Example:
                 data = self._safe_parse_json(raw_text)
                 placements_data = data.get("placements", []) if isinstance(data, dict) else []
                 for p in placements_data:
-                    if isinstance(p, dict) and "text" in p and "rect" in p:
-                        p["page"] = page_no
-                        all_placements.append(VisualPlacement(**p))
+                    if isinstance(p, dict):
+                        text_val = p.get("text") or p.get("value") or ""
+                        rect_val = p.get("rect") or p.get("bbox") or p.get("rect_px")
+                        if text_val and rect_val and isinstance(rect_val, list) and len(rect_val) == 4:
+                            all_placements.append(VisualPlacement(
+                                page=page_no,
+                                rect=[float(c) for c in rect_val],
+                                text=str(text_val),
+                                font_size=float(p.get("font_size", 8.5)),
+                                align=p.get("align", 0),
+                                field_description=p.get("field_description") or p.get("label") or p.get("field", "")
+                            ))
 
         print(f"[INFO] Total generated {len(all_placements)} visual placements across {len(layouts)} pages.")
         for p in all_placements:
@@ -564,24 +585,18 @@ Example:
 """
 
             raw_text = None
-            for token_limit in [2000, 1000]:
+            for token_limit in [4000, 2500]:
                 try:
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": system_instructions},
-                            {"role": "user", "content": [
-                                {"type": "text", "text": prompt},
-                                {"type": "image_url", "image_url": {"url": image_url}}
-                            ]}
-                        ],
-                        temperature=0.1,
-                        max_tokens=token_limit
-                    )
-                    raw_text = response.choices[0].message.content.strip()
+                    raw_text = self._call_llm([
+                        {"role": "system", "content": system_instructions},
+                        {"role": "user", "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": image_url}}
+                        ]}
+                    ], token_limit=token_limit)
                     break
                 except Exception as err:
-                    if "402" in str(err) and token_limit > 1000:
+                    if "402" in str(err) and token_limit > 2500:
                         print(f"[WARN] Credit constraint, retrying with fewer tokens...")
                         continue
                     else:
@@ -592,17 +607,19 @@ Example:
                 data = self._safe_parse_json(raw_text)
                 placements_data = data.get("placements", []) if isinstance(data, dict) else []
                 for p in placements_data:
-                    if isinstance(p, dict) and "text" in p and "rect_px" in p:
-                        # Convert pixel coordinates to PDF points
-                        rect_pts = self.visual_processor.rect_pixels_to_points(page_image, p["rect_px"])
-                        all_placements.append(VisualPlacement(
-                            page=page_no,
-                            rect=rect_pts,
-                            text=p["text"],
-                            font_size=p.get("font_size", 8.5),
-                            align=p.get("align", 0),
-                            field_description=p.get("field_description", "")
-                        ))
+                    if isinstance(p, dict):
+                        text_val = p.get("text") or p.get("value") or ""
+                        rect_px_val = p.get("rect_px") or p.get("bbox") or p.get("rect")
+                        if text_val and rect_px_val and isinstance(rect_px_val, list) and len(rect_px_val) == 4:
+                            rect_pts = self.visual_processor.rect_pixels_to_points(page_image, [float(c) for c in rect_px_val])
+                            all_placements.append(VisualPlacement(
+                                page=page_no,
+                                rect=rect_pts,
+                                text=str(text_val),
+                                font_size=float(p.get("font_size", 8.5)),
+                                align=p.get("align", 0),
+                                field_description=p.get("field_description") or p.get("label") or p.get("field", "")
+                            ))
 
         print(f"[INFO] Vision mode: total {len(all_placements)} placements generated")
         for p in all_placements:
