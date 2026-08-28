@@ -11,7 +11,8 @@ import {
   Building2,
   FileCheck,
   Trash2,
-  Zap
+  Zap,
+  Sparkles
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -25,10 +26,12 @@ interface NavbarProps {
   onChangePage: (page: number) => void;
   onSaveMapping: () => void;
   onGeneratePdf: (isTemporary?: boolean) => void;
+  onAiFill: () => void;
   onClearMappings: () => void;
   onOpenCompanyData: () => void;
   isSaving: boolean;
   isGenerating: boolean;
+  isAiFilling: boolean;
   mappingsCount: number;
   isTemporarySession?: boolean;
 }
@@ -44,10 +47,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   onChangePage,
   onSaveMapping,
   onGeneratePdf,
+  onAiFill,
   onClearMappings,
   onOpenCompanyData,
   isSaving,
   isGenerating,
+  isAiFilling,
   mappingsCount,
   isTemporarySession = false,
 }) => {
@@ -137,14 +142,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           <button 
-            className="btn btn-secondary btn-icon btn-quick-fill"
-            onClick={() => tempFileInputRef.current?.click()}
-            title="Subir PDF para llenado rápido de un solo uso (sesión temporal sin acumular archivos)"
+            className="btn btn-secondary btn-icon btn-ai-fill"
+            onClick={onAiFill}
+            disabled={isAiFilling}
+            title="Autollenar inteligentemente este PDF con IA (Soporta PDF planos y AcroForms con datos de empresa, contacto y banco)"
           >
-            <Zap size={14} className="zap-icon" />
-            <span>Llenado Rápido</span>
+            <Sparkles size={14} className={`sparkles-icon ${isAiFilling ? 'spinning-sparkle' : ''}`} />
+            <span>{isAiFilling ? 'Autollenando IA...' : 'Autollenado IA'}</span>
           </button>
         </div>
+
 
         {/* Temporary Session Badge */}
         {isTemporarySession && (

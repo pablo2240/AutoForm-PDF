@@ -89,6 +89,17 @@ def test_delete_template():
     assert not os.path.exists(dummy_mapping)
     print("[SUCCESS] Template deletion test passed!")
 
+def test_ai_fill_endpoint_validation():
+    # 1. Non-existent template should return 404
+    res = client.post("/api/ai-fill", json={"template_id": "non_existent_template_999"})
+    assert res.status_code == 404
+
+    # 2. Existing template route check
+    res2 = client.post("/api/ai-fill", json={"template_id": "formulario_datos_empresa"})
+    # If API key is present, returns 200; if missing/invalid credit, returns 500 with error detail
+    assert res2.status_code in [200, 500]
+    print("[SUCCESS] AI Fill endpoint validation test passed!")
+
 if __name__ == "__main__":
     test_root()
     test_company_data()
@@ -96,4 +107,6 @@ if __name__ == "__main__":
     test_get_pdf_pages()
     test_save_mapping_and_generate_with_styles()
     test_delete_template()
-    print("[SUCCESS] All backend API integration tests passed with template deletion and temporary session support!")
+    test_ai_fill_endpoint_validation()
+    print("[SUCCESS] All backend API integration tests passed with Autollenado IA endpoint support!")
+

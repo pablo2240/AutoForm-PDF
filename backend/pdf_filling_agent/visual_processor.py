@@ -100,6 +100,43 @@ class VisualPDFProcessor:
         doc.close()
         return images
 
+    def extract_page_layouts(self, pdf_path: str) -> List[Dict[str, Any]]:
+        """
+        Extract text blocks with bounding boxes for all pages in PDF.
+        """
+        doc = fitz.open(pdf_path)
+        layouts = []
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            rect = page.rect
+            blocks = []
+            for b in page.get_text("blocks"):
+                if b[6] == 0 and b[4].strip():
+                    blocks.append({
+                        "bbox": [round(b[0], 2), round(b[1], 2), round(b[2], 2), round(b[3], 2)],
+                        "text": b[4].strip()
+                    })
+            layouts.append({
+                "page": page_num,
+                "width": round(rect.width, 2),
+                "height": round(rect.height, 2),
+                "blocks": blocks
+            })
+        doc.close()
+        return layouts
+
+    def rect_pixels_to_points(self, page_image: PageImage, rect_px: List[float]) -> List[float]:
+        """
+        Convert pixel coordinates to PDF point coordinates.
+        """
+        return [
+            rect_px[0] * page_image.scale_x,
+            rect_px[1] * page_image.scale_y,
+            rect_px[2] * page_image.scale_x,
+            rect_px[3] * page_image.scale_y
+        ]
+
+
     def apply_cell_placement(self, page: fitz.Page, rect: List[float], text: str, 
                              font_size: float = 10.0, is_checkbox: bool = False,
                              align: str = "left",

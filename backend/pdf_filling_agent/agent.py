@@ -67,17 +67,23 @@ class PDFAgent:
 
     def __init__(self,
                  api_key: Optional[str] = None,
-                 base_url: str = "https://openrouter.ai/api/v1",
+                 base_url: Optional[str] = None,
                  model: Optional[str] = None,
                  knowledge_base: Optional[KnowledgeBase] = None,
                  company_profile_path: Optional[str] = None,
                  forms_dir: Optional[str] = None):
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-        self.base_url = base_url or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        self.model = model or os.getenv("OPENROUTER_MODEL", "qwen/qwen3-max")
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+        
+        # Configure endpoints for OpenAI or OpenRouter
+        if os.getenv("OPENAI_API_KEY") and not os.getenv("OPENROUTER_API_KEY") and not base_url:
+            self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        else:
+            self.base_url = base_url or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+            self.model = model or os.getenv("OPENROUTER_MODEL", "qwen/qwen3-max")
 
         if not self.api_key:
-            raise ValueError("OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable.")
+            raise ValueError("API key not found. Please set OPENAI_API_KEY or OPENROUTER_API_KEY in your environment or .env file.")
 
         self.client = OpenAI(
             api_key=self.api_key,
@@ -99,14 +105,17 @@ class PDFAgent:
     def _load_company_profile(self, profile_path: Optional[str]) -> Dict[str, Any]:
         """Load company profile from JSON file."""
         if profile_path is None:
-            # Default path
+            # Default paths
             base_dir = os.path.dirname(os.path.dirname(__file__))
-            profile_path = os.path.join(base_dir, "company_profile.json")
+            profile_path = os.path.join(base_dir, "data", "company_data.json")
+            if not os.path.exists(profile_path):
+                profile_path = os.path.join(base_dir, "company_profile.json")
 
         if os.path.exists(profile_path):
             with open(profile_path, 'r', encoding='utf-8') as f:
                 profile = json.load(f)
-            print(f"[INFO] Loaded company profile: {profile.get('company_name', 'Unknown')}")
+            company_name = profile.get('razon_social') or profile.get('company_name', 'Unknown')
+            print(f"[INFO] Loaded company profile: {company_name}")
             return profile
         else:
             print(f"[WARN] Company profile not found at {profile_path}")

@@ -88,6 +88,22 @@ export async function generateFilledPdf(
   return res.json();
 }
 
+export async function aiFillPdf(
+  templateId: string
+): Promise<{ status: string; filename: string; download_url: string; message: string; total_placed?: number }> {
+  const res = await fetch(`${API_BASE}/api/ai-fill`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ template_id: templateId }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Error en Autollenado IA');
+  }
+  return res.json();
+}
+
 export function getDownloadUrl(filename: string): string {
   return `${API_BASE}/api/download/${encodeURIComponent(filename)}`;
 }
+

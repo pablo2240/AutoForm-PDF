@@ -20,6 +20,7 @@ import {
   fetchTemplateMapping, 
   saveTemplateMapping, 
   generateFilledPdf,
+  aiFillPdf,
   getDownloadUrl
 } from './api';
 import { Navbar } from './components/Navbar';
@@ -79,6 +80,7 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isAiFilling, setIsAiFilling] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState<boolean>(false);
@@ -399,6 +401,31 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleAiFill = async () => {
+    if (!selectedTemplate) {
+      showToast('Por favor selecciona o sube un PDF primero', 'info');
+      return;
+    }
+    try {
+      setIsAiFilling(true);
+      showToast('✨ Procesando Autollenado IA con OpenAI / LLM...', 'info');
+
+      const res = await aiFillPdf(selectedTemplate);
+
+      setResultModalData({
+        filename: res.filename,
+        total_placed: res.total_placed ?? 0,
+        is_temporary: false,
+      });
+
+      showToast('✨ ¡PDF autollenado con IA exitosamente!', 'success');
+    } catch (err: any) {
+      showToast(`Error en Autollenado IA: ${err.message}`, 'error');
+    } finally {
+      setIsAiFilling(false);
+    }
+  };
+
   const handleDownloadAndCleanup = async () => {
     if (!resultModalData) return;
     
@@ -426,10 +453,18 @@ export const App: React.FC = () => {
     try {
       await saveCompanyData(updatedData);
       setCompanyData(updatedData);
+      
       if (signature !== undefined) {
         setGlobalSignature(signature);
+        if (signature) {
+          localStorage.setItem('autoform_global_signature_v1', JSON.stringify(signature));
+        } else {
+          localStorage.removeItem('autoform_global_signature_v1');
+        }
       }
-      showToast('Datos de empresa, perfiles y firma guardados exitosamente', 'success');
+      
+      setIsCompanyModalOpen(false);
+      showToast('Datos de la empresa guardados correctamente', 'success');
     } catch (err: any) {
       showToast(`Error al guardar datos: ${err.message}`, 'error');
     }
@@ -450,7 +485,7 @@ export const App: React.FC = () => {
   );
 
   return (
-    <div className="app-layout">
+    <div className="app-container">
       {/* Top Navbar */}
       <Navbar 
         templates={templates}
@@ -463,10 +498,12 @@ export const App: React.FC = () => {
         onChangePage={setCurrentPage}
         onSaveMapping={handleSaveMapping}
         onGeneratePdf={handleGeneratePdf}
+        onAiFill={handleAiFill}
         onClearMappings={handleClearMappings}
         onOpenCompanyData={() => setIsCompanyModalOpen(true)}
         isSaving={isSaving}
         isGenerating={isGenerating}
+        isAiFilling={isAiFilling}
         mappingsCount={mappings.length}
         isTemporarySession={isTemporarySession}
       />

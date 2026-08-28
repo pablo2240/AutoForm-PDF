@@ -22,7 +22,7 @@
       },
       "style": {
         "font_family": "Arial",
-        "font_size": 16.0,
+        "font_size": 12.0,
         "bold": true,
         "color": "#000000",
         "align": "center",
@@ -50,7 +50,7 @@
       },
       "style": {
         "font_family": "Arial",
-        "font_size": 11.0,
+        "font_size": 10.0,
         "bold": true,
         "color": "#000000",
         "align": "center",
@@ -246,7 +246,7 @@
       },
       "style": {
         "font_family": "Arial",
-        "font_size": 13.0,
+        "font_size": 11.0,
         "bold": true,
         "color": "#000000",
         "align": "center",
@@ -414,7 +414,7 @@
       },
       "style": {
         "font_family": "Arial",
-        "font_size": 10.0,
+        "font_size": 11.0,
         "bold": true,
         "color": "#000000",
         "align": "center",

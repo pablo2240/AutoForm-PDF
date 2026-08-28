@@ -2975,17 +2975,40 @@ body {
   color: #f87171;
 }
 
-.btn-quick-fill {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.25) 100%);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  color: #fde68a;
+.btn-quick-fill,
+.btn-ai-fill {
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.2) 0%, rgba(245, 158, 11, 0.25) 100%);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  color: #f3e8ff;
+  font-weight: 600;
+  transition: all 0.2s ease;
 }
 
-.btn-quick-fill:hover {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.3) 0%, rgba(217, 119, 6, 0.4) 100%);
-  border-color: #f59e0b;
-  color: #fff;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+.btn-quick-fill:hover,
+.btn-ai-fill:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.35) 0%, rgba(245, 158, 11, 0.4) 100%);
+  border-color: #c084fc;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-ai-fill:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sparkles-icon {
+  color: #fcd34d;
+}
+
+.spinning-sparkle {
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .zap-icon {

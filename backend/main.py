@@ -62,6 +62,10 @@ class GenerateRequest(BaseModel):
     mappings: Optional[List[MappingItem]] = None
     is_temporary: Optional[bool] = False
 
+class AiFillRequest(BaseModel):
+    template_id: str
+
+
 def hex_to_rgb_tuple(hex_color: Optional[str]) -> Tuple[float, float, float]:
     """Convert hex color (#000000) to normalized RGB float tuple (0.0 to 1.0)."""
     if not hex_color or not hex_color.startswith("#") or len(hex_color) < 7:
@@ -324,6 +328,49 @@ def generate_pdf(req: GenerateRequest):
         "total_placed": len(placements),
         "is_temporary": req.is_temporary
     }
+
+@app.post("/api/ai-fill")
+def ai_fill_pdf(req: AiFillRequest):
+    # 1. Locate input PDF
+    template_id = req.template_id
+    pdf_path = os.path.join(INPUT_DIR, f"{template_id}.pdf")
+    if not os.path.exists(pdf_path):
+        pdf_path = os.path.join(INPUT_DIR, template_id)
+        if not os.path.exists(pdf_path):
+            raise HTTPException(status_code=404, detail=f"Input PDF '{template_id}' not found")
+
+    # 2. Load company data
+    company_data_path = os.path.join(DATA_DIR, "company_data.json")
+    if not os.path.exists(company_data_path):
+        raise HTTPException(status_code=404, detail="Company data not found")
+    with open(company_data_path, "r", encoding="utf-8") as f:
+        company_data = json.load(f)
+
+    instructions = (
+        "Por favor llena este formulario PDF con los datos principales de la empresa:\n"
+        f"{json.dumps(company_data, ensure_ascii=False, indent=2)}\n\n"
+        "Incluye datos de identificación (NIT, Razón Social, Representante Legal, Cédula), "
+        "datos de contacto (Ciudad, Dirección, Correo, Celular, Teléfono) y "
+        "datos bancarios (Banco, Tipo de cuenta, Número de cuenta) en los campos correspondientes."
+    )
+
+    try:
+        from backend.pdf_filling_agent.agent import PDFAgent
+        # ponytail: instantiates PDFAgent per request.
+        agent = PDFAgent(company_profile_path=company_data_path)
+        output_path = agent.fill_pdf(pdf_path, instructions, output_dir=OUTPUT_DIR, mode="auto")
+        out_filename = os.path.basename(output_path)
+
+        return {
+            "status": "success",
+            "filename": out_filename,
+            "download_url": f"/api/download/{out_filename}",
+            "message": "PDF autollenado con IA exitosamente",
+            "total_placed": -1
+        }
+    except Exception as e:
+        print(f"[ERROR] ai_fill_pdf error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error en Autollenado IA: {str(e)}")
 
 @app.get("/api/download/{filename}")
 def download_file(filename: str):
