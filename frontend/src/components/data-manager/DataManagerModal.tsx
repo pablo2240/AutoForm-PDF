@@ -64,7 +64,7 @@ function categorizeFlatCompanyData(data: CompanyData): CategorizedCompanyData {
 }
 
 // Flatten back to key-value record for form stamping
-function flattenToCompanyData(
+export function flattenToCompanyData(
   categorized: CategorizedCompanyData,
   profiles: EmployerProfile[],
   signature: GlobalSignature | null
@@ -179,6 +179,23 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     return null;
   });
 
+  // Real-time synchronization helper
+  const syncAndPersist = (
+    nextCat: CategorizedCompanyData,
+    nextProfiles: EmployerProfile[],
+    nextSig: GlobalSignature | null
+  ) => {
+    const flat = flattenToCompanyData(nextCat, nextProfiles, nextSig);
+    localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(nextCat));
+    localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(nextProfiles));
+    if (nextSig) {
+      localStorage.setItem(STORAGE_SIGNATURE_KEY, JSON.stringify(nextSig));
+    } else {
+      localStorage.removeItem(STORAGE_SIGNATURE_KEY);
+    }
+    onSaveData(flat, nextProfiles, nextSig);
+  };
+
   // Sync if initial data changes
   useEffect(() => {
     if (initialCompanyData && Object.keys(initialCompanyData).length > 0) {
@@ -226,7 +243,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         [field.category]: updatedList,
       };
 
-      localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(next));
+      syncAndPersist(next, profiles, signature);
       return next;
     });
   };
@@ -254,7 +271,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         ...prev,
         [category]: updatedList,
       };
-      localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(next));
+      syncAndPersist(next, profiles, signature);
       return next;
     });
   };
@@ -266,7 +283,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         ...prev,
         [category]: (prev[category] || []).filter(item => item.id !== id),
       };
-      localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(next));
+      syncAndPersist(next, profiles, signature);
       return next;
     });
   };
@@ -293,7 +310,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         updated = [...prev, newProf];
       }
 
-      localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(updated));
+      syncAndPersist(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -302,7 +319,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const handleUpdateProfile = (id: string, updatedProfile: EmployerProfile) => {
     setProfiles(prev => {
       const updated = prev.map(p => (p.id === id ? updatedProfile : p));
-      localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(updated));
+      syncAndPersist(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -311,7 +328,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const handleDeleteProfile = (id: string) => {
     setProfiles(prev => {
       const updated = prev.filter(p => p.id !== id);
-      localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(updated));
+      syncAndPersist(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -319,29 +336,22 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   // Save Signature
   const handleSaveSignature = (sig: GlobalSignature | null) => {
     setSignature(sig);
-    if (sig) {
-      localStorage.setItem(STORAGE_SIGNATURE_KEY, JSON.stringify(sig));
-    } else {
-      localStorage.removeItem(STORAGE_SIGNATURE_KEY);
-    }
+    syncAndPersist(categorizedCompany, profiles, sig);
   };
 
   // Save everything and sync
   const handleFinalSaveAndClose = () => {
-    const flat = flattenToCompanyData(categorizedCompany, profiles, signature);
-    localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(categorizedCompany));
-    localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(profiles));
-    if (signature) {
-      localStorage.setItem(STORAGE_SIGNATURE_KEY, JSON.stringify(signature));
-    } else {
-      localStorage.removeItem(STORAGE_SIGNATURE_KEY);
-    }
-    onSaveData(flat, profiles, signature);
+    syncAndPersist(categorizedCompany, profiles, signature);
+    onClose();
+  };
+
+  const handleClose = () => {
+    syncAndPersist(categorizedCompany, profiles, signature);
     onClose();
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={handleClose}>
       <div className="modal-dialog data-manager-dialog" onClick={(e) => e.stopPropagation()}>
         {/* Modal Header */}
         <div className="modal-header dm-header">
@@ -356,7 +366,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
               </p>
             </div>
           </div>
-          <button className="btn-close" onClick={onClose}>
+          <button className="btn-close" onClick={handleClose}>
             <X size={18} />
           </button>
         </div>

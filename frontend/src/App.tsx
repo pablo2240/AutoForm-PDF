@@ -102,8 +102,71 @@ export const App: React.FC = () => {
           fetchTemplates(),
           fetchCompanyData(),
         ]);
+
+        let hasNewVariables = false;
+
+        // 1. Merge categorized company data from localStorage if exists
+        try {
+          const savedCatStr = localStorage.getItem('autoform_categorized_company_v3');
+          if (savedCatStr) {
+            const savedCat = JSON.parse(savedCatStr);
+            if (savedCat && typeof savedCat === 'object') {
+              Object.values(savedCat).forEach((fields: any) => {
+                if (Array.isArray(fields)) {
+                  fields.forEach((f: any) => {
+                    if (f && f.key && f.value) {
+                      if (compData[f.key] !== f.value) {
+                        compData[f.key] = f.value;
+                        hasNewVariables = true;
+                      }
+                    }
+                  });
+                }
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('Error merging categorized company data on init:', e);
+        }
+
+        // 2. Merge employer profiles from localStorage so their variables are always available
+        try {
+          const savedProfilesStr = localStorage.getItem('autoform_employer_profiles_v3');
+          if (savedProfilesStr) {
+            const savedProfiles = JSON.parse(savedProfilesStr);
+            if (Array.isArray(savedProfiles) && savedProfiles.length > 0) {
+              savedProfiles.forEach((p: any) => {
+                if (!p || !p.profileName) return;
+                const prefix = p.profileName.toLowerCase().replace(/\s+/g, '_').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                if (p.nombre) { compData[`${prefix}_nombre`] = p.nombre; hasNewVariables = true; }
+                if (p.apellido) { compData[`${prefix}_apellido`] = p.apellido; hasNewVariables = true; }
+                if (p.nombre && p.apellido) { compData[`${prefix}_nombre_completo`] = `${p.nombre} ${p.apellido}`; hasNewVariables = true; }
+                if (p.email) { compData[`${prefix}_email`] = p.email; hasNewVariables = true; }
+                if (p.celular) { compData[`${prefix}_celular`] = p.celular; hasNewVariables = true; }
+
+                if (p.customFields && Array.isArray(p.customFields)) {
+                  p.customFields.forEach((cf: any) => {
+                    if (cf && cf.key && cf.value) {
+                      const cfKey = cf.key.toLowerCase().replace(/\s+/g, '_').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                      compData[`${prefix}_${cfKey}`] = cf.value;
+                      hasNewVariables = true;
+                    }
+                  });
+                }
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('Error merging profiles on init:', e);
+        }
+
         setTemplates(tplList);
-        setCompanyData(compData);
+        setCompanyData({ ...compData });
+
+        // If local storage had extra variables not yet in backend, sync them
+        if (hasNewVariables) {
+          saveCompanyData(compData).catch(() => {});
+        }
 
         if (tplList.length > 0) {
           setSelectedTemplate(tplList[0].id);
