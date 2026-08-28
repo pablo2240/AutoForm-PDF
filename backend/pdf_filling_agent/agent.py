@@ -369,10 +369,7 @@ Given the following interactive PDF form fields:
 User Instructions:
 {user_instructions}
 
-{get_dictionary_context()}
-
-Determine the exact field names and the values that should be filled in.
-Use the synonyms dictionary to match field names and strictly adhere to the exclusion rules (never fill foreign or counterparty sections).
+Use the synonyms dictionary and exclusion rules from your system instructions to match fields.
 Return ONLY a valid JSON object mapping the exact PDF field names to their assigned string values.
 Example:
 {{
@@ -388,7 +385,7 @@ Example:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.1,
-                max_tokens=1000
+                max_tokens=2000
             )
             raw_text = response.choices[0].message.content.strip()
             json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
@@ -409,21 +406,14 @@ Example:
         layouts = self.visual_processor.extract_page_layouts(pdf_path)
         all_placements: List[VisualPlacement] = []
 
-        system_instructions = (
-            "You are an expert AI PDF filling assistant. You are given the visual layout of a page from a flat PDF "
-            "document with coordinates [x0, y0, x1, y1] for all text labels and cells. "
-            "Your task is to place user-requested information and checkbox marks ('X') in the exact matching cell coordinates for this page. "
-            "Match labels using the synonyms dictionary and strictly obey the exclusion rules (do not fill foreign or counterparty sections). "
-            "If no information applies to this page, return an empty placements list."
-        )
+        # System instructions already contain the full synonyms dictionary and exclusion rules via KnowledgeBase
+        system_instructions = self.knowledge_base.get_system_instructions()
 
         # Build context with company profile
         profile_context = ""
         if self.company_profile:
             profile_context = f"\n\nCOMPANY PROFILE (use these values when instructions reference 'datos de la empresa'):\n"
             profile_context += json.dumps(self.company_profile, ensure_ascii=False, indent=2)
-
-        dictionary_context = get_dictionary_context()
 
         # Extract keywords from user instructions to identify relevant pages
         keywords = [w.lower() for w in re.findall(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ]{4,}', user_instructions)]
@@ -458,20 +448,18 @@ Visual layout for PAGE {page_no} [x0, y0, x1, y1]:
 User Instructions for filling the form:
 {user_instructions}
 {profile_context}
-{dictionary_context}
 
-Please analyze each field label on this page, find the corresponding empty cell/space, and generate placements for any fields that belong on PAGE {page_no}.
-Strictly follow the exclusion rules: DO NOT fill sections for foreigners or exclusive use of the entity.
-For each field or checkbox mark to insert on this page, provide:
+Analyze each field label on this page using the synonyms dictionary from your system instructions.
+Strictly follow exclusion rules: DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
+For each field to fill on PAGE {page_no}, provide:
 - "page": {page_no}
-- "rect": [x0, y0, x1, y1] bounding box where text should fit (give adequate width and height)
+- "rect": [x0, y0, x1, y1] bounding box where text should fit
 - "text": the text string to insert (or "X" for checkboxes)
 - "font_size": 8.5
 - "align": 0 (left) or 1 (center)
 
-Return ONLY a valid JSON object with key "placements". If nothing needs to be filled on this page, return {{"placements": []}}.
-
-Example format:
+Return ONLY a valid JSON object with key "placements". If nothing needs to be filled, return {{"placements": []}}.
+Example:
 {{
   "placements": [
     {{
@@ -485,7 +473,7 @@ Example format:
 }}
 """
             raw_text = None
-            for token_limit in [600, 250]:
+            for token_limit in [2000, 1000]:
                 try:
                     response = self.client.chat.completions.create(
                         model=self.model,
@@ -499,7 +487,7 @@ Example format:
                     raw_text = response.choices[0].message.content.strip()
                     break
                 except Exception as err:
-                    if "402" in str(err) and token_limit > 250:
+                    if "402" in str(err) and token_limit > 1000:
                         print(f"[WARN] Credit constraint on {self.model}, retrying with fewer tokens...")
                         continue
                     else:
@@ -526,13 +514,7 @@ Example format:
 
         all_placements: List[VisualPlacement] = []
 
-        system_instructions = (
-            "You are an expert AI PDF filling assistant. You are given an IMAGE of a scanned PDF page. "
-            "Your task is to locate the form fields on this page and determine where to place the user-requested information. "
-            "Return placements in IMAGE PIXEL COORDINATES [x0, y0, x1, y1] (origin top-left). "
-            "I will convert them to PDF points. "
-            "For checkboxes, use text 'X'. Return ONLY valid JSON with 'placements' key."
-        )
+        system_instructions = self.knowledge_base.get_system_instructions()
 
         # Build company profile context
         profile_context = ""
@@ -550,17 +532,15 @@ Example format:
             # Prepare image for API
             image_url = f"data:image/png;base64,{page_image.image_base64}"
 
-            dictionary_context = get_dictionary_context()
             prompt = f"""
 Page {page_no} of a scanned form (image coordinates: origin top-left, {page_image.width_px}x{page_image.height_px}px).
 
 User Instructions:
 {user_instructions}
 {profile_context}
-{dictionary_context}
 
 Analyze the form image and identify where to place each requested piece of information.
-Match labels using the synonyms dictionary and strictly adhere to the exclusion rules (never fill foreign or counterparty sections).
+Match labels using the synonyms dictionary and strictly adhere to the exclusion rules from your system instructions.
 For each field or checkbox to fill on THIS PAGE, provide:
 - "page": {page_no}
 - "rect_px": [x0, y0, x1, y1] in IMAGE PIXELS (top-left origin)
@@ -584,7 +564,7 @@ Example:
 """
 
             raw_text = None
-            for token_limit in [800, 400]:
+            for token_limit in [2000, 1000]:
                 try:
                     response = self.client.chat.completions.create(
                         model=self.model,
@@ -601,7 +581,7 @@ Example:
                     raw_text = response.choices[0].message.content.strip()
                     break
                 except Exception as err:
-                    if "402" in str(err) and token_limit > 400:
+                    if "402" in str(err) and token_limit > 1000:
                         print(f"[WARN] Credit constraint, retrying with fewer tokens...")
                         continue
                     else:
@@ -632,20 +612,33 @@ Example:
 
     def _safe_parse_json(self, raw_text: str) -> Dict[str, Any]:
         """Safely extract and parse JSON from LLM response text."""
+        if not raw_text or not raw_text.strip():
+            return {}
+
+        # 1. Direct or stripped parsing
         clean = re.sub(r'^```(?:json)?\s*', '', raw_text.strip(), flags=re.MULTILINE)
-        clean = re.sub(r'\s*```$', '', clean.strip(), flags=re.MULTILINE)
+        clean = re.sub(r'\s*```$', '', clean.strip(), flags=re.MULTILINE).strip()
 
         try:
             return json.loads(clean)
         except Exception:
             pass
 
-        match = re.search(r'\{.*\}', clean, re.DOTALL)
-        if match:
+        # 2. Search for codeblock content
+        block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
+        if block_match:
             try:
-                return json.loads(match.group(0))
+                return json.loads(block_match.group(1))
             except Exception:
-                candidate = match.group(0)
+                pass
+
+        # 3. Greedy search for outermost curly braces
+        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        if match:
+            candidate = match.group(0)
+            try:
+                return json.loads(candidate)
+            except Exception:
                 last_obj_idx = candidate.rfind('}')
                 if last_obj_idx != -1:
                     repaired = candidate[:last_obj_idx + 1] + "\n]}"
@@ -654,6 +647,7 @@ Example:
                     except Exception:
                         pass
         return {}
+
 
     def _heuristic_acroform_fill(self, pdf_path: str, user_instructions: str) -> str:
         """Fallback method for standard AcroForm fields using Spanish & English synonyms."""
