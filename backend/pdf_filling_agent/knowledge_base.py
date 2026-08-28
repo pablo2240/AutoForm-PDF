@@ -4,49 +4,31 @@ Knowledge Base system for PDF filling instructions.
 
 import os
 from typing import Dict, Any, Optional
+from .field_dictionary import get_dictionary_context, FIELD_SYNONYMS, IGNORE_RULES
 
 
 class KnowledgeBase:
-    """Manages system instructions for PDF filling."""
+    """Manages system instructions and domain context for PDF filling."""
 
     def __init__(self, knowledge_file: Optional[str] = None):
         if knowledge_file is None:
-            # Default knowledge base content
             self.knowledge_content = self._get_default_knowledge()
         else:
             self.knowledge_content = self._load_knowledge_file(knowledge_file)
 
     def _get_default_knowledge(self) -> str:
-        """Get default knowledge base content."""
-        return """
+        """Get default knowledge base content including dictionary and exclusion rules."""
+        return f"""
 # PDF Filling System Instructions
 
 ## General Guidelines
 - Always use PyMuPDF (fitz) for PDF manipulation
-- Field names are case-sensitive
+- Match form field labels against the synonyms dictionary
+- Adhere strictly to the negative exclusion rules (never fill foreign or counterparty sections)
 - Call widget.update() after setting field values
 - Save the PDF with incremental=False
-- Handle errors gracefully and provide meaningful feedback
 
-## Code Generation Rules
-1. Import fitz at the beginning of generated code
-2. Open the PDF document with fitz.open()
-3. Iterate through all pages and widgets
-4. Set field_value for matching field names
-5. Update widgets after setting values
-6. Save to output directory
-7. Close the document properly
-
-## Field Value Types
-- Text fields: Use string values
-- Checkboxes: Use boolean values (True/False)
-- Radio buttons: Use string values matching the option
-- Dropdowns: Use string values matching the option
-
-## Error Handling
-- Validate that PDF files exist before processing
-- Handle cases where field names don't exist in the PDF
-- Provide informative error messages for debugging
+{get_dictionary_context()}
 """
 
     def _load_knowledge_file(self, file_path: str) -> str:
@@ -60,32 +42,12 @@ class KnowledgeBase:
     def get_system_instructions(self) -> str:
         """Get formatted system instructions for the AI agent."""
         return f"""
-You are an AI assistant specialized in generating Python code to fill PDF forms using PyMuPDF.
+You are an expert AI assistant specialized in analyzing, mapping, and filling PDF forms (both AcroForms and Flat visual PDFs).
 
-KNOWLEDGE BASE:
+KNOWLEDGE BASE & DOMAIN RULES:
 {self.knowledge_content}
 
-Your task is to generate Python code that:
-1. Opens the specified PDF file
-2. Fills in the form fields based on the user's instructions
-3. Saves the filled PDF to the output directory
-
-Generate code that follows this pattern:
-```python
-import fitz  # PyMuPDF
-
-doc = fitz.open("input.pdf")
-for page_num in range(len(doc)):
-    page = doc[page_num]
-    for widget in page.widgets():
-        if widget.field_name == "FieldName":
-            widget.field_value = "Value"
-            widget.update()
-doc.save("output.pdf", incremental=False)
-doc.close()
-```
-
-The generated code should be executable and handle the specific field names and values from the user's instructions.
+Your objective is to identify matching fields based on the synonyms dictionary, assign company profile values, and strictly respect exclusion rules.
 """
 
     def update_knowledge(self, new_content: str):

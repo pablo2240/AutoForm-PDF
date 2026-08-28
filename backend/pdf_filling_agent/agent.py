@@ -22,6 +22,7 @@ load_dotenv()
 from .knowledge_base import KnowledgeBase
 from .pdf_processor import PDFProcessor
 from .visual_processor import VisualPDFProcessor, VisualPlacement, PageImage
+from .field_dictionary import get_dictionary_context
 
 
 class FieldMapping(BaseModel):
@@ -368,7 +369,10 @@ Given the following interactive PDF form fields:
 User Instructions:
 {user_instructions}
 
+{get_dictionary_context()}
+
 Determine the exact field names and the values that should be filled in.
+Use the synonyms dictionary to match field names and strictly adhere to the exclusion rules (never fill foreign or counterparty sections).
 Return ONLY a valid JSON object mapping the exact PDF field names to their assigned string values.
 Example:
 {{
@@ -409,6 +413,7 @@ Example:
             "You are an expert AI PDF filling assistant. You are given the visual layout of a page from a flat PDF "
             "document with coordinates [x0, y0, x1, y1] for all text labels and cells. "
             "Your task is to place user-requested information and checkbox marks ('X') in the exact matching cell coordinates for this page. "
+            "Match labels using the synonyms dictionary and strictly obey the exclusion rules (do not fill foreign or counterparty sections). "
             "If no information applies to this page, return an empty placements list."
         )
 
@@ -417,6 +422,8 @@ Example:
         if self.company_profile:
             profile_context = f"\n\nCOMPANY PROFILE (use these values when instructions reference 'datos de la empresa'):\n"
             profile_context += json.dumps(self.company_profile, ensure_ascii=False, indent=2)
+
+        dictionary_context = get_dictionary_context()
 
         # Extract keywords from user instructions to identify relevant pages
         keywords = [w.lower() for w in re.findall(r'[a-zA-ZáéíóúÁÉÍÓÚñÑ]{4,}', user_instructions)]
@@ -451,8 +458,10 @@ Visual layout for PAGE {page_no} [x0, y0, x1, y1]:
 User Instructions for filling the form:
 {user_instructions}
 {profile_context}
+{dictionary_context}
 
 Please analyze each field label on this page, find the corresponding empty cell/space, and generate placements for any fields that belong on PAGE {page_no}.
+Strictly follow the exclusion rules: DO NOT fill sections for foreigners or exclusive use of the entity.
 For each field or checkbox mark to insert on this page, provide:
 - "page": {page_no}
 - "rect": [x0, y0, x1, y1] bounding box where text should fit (give adequate width and height)
@@ -461,6 +470,7 @@ For each field or checkbox mark to insert on this page, provide:
 - "align": 0 (left) or 1 (center)
 
 Return ONLY a valid JSON object with key "placements". If nothing needs to be filled on this page, return {{"placements": []}}.
+
 Example format:
 {{
   "placements": [
@@ -540,14 +550,17 @@ Example format:
             # Prepare image for API
             image_url = f"data:image/png;base64,{page_image.image_base64}"
 
+            dictionary_context = get_dictionary_context()
             prompt = f"""
 Page {page_no} of a scanned form (image coordinates: origin top-left, {page_image.width_px}x{page_image.height_px}px).
 
 User Instructions:
 {user_instructions}
 {profile_context}
+{dictionary_context}
 
 Analyze the form image and identify where to place each requested piece of information.
+Match labels using the synonyms dictionary and strictly adhere to the exclusion rules (never fill foreign or counterparty sections).
 For each field or checkbox to fill on THIS PAGE, provide:
 - "page": {page_no}
 - "rect_px": [x0, y0, x1, y1] in IMAGE PIXELS (top-left origin)
@@ -643,15 +656,19 @@ Example:
         return {}
 
     def _heuristic_acroform_fill(self, pdf_path: str, user_instructions: str) -> str:
-        """Fallback method for standard AcroForm fields."""
+        """Fallback method for standard AcroForm fields using Spanish & English synonyms."""
         patterns = [
-            (r'name[:\s]+([^\n,]+)', 'name'),
-            (r'business name[:\s]+([^\n,]+)', 'business_name'),
-            (r'address[:\s]+([^\n,]+)', 'address'),
-            (r'tax id[:\s]+([^\n,]+)', 'tax_id'),
-            (r'ssn[:\s]+([^\n,]+)', 'ssn'),
-            (r'phone[:\s]+([^\n,]+)', 'phone'),
-            (r'email[:\s]+([^\n,]+)', 'email'),
+            (r'(?:razon\s*social|nombre\s*(?:empresa|entidad)?|business\s*name|name)[:\s]+([^\n,]+)', 'razon_social'),
+            (r'(?:nit|rut|tax\s*id)[:\s]+([^\n,]+)', 'nit'),
+            (r'(?:cedula|c\.?c\.?|identificacion|id|ssn)[:\s]+([^\n,]+)', 'cedula'),
+            (r'(?:representante\s*legal|gerente)[:\s]+([^\n,]+)', 'representante_legal'),
+            (r'(?:direccion|residencia|sede|address)[:\s]+([^\n,]+)', 'direccion'),
+            (r'(?:ciudad|municipio|city)[:\s]+([^\n,]+)', 'ciudad'),
+            (r'(?:departamento|provincia|state)[:\s]+([^\n,]+)', 'departamento'),
+            (r'(?:telefono|tel|celular|phone)[:\s]+([^\n,]+)', 'telefono'),
+            (r'(?:correo|email|e-mail)[:\s]+([^\n,]+)', 'email'),
+            (r'(?:banco|entidad\s*bancaria|bank)[:\s]+([^\n,]+)', 'banco'),
+            (r'(?:numero\s*cuenta|no\.?\s*cuenta|cta|account)[:\s]+([^\n,]+)', 'numero_cuenta'),
         ]
         extracted = {}
         for pattern, k in patterns:
@@ -659,14 +676,14 @@ Example:
             if m:
                 extracted[k] = m.group(1).strip()
 
-        mappings = {
-            'name': 'topmostSubform[0].Page1[0].f1_01[0]',
-            'business_name': 'topmostSubform[0].Page1[0].f1_02[0]',
-            'address': 'topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_07[0]',
-            'tax_id': 'topmostSubform[0].Page1[0].f1_05[0]',
-            'ssn': 'topmostSubform[0].Page1[0].f1_05[0]',
-            'phone': 'topmostSubform[0].Page1[0].f1_14[0]',
-            'email': 'topmostSubform[0].Page1[0].f1_15[0]',
-        }
-        field_values = {mappings[k]: v for k, v in extracted.items() if k in mappings}
-        return self.pdf_processor.fill_pdf(pdf_path, field_values)
+        # Check existing PDF fields and match heuristically
+        pdf_fields = self.pdf_processor.get_pdf_fields(pdf_path)
+        field_values = {}
+        for field_name in pdf_fields:
+            fn_lower = field_name.lower()
+            for key, val in extracted.items():
+                if key in fn_lower:
+                    field_values[field_name] = val
+                    break
+
+        return self.pdf_processor.fill_pdf(pdf_path, field_values)
