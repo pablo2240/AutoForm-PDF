@@ -79,7 +79,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
         <div className="brand-text">
           <h1 className="app-title">AutoForm PDF</h1>
-          <span className="app-subtitle">WYSIWYG PDF Form Mapper</span>
         </div>
       </div>
 
