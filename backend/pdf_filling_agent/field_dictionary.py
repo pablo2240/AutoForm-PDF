@@ -18,7 +18,9 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     "numero_cedula": [
         "cedula", "cédula", "c.c", "C.C.", "c.c", "identificacion", "identificación", 
         "identidad", "id", "ID", "Nro", "No. Documento", "Número de Documento", 
-        "Número de Cédula", "Cédula de Ciudadanía"
+        "Número de Cédula", "Cédula de Ciudadanía", "NÚMERO ID", "NUMERO ID", 
+        "Número ID", "Numero ID", "Nro ID", "No. ID", "No ID", "NÚMERO DE ID", 
+        "NUMERO DE ID", "Número de ID", "Numero de ID", "Num ID"
     ],
     "tipo_documento": [
         "Tipo de Documento", "Tipo ID", "Tipo de ID", "Clase de Documento", 
@@ -91,7 +93,10 @@ IGNORE_RULES: List[str] = [
     "2. NO LLENAR SECCIONES DE USO EXCLUSIVO DE LA ENTIDAD: Ignora cualquier sección con títulos como 'Espacio reservado para la entidad', 'Uso exclusivo de la empresa/banco', 'Aprobación interna', 'Para uso de la oficina', 'Firma y sello del funcionario'.",
     "3. NO LLENAR DATOS DE LA CONTRAPARTE/CLIENTE: Si el formulario es de vinculación o registro, llena únicamente la sección de 'DATOS DEL SOLICITANTE / EMPRESA / TITULAR / PROVEEDOR'. No llenes datos del comprador o cliente si la casilla pertenece a la empresa que emitió el formulario.",
     "4. NO LLENAR CONTACTOS COMERCIALES DE TERCEROS NO APLICABLES: Ignora campos como 'Datos de contacto sólo para proveedores' cuando sea una sección de terceros o referencias comerciales externas.",
-    "5. REPRESENTANTE LEGAL PRINCIPAL: La persona facultada y principal para firmar y representar a la empresa es Guillermo Humberto Cañón Sarria (C.C. 98555384 de Envigado). Completa siempre sus datos en los campos de Representante Legal."
+    "5. REPRESENTANTE LEGAL PRINCIPAL: La persona facultada y principal para firmar y representar a la empresa es Guillermo Humberto Cañón Sarria (C.C. 98555384 de Envigado). Completa siempre sus datos en los campos de Representante Legal.",
+    "6. CAMPOS 'OTRA' / 'OTRO': Si una casilla o etiqueta dice 'OTRA', 'OTRO', 'OTRAS', 'OTROS' (por ejemplo campos residuales 'Otra:', '¿Cuál?', 'Otras operaciones', etc.), NUNCA pongas datos y déjala completamente vacía.",
+    "7. OPCIONES MÚLTIPLES: Cuando en los formularios se presenten grupos o bloques de opciones múltiples (listas para marcar múltiples alternativas, encuestas de opciones múltiples o bloques de selección no específicos), ignóralas y no escribas nada.",
+    "8. NÚMERO ID: Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID', 'NRO ID' o similar, debe llenarse con el número de Cédula de Ciudadanía del Representante Legal (98555384)."
 ]
 
 def get_dictionary_context() -> str:

@@ -459,8 +459,10 @@ class PDFAgent:
             full_context = f"{item['attr_label']} {item['left_text']} {item['above_text']} {item['section']} {fn}".strip()
             norm = self._normalize_label(full_context)
             
-            # Exclusion rules: ignore foreign, counterparty, internal use
+            # Exclusion rules: ignore foreign, counterparty, internal use, or 'OTRA' / 'OTRO'
             if any(ign in norm for ign in ["extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna"]):
+                continue
+            if re.search(r'\b(otra|otro|otras|otros)\b', norm) and not any(k in norm for k in ["razon social", "representante legal"]):
                 continue
 
             val_to_set = None
@@ -491,16 +493,16 @@ class PDFAgent:
             elif "representante legal" in norm and ("nombre" in norm or "apellidos" in norm or "representante" in norm):
                 val_to_set = rep_full
             
-            # 5. Document Type
+            # 5. Cédula / Número ID
+            elif (re.search(r'\b(numero id|nro id|no id|num id|numero de id|cedula|numero de documento|no documento)\b', norm) and ftype == "Text") or (re.search(r'\b(numero id|nro id|num id|numero de id|cedula)\b', norm) and "tipo" not in norm):
+                val_to_set = profile.get("numero_cedula")
+
+            # 6. Document Type
             elif re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', norm):
                 if "empresa" in norm or "juridica" in norm:
                     val_to_set = "NIT"
                 else:
                     val_to_set = profile.get("tipo_documento", "C.C.")
-            
-            # 6. Cédula
-            elif re.search(r'\b(cedula|numero de documento|no documento|numero id)\b', norm) and "tipo" not in norm:
-                val_to_set = profile.get("numero_cedula")
             
             # 7. Lugar Expedición
             elif re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en)\b', norm):
@@ -592,8 +594,11 @@ Assign the appropriate company profile values to matching fields.
 CRITICAL RULES:
 1. ONLY map fields that correspond to the company ({self.company_profile.get('razon_social', 'la empresa')}) or its main legal representative ({self.company_profile.get('representante_legal', 'el representante legal')}).
 2. DO NOT fill sections for Foreigners ('Extranjeros'), Counterparties, or Internal entity use ('Uso exclusivo de la entidad').
-3. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
-4. Return ONLY a valid JSON object mapping exact field IDs to string values.
+3. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
+4. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+5. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
+6. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
+7. Return ONLY a valid JSON object mapping exact field IDs to string values.
 """
                 try:
                     raw_text = self._call_llm([
@@ -667,7 +672,11 @@ User Instructions for filling the form:
 {profile_context}
 
 Analyze each field label on this page using the synonyms dictionary from your system instructions.
-Strictly follow exclusion rules: DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
+Strictly follow exclusion rules:
+1. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
+2. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
+3. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+4. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
 For each field to fill on PAGE {page_no}, provide:
 - "page": {page_no}
 - "rect": [x0, y0, x1, y1] bounding box where text should fit
