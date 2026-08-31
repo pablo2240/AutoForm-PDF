@@ -32,8 +32,25 @@ class PDFProcessor:
             for widget in page.widgets():
                 field_name = widget.field_name
                 if field_name in field_values:
-                    widget.field_value = field_values[field_name]
-                    widget.update()  # Regenerates the widget appearance
+                    val = field_values[field_name]
+                    if val is None:
+                        continue
+                    try:
+                        if widget.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
+                            if str(val).lower() in ["true", "1", "yes", "si", "x", "on"]:
+                                widget.field_value = "1"
+                            else:
+                                widget.field_value = "Off"
+                        elif widget.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON:
+                            if str(val).lower() in ["true", "1", "yes", "si", "x", "on"]:
+                                widget.field_value = "1"
+                            else:
+                                widget.field_value = "Off"
+                        else:
+                            widget.field_value = str(val)
+                        widget.update()  # Regenerates the widget appearance
+                    except Exception as wex:
+                        print(f"[WARN] Failed to update widget '{field_name}': {wex}")
 
         # Generate output filename
         input_filename = os.path.basename(input_pdf_path)

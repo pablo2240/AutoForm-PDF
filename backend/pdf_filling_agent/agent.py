@@ -11,6 +11,8 @@ import os
 import json
 import re
 import base64
+import unicodedata
+import fitz
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
 from dotenv import load_dotenv
@@ -22,7 +24,7 @@ load_dotenv()
 from .knowledge_base import KnowledgeBase
 from .pdf_processor import PDFProcessor
 from .visual_processor import VisualPDFProcessor, VisualPlacement, PageImage
-from .field_dictionary import get_dictionary_context
+from .field_dictionary import FIELD_SYNONYMS, IGNORE_RULES, get_dictionary_context
 
 
 class FieldMapping(BaseModel):
@@ -381,43 +383,240 @@ class PDFAgent:
             print(f"[INFO] Flat PDF with text layer ({pages_with_text}/{total_pages} pages). Using Visual Overlay mode.")
             return self._fill_visual(pdf_path, user_instructions)
 
+    def _extract_rich_acro_widgets(self, doc: fitz.Document) -> List[Dict[str, Any]]:
+        """Extract all widgets with their precise visual labels from the PDF pages."""
+        rich_widgets = []
+        for pno in range(len(doc)):
+            page = doc[pno]
+            widgets = list(page.widgets())
+            if not widgets:
+                continue
+            words = page.get_text("words")
+            blocks = page.get_text("blocks")
+            
+            for w in widgets:
+                wr = w.rect
+                attr_label = getattr(w, 'field_label', '') or ''
+                
+                # Words to the left on the same horizontal line
+                left_words = [nw[4] for nw in sorted([wd for wd in words if abs(wd[1] - wr.y0) < 12 and wd[2] <= wr.x0 + 4 and (wr.x0 - wd[2]) < 220], key=lambda x: (x[1], x[0]))]
+                # Words immediately above the widget
+                above_words = [nw[4] for nw in sorted([wd for wd in words if 0 <= wr.y0 - wd[3] < 16 and (wd[0] >= wr.x0 - 40 and wd[2] <= wr.x1 + 40)], key=lambda x: (x[1], x[0]))]
+                
+                left_str = " ".join(left_words)
+                above_str = " ".join(above_words)
+                
+                # Closest section header
+                section_header = ""
+                for b in blocks:
+                    if b[4].strip() and b[3] <= wr.y0 and (wr.y0 - b[3]) < 70:
+                        section_header = b[4].strip().replace("\n", " ")
+                
+                label = attr_label or left_str or above_str or w.field_name
+                rich_widgets.append({
+                    "widget": w,
+                    "field_name": w.field_name,
+                    "field_type": w.field_type_string,
+                    "rect": wr,
+                    "attr_label": attr_label,
+                    "left_text": left_str,
+                    "above_text": above_str,
+                    "label": label,
+                    "section": section_header,
+                    "page": pno
+                })
+        return rich_widgets
+
+    def _normalize_label(self, text: str) -> str:
+        if not text:
+            return ""
+        text = unicodedata.normalize('NFKD', str(text)).encode('ASCII', 'ignore').decode('utf-8')
+        return re.sub(r'[^a-zA-Z0-9\s]', ' ', text).lower().strip()
+
+    def _deterministic_acroform_match(self, rich_widgets: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Deterministic mapping based on company profile and synonyms dictionary."""
+        profile = self.company_profile
+        if not profile:
+            return {}
+
+        nit_val = str(profile.get("nit", "")).strip()
+        nit_base = nit_val[:-1] if len(nit_val) == 10 and nit_val.isdigit() else nit_val
+        nit_dv = nit_val[-1] if len(nit_val) == 10 and nit_val.isdigit() else "2"
+        
+        rep_full = str(profile.get("representante_legal", "Guillermo Humberto Cañón Sarria")).strip()
+        rep_nombre = str(profile.get("representante_nombre", "Guillermo Humberto")).strip()
+        rep_apellido = str(profile.get("representante_apellido", "Cañón Sarria")).strip()
+        rep_apellidos_split = rep_apellido.split()
+        primer_apellido = rep_apellidos_split[0] if len(rep_apellidos_split) > 0 else rep_apellido
+        segundo_apellido = rep_apellidos_split[1] if len(rep_apellidos_split) > 1 else ""
+
+        mappings = {}
+        
+        for item in rich_widgets:
+            fn = item["field_name"]
+            ftype = item["field_type"]
+            pno = item["page"]
+            full_context = f"{item['attr_label']} {item['left_text']} {item['above_text']} {item['section']} {fn}".strip()
+            norm = self._normalize_label(full_context)
+            
+            # Exclusion rules: ignore foreign, counterparty, internal use
+            if any(ign in norm for ign in ["extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna"]):
+                continue
+
+            val_to_set = None
+            
+            # 1. Razón Social
+            if any(k in norm for k in ["razon social", "nombre empresa", "nombre o razon social", "denominacion social"]):
+                if "representante" not in norm and "intermediario" not in norm:
+                    val_to_set = profile.get("razon_social")
+            
+            # 2. DV
+            elif re.search(r'\b(dv|digito verificacion|digito de verificacion)\b', norm):
+                val_to_set = nit_dv
+            
+            # 3. NIT / RUT
+            elif re.search(r'\b(nit|rut|identificacion tributaria)\b', norm) and "dv" not in norm:
+                if "tipo" not in norm:
+                    val_to_set = nit_base or nit_val
+                elif ftype == "ComboBox":
+                    val_to_set = "NIT"
+            
+            # 4. Representante Legal Split & Full
+            elif "primer apellido" in norm and ("rep" in norm or "legal" in norm or "vinculacion" in norm or pno == 0):
+                val_to_set = primer_apellido
+            elif "segundo apellido" in norm and ("rep" in norm or "legal" in norm or "vinculacion" in norm or pno == 0):
+                val_to_set = segundo_apellido
+            elif "nombres" in norm and ("rep" in norm or "legal" in norm or "vinculacion" in norm or pno == 0):
+                val_to_set = rep_nombre
+            elif "representante legal" in norm and ("nombre" in norm or "apellidos" in norm or "representante" in norm):
+                val_to_set = rep_full
+            
+            # 5. Document Type
+            elif re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', norm):
+                if "empresa" in norm or "juridica" in norm:
+                    val_to_set = "NIT"
+                else:
+                    val_to_set = profile.get("tipo_documento", "C.C.")
+            
+            # 6. Cédula
+            elif re.search(r'\b(cedula|numero de documento|no documento|numero id)\b', norm) and "tipo" not in norm:
+                val_to_set = profile.get("numero_cedula")
+            
+            # 7. Lugar Expedición
+            elif re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en)\b', norm):
+                val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
+            
+            # 8. Dirección
+            elif re.search(r'\b(direccion|domicilio|oficina principal direccion|direccion domicilio)\b', norm):
+                val_to_set = profile.get("direccion_principal")
+            
+            # 9. Ciudad
+            elif re.search(r'\b(ciudad|municipio)\b', norm) and "expedicion" not in norm and "nacimiento" not in norm:
+                val_to_set = profile.get("ciudad", "Medellin")
+            
+            # 10. Departamento
+            elif re.search(r'\b(departamento|dpto)\b', norm):
+                val_to_set = profile.get("departamento", "Antioquia")
+            
+            # 11. País
+            elif re.search(r'\b(pais|pais de domicilio)\b', norm):
+                val_to_set = profile.get("pais", "Colombia")
+            
+            # 12. Teléfono / Celular
+            elif re.search(r'\b(telefono celular|celular)\b', norm):
+                val_to_set = profile.get("celular_rep", profile.get("telefono"))
+            elif re.search(r'\b(telefono|telefono fijo|tel)\b', norm):
+                val_to_set = profile.get("telefono")
+            
+            # 13. Email / Correo
+            elif re.search(r'\b(correo|e mail|email|correo electronico)\b', norm):
+                val_to_set = profile.get("correo_rep")
+            
+            # 14. Web
+            elif re.search(r'\b(pagina web|sitio web|web)\b', norm):
+                val_to_set = profile.get("pagina_web")
+            
+            # 15. Banco / Cuenta
+            elif re.search(r'\b(banco|entidad bancaria|entidad financiera)\b', norm):
+                val_to_set = profile.get("entidad_bancaria")
+            elif re.search(r'\b(numero de cuenta|no cuenta|cuenta no)\b', norm) and "tipo" not in norm:
+                val_to_set = profile.get("numero_cuenta")
+            elif re.search(r'\b(tipo de cuenta|tipo cuenta)\b', norm):
+                val_to_set = profile.get("tipo_cuenta")
+            
+            # 16. Tipo de empresa
+            elif re.search(r'\b(tipo de empresa)\b', norm):
+                val_to_set = "PRIVADA"
+
+            if val_to_set:
+                mappings[fn] = str(val_to_set)
+
+        return mappings
+
     def _fill_acroform(self, pdf_path: str, fields: Dict[str, str], user_instructions: str) -> str:
-        """Fill an interactive PDF form with AcroForm widgets using LLM mapping."""
-        fields_info = "\n".join([f"- {name} (type: {ftype})" for name, ftype in fields.items()])
+        """Fill an interactive PDF form with AcroForm widgets using rich label extraction + LLM + dictionary hybrid."""
+        doc = fitz.open(pdf_path)
+        rich_widgets = self._extract_rich_acro_widgets(doc)
+        
+        # 1. Deterministic high-confidence matches from dictionary
+        deterministic_matches = self._deterministic_acroform_match(rich_widgets)
+        print(f"[INFO] Deterministic AcroForm matches found: {len(deterministic_matches)}")
+
+        # 2. LLM enriched page-by-page mapping
+        llm_matches: Dict[str, str] = {}
+        
+        # Group rich widgets by page
+        pages_dict: Dict[int, List[Dict[str, Any]]] = {}
+        for rw in rich_widgets:
+            pages_dict.setdefault(rw["page"], []).append(rw)
 
         system_instructions = self.knowledge_base.get_system_instructions()
-        prompt = f"""
-Given the following interactive PDF form fields:
-{fields_info}
+        chunk_size = 35
+
+        for pno, p_widgets in pages_dict.items():
+            for i in range(0, len(p_widgets), chunk_size):
+                chunk = p_widgets[i:i + chunk_size]
+                fields_text = "\n".join([f"- ID: {f['field_name']} | Label: '{f['label']}' | Type: {f['field_type']}" for f in chunk])
+                
+                prompt = f"""
+Given the following interactive PDF form fields on Page {pno + 1}:
+{fields_text}
+
+Company Profile Data:
+{json.dumps(self.company_profile, ensure_ascii=False, indent=2)}
 
 User Instructions:
 {user_instructions}
 
-Use the synonyms dictionary and exclusion rules from your system instructions to match fields.
-Return ONLY a valid JSON object mapping the exact PDF field names to their assigned string values.
-Example:
-{{
-    "topmostSubform[0].Page1[0].f1_01[0]": "John Doe",
-    "topmostSubform[0].Page1[0].f1_02[0]": "ACME Corp"
-}}
+Assign the appropriate company profile values to matching fields.
+CRITICAL RULES:
+1. ONLY map fields that correspond to the company ({self.company_profile.get('razon_social', 'la empresa')}) or its main legal representative ({self.company_profile.get('representante_legal', 'el representante legal')}).
+2. DO NOT fill sections for Foreigners ('Extranjeros'), Counterparties, or Internal entity use ('Uso exclusivo de la entidad').
+3. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
+4. Return ONLY a valid JSON object mapping exact field IDs to string values.
 """
-        try:
-            raw_text = self._call_llm([
-                {"role": "system", "content": system_instructions},
-                {"role": "user", "content": prompt}
-            ], token_limit=2000)
-            json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-            if json_match:
-                field_values = json.loads(json_match.group(0))
-            else:
-                field_values = json.loads(raw_text)
+                try:
+                    raw_text = self._call_llm([
+                        {"role": "system", "content": system_instructions},
+                        {"role": "user", "content": prompt}
+                    ], token_limit=2000)
+                    
+                    json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                    if json_match:
+                        parsed = json.loads(json_match.group(0))
+                        for k, v in parsed.items():
+                            if v is not None and str(v).strip():
+                                llm_matches[k] = str(v)
+                except Exception as ex:
+                    print(f"[WARN] AcroForm LLM chunk error on page {pno}: {ex}")
 
-            print(f"[INFO] Mapped field values: {field_values}")
-            return self.pdf_processor.fill_pdf(pdf_path, field_values)
+        # Combine matches: deterministic matches take baseline, LLM adds complementary context
+        final_field_values = {**deterministic_matches, **llm_matches}
+        print(f"[INFO] Total AcroForm field values mapped: {len(final_field_values)}")
+        print(f"[INFO] Mapped field values: {final_field_values}")
 
-        except Exception as e:
-            print(f"[WARN] LLM AcroForm mapping error: {e}. Attempting direct heuristic fallback.")
-            return self._heuristic_acroform_fill(pdf_path, user_instructions)
+        doc.close()
+        return self.pdf_processor.fill_pdf(pdf_path, final_field_values)
 
     def _fill_visual(self, pdf_path: str, user_instructions: str) -> str:
         """Fill a flat PDF by extracting layout and asking LLM to position text/marks page by page."""
@@ -667,34 +866,9 @@ Example:
 
 
     def _heuristic_acroform_fill(self, pdf_path: str, user_instructions: str) -> str:
-        """Fallback method for standard AcroForm fields using Spanish & English synonyms."""
-        patterns = [
-            (r'(?:razon\s*social|nombre\s*(?:empresa|entidad)?|business\s*name|name)[:\s]+([^\n,]+)', 'razon_social'),
-            (r'(?:nit|rut|tax\s*id)[:\s]+([^\n,]+)', 'nit'),
-            (r'(?:cedula|c\.?c\.?|identificacion|id|ssn)[:\s]+([^\n,]+)', 'cedula'),
-            (r'(?:representante\s*legal|gerente)[:\s]+([^\n,]+)', 'representante_legal'),
-            (r'(?:direccion|residencia|sede|address)[:\s]+([^\n,]+)', 'direccion'),
-            (r'(?:ciudad|municipio|city)[:\s]+([^\n,]+)', 'ciudad'),
-            (r'(?:departamento|provincia|state)[:\s]+([^\n,]+)', 'departamento'),
-            (r'(?:telefono|tel|celular|phone)[:\s]+([^\n,]+)', 'telefono'),
-            (r'(?:correo|email|e-mail)[:\s]+([^\n,]+)', 'email'),
-            (r'(?:banco|entidad\s*bancaria|bank)[:\s]+([^\n,]+)', 'banco'),
-            (r'(?:numero\s*cuenta|no\.?\s*cuenta|cta|account)[:\s]+([^\n,]+)', 'numero_cuenta'),
-        ]
-        extracted = {}
-        for pattern, k in patterns:
-            m = re.search(pattern, user_instructions, re.IGNORECASE)
-            if m:
-                extracted[k] = m.group(1).strip()
-
-        # Check existing PDF fields and match heuristically
-        pdf_fields = self.pdf_processor.get_pdf_fields(pdf_path)
-        field_values = {}
-        for field_name in pdf_fields:
-            fn_lower = field_name.lower()
-            for key, val in extracted.items():
-                if key in fn_lower:
-                    field_values[field_name] = val
-                    break
-
+        """Fallback method for standard AcroForm fields using rich label extraction & dictionary matching."""
+        doc = fitz.open(pdf_path)
+        rich_widgets = self._extract_rich_acro_widgets(doc)
+        field_values = self._deterministic_acroform_match(rich_widgets)
+        doc.close()
         return self.pdf_processor.fill_pdf(pdf_path, field_values)
