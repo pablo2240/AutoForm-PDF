@@ -188,7 +188,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       <div className="navbar-actions">
         <button 
-          className="btn btn-secondary" 
+          className="btn btn-secondary btn-company-data" 
           onClick={onOpenCompanyData}
           title="Editar datos de la empresa y perfiles"
         >
