@@ -1,11 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --bg-app: #0f172a;
-  --bg-panel: #1e293b;
-  --bg-card: #273549;
-  --bg-card-hover: #334155;
-  --border-color: #334155;
+  --bg-app: #090d16;
+  --bg-panel: #0f172a;
+  --bg-card: #1e293b;
+  --bg-card-hover: #283548;
+  --border-color: #243044;
   --border-focus: #F8B126;
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
@@ -25,9 +25,9 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -275,14 +275,14 @@ body {
 /* Secondary Formatting Toolbar */
 .editor-secondary-toolbar {
   height: 46px;
-  background: linear-gradient(90deg, #181829 0%, #1e2238 100%);
+  background-color: var(--bg-panel);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   padding: 0 16px;
   gap: 12px;
   z-index: 15;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .toolbar-section {
@@ -299,14 +299,14 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  background-color: rgba(15, 23, 42, 0.6);
+  background-color: var(--bg-app);
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
 }
 
 .toolbar-icon {
-  color: #818cf8;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -364,7 +364,7 @@ body {
 }
 
 .btn-toolbar-toggle {
-  background-color: rgba(15, 23, 42, 0.6);
+  background-color: var(--bg-app);
   border: 1px solid var(--border-color);
   color: var(--text-muted);
   padding: 5px 12px;
@@ -381,20 +381,21 @@ body {
 .btn-toolbar-toggle:hover {
   background-color: var(--bg-card);
   color: #fff;
+  border-color: #475569;
 }
 
 .btn-toolbar-toggle.active {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-  color: #fff;
-  border-color: #818cf8;
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+  background-color: var(--bg-card);
+  color: var(--brand-yellow, #F8B126);
+  border-color: var(--brand-yellow, #F8B126);
+  box-shadow: 0 0 6px rgba(248, 177, 38, 0.25);
 }
 
 .toolbar-btn-group {
   display: flex;
   align-items: center;
   gap: 2px;
-  background-color: rgba(15, 23, 42, 0.6);
+  background-color: var(--bg-app);
   padding: 2px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
@@ -631,13 +632,13 @@ body {
 
 .variable-card:hover {
   background-color: var(--bg-card-hover);
-  border-color: #475569;
+  border-color: #334155;
 }
 
 .variable-card.selected {
-  border-color: #6366f1;
-  background-color: rgba(99, 102, 241, 0.15);
-  box-shadow: 0 0 0 1px #6366f1;
+  border-color: var(--brand-yellow, #F8B126);
+  background-color: rgba(248, 177, 38, 0.12);
+  box-shadow: 0 0 0 1px var(--brand-yellow, #F8B126);
 }
 
 .variable-card.mapped {
@@ -794,7 +795,7 @@ body {
 .editor-stage {
   flex: 1;
   height: 100%;
-  background-color: #0b0f19;
+  background-color: #070a10;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -815,7 +816,7 @@ body {
   width: 44px;
   height: 44px;
   border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #6366f1;
+  border-top-color: var(--brand-yellow, #F8B126);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -861,7 +862,11 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 0.82rem;
-  color: #a5b4fc;
+  color: #e2e8f0;
+}
+
+.active-field-indicator strong {
+  color: var(--brand-yellow, #F8B126);
 }
 
 .active-field-indicator.idle {
@@ -941,8 +946,8 @@ body {
 /* Active drawing box */
 .drawing-box-preview {
   position: absolute;
-  border: 2px dashed #6366f1;
-  background-color: rgba(99, 102, 241, 0.25);
+  border: 2px dashed var(--brand-yellow, #F8B126);
+  background-color: rgba(248, 177, 38, 0.2);
   pointer-events: none;
   z-index: 20;
   display: flex;
@@ -955,8 +960,8 @@ body {
   position: absolute;
   top: -24px;
   left: 0;
-  background-color: #6366f1;
-  color: #fff;
+  background-color: var(--brand-yellow, #F8B126);
+  color: #121212;
   font-size: 0.72rem;
   font-weight: 700;
   padding: 2px 8px;
@@ -989,8 +994,8 @@ body {
 
 .mapped-box-overlay {
   position: absolute;
-  border: 2px solid #4f46e5;
-  background-color: rgba(79, 70, 229, 0.16);
+  border: 2px solid #3b82f6;
+  background-color: rgba(59, 130, 246, 0.14);
   border-radius: 3px;
   z-index: 10;
   display: flex;
@@ -1004,10 +1009,10 @@ body {
 }
 
 .mapped-box-overlay:hover {
-  background-color: rgba(79, 70, 229, 0.35);
-  border-color: #818cf8;
+  background-color: rgba(59, 130, 246, 0.3);
+  border-color: #60a5fa;
   z-index: 30;
-  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.4);
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.4);
 }
 
 .mapped-box-overlay.is-dragging {
@@ -1070,7 +1075,7 @@ body {
   pointer-events: none;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(79, 70, 229, 0.35);
+  border: 1px solid rgba(59, 130, 246, 0.35);
 }
 
 .box-value-text.align-left {
@@ -1092,14 +1097,16 @@ body {
 }
 
 .mapped-box-overlay.is-selected-active {
-  border-color: #f59e0b !important;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.5), 0 0 12px rgba(245, 158, 11, 0.3) !important;
+  border-color: var(--brand-yellow, #F8B126) !important;
+  box-shadow: 0 0 0 2px rgba(248, 177, 38, 0.6), 0 0 14px rgba(248, 177, 38, 0.35) !important;
   z-index: 40 !important;
 }
 
 .mapped-box-overlay.is-selected-active .box-header-badge {
-  background: linear-gradient(135deg, #d97706 0%, #b45309 100%) !important;
-  border-color: #fcd34d !important;
+  background: linear-gradient(135deg, #F8B126 0%, #FF6B00 100%) !important;
+  border-color: #F8B126 !important;
+  color: #121212 !important;
+  font-weight: 700 !important;
 }
 
 .mapped-box-overlay.is-image-box {
