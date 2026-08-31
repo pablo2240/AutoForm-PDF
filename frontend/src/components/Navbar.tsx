@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import type { TemplateInfo } from '../types';
+import logoIac from '../assets/logo_iac.png';
 import { 
   FileText, 
   Upload, 
@@ -9,7 +10,6 @@ import {
   ChevronRight, 
   RotateCcw,
   Building2,
-  FileCheck,
   Trash2,
   Zap,
   Sparkles
@@ -74,8 +74,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="navbar">
       <div className="navbar-brand">
-        <div className="logo-badge">
-          <FileCheck className="icon-main" />
+        <div className="logo-badge logo-iac-badge" title="IAC - Ingeniería Asistida Por Computador">
+          <img src={logoIac} alt="IAC" className="navbar-iac-logo" />
         </div>
         <div className="brand-text">
           <h1 className="app-title">AutoForm PDF</h1>
