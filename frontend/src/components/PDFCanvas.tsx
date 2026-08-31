@@ -355,6 +355,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
       const y0 = y0_pct * page.page_height_pts;
       const y1 = y1_pct * page.page_height_pts;
 
+      const isFreeText = selectedField === 'texto_libre';
       if (activeImage) {
         onAddBox(
           { x0, y0, x1, y1 },
@@ -362,6 +363,16 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
           {
             item_type: 'image',
             image_base64: activeImage.base64,
+          }
+        );
+      } else if (isFreeText) {
+        onAddBox(
+          { x0, y0, x1, y1 },
+          { x0_pct, y0_pct, x1_pct, y1_pct },
+          {
+            ...currentStyle,
+            item_type: 'text',
+            custom_text: 'Nuevo texto',
           }
         );
       } else {
@@ -398,9 +409,9 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
             <span>Dibujando área para: <strong>{activeImage.filename}</strong></span>
           </div>
         ) : selectedField ? (
-          <div className="active-field-indicator">
+          <div className={`active-field-indicator ${selectedField === 'texto_libre' ? 'text-mode-indicator' : ''}`}>
             <Crosshair size={14} className="animate-pulse" />
-            <span>Dibujando: <strong>{formatLabel(selectedField)}</strong></span>
+            <span>Dibujando: <strong>{selectedField === 'texto_libre' ? 'Texto Libre / Personalizado' : formatLabel(selectedField)}</strong></span>
           </div>
         ) : (
           <div className="active-field-indicator idle">
@@ -480,7 +491,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                     color: currentStyle.color || '#000000',
                   }}
                 >
-                  {String(companyData[selectedField || ''] || '')}
+                  {selectedField === 'texto_libre' ? 'Texto' : String(companyData[selectedField || ''] || '')}
                 </span>
               )}
             </div>

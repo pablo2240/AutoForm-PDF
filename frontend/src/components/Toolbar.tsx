@@ -21,6 +21,8 @@ interface ToolbarProps {
   selectedBoxLabel: string | null;
   selectedBoxText: string;
   onTextChange: (newText: string) => void;
+  onAddText: () => void;
+  isTextMode: boolean;
   onAddImage: (base64: string, filename: string) => void;
   isImageMode: boolean;
 }
@@ -47,6 +49,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   selectedBoxLabel,
   selectedBoxText,
   onTextChange,
+  onAddText,
+  isTextMode,
   onAddImage,
   isImageMode,
 }) => {
@@ -215,7 +219,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="toolbar-divider" />
 
-      {/* 7. Agregar Imagen / Firma */}
+      {/* 7. Añadir Texto Libre */}
+      <div className="toolbar-section">
+        <button 
+          type="button"
+          className={`btn-toolbar-action btn-toolbar-text ${isTextMode ? 'active-text-mode' : ''}`}
+          onClick={onAddText}
+          title="Añadir texto libre o personalizado en el documento"
+        >
+          <Type size={16} />
+          <span>{isTextMode ? 'Dibujando Texto...' : 'Añadir Texto'}</span>
+        </button>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      {/* 8. Agregar Imagen */}
       <div className="toolbar-section">
         <input 
           type="file" 
@@ -225,12 +244,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onChange={handleImageFile}
         />
         <button 
+          type="button"
           className={`btn-toolbar-action ${isImageMode ? 'active-image-mode' : ''}`}
           onClick={() => imageInputRef.current?.click()}
-          title="Subir imagen, firma o sello para estampar en el PDF"
+          title="Subir imagen para estampar en el PDF"
         >
           <ImageIcon size={16} />
-          <span>{isImageMode ? 'Estampando Imagen' : 'Agregar Imagen / Firma'}</span>
+          <span>{isImageMode ? 'Estampando Imagen...' : 'Agregar Imagen'}</span>
         </button>
       </div>
     </div>

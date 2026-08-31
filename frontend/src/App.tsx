@@ -298,11 +298,30 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleToggleAddText = () => {
+    if (selectedField === 'texto_libre') {
+      setSelectedField(null);
+      showToast('Modo texto desactivado', 'info');
+    } else {
+      setSelectedField('texto_libre');
+      setActiveImage(null);
+      setSelectedBoxId(null);
+      showToast('✏️ Modo Añadir Texto activo: Haz clic y dibuja un recuadro en el PDF', 'info');
+    }
+  };
+
   const handleAddBox = (box: BoxCoords, boxPct: BoxPct, customStyle?: ItemStyle) => {
     const isImage = customStyle?.item_type === 'image';
     const isGlobalSig = isImage && activeImage?.filename === (globalSignature?.filename || 'Firma Global');
-    const fieldKey = isGlobalSig ? 'firma_global' : (isImage ? 'firma_o_imagen' : (selectedField || 'campo_personalizado'));
-    const label = isGlobalSig ? '✍️ Firma Global' : (isImage ? (activeImage?.filename || 'Imagen / Firma') : (selectedField || 'Campo'));
+    const isFreeText = selectedField === 'texto_libre';
+    const fieldKey = isGlobalSig ? 'firma_global' : (isImage ? 'firma_o_imagen' : (isFreeText ? 'texto_personalizado' : (selectedField || 'campo_personalizado')));
+    const label = isGlobalSig ? '✍️ Firma Global' : (isImage ? (activeImage?.filename || 'Imagen') : (isFreeText ? 'Texto' : (selectedField || 'Campo')));
+
+    const finalStyle: ItemStyle = {
+      ...(customStyle || currentStyle),
+      item_type: isImage ? 'image' : 'text',
+      custom_text: isFreeText ? (customStyle?.custom_text || 'Nuevo texto') : customStyle?.custom_text,
+    };
 
     const newItem: MappingItem = {
       id: `box-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -311,7 +330,7 @@ export const App: React.FC = () => {
       page_number: currentPage,
       box,
       box_pct: boxPct,
-      style: customStyle || { ...currentStyle },
+      style: finalStyle,
     };
 
     setMappings((prev) => [...prev, newItem]);
@@ -320,6 +339,9 @@ export const App: React.FC = () => {
     if (activeImage) {
       showToast(`Estampado "${label}" colocado`, 'success');
       setActiveImage(null);
+    } else if (isFreeText) {
+      showToast('Texto añadido: edita su contenido en la barra superior', 'success');
+      setSelectedField(null);
     } else {
       showToast(`Campo "${fieldKey}" asignado`, 'success');
     }
@@ -571,7 +593,7 @@ export const App: React.FC = () => {
         isTemporarySession={isTemporarySession}
       />
 
-      {/* Secondary Toolbar (Font, Size, Bold, Color, Text Edit, Add Image) */}
+      {/* Secondary Toolbar (Font, Size, Bold, Color, Text Edit, Add Text, Add Image) */}
       <Toolbar 
         currentStyle={currentStyle}
         onStyleChange={handleStyleChange}
@@ -579,6 +601,8 @@ export const App: React.FC = () => {
         selectedBoxLabel={selectedBox ? (selectedBox.label || selectedBox.field_key) : null}
         selectedBoxText={selectedBoxText}
         onTextChange={handleTextChange}
+        onAddText={handleToggleAddText}
+        isTextMode={selectedField === 'texto_libre'}
         onAddImage={handleAddImage}
         isImageMode={!!activeImage}
       />
