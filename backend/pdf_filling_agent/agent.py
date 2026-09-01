@@ -77,10 +77,27 @@ class PDFAgent:
                  forms_dir: Optional[str] = None):
         
         # Determine provider: Azure OpenAI, OpenAI Standard, or OpenRouter
-        azure_key = api_key if (api_key and os.getenv("LLM_PROVIDER") == "azure") else os.getenv("AZURE_OPENAI_API_KEY")
-        azure_endpoint = base_url if (base_url and "azure" in (base_url or "").lower()) else os.getenv("AZURE_OPENAI_ENDPOINT")
-        azure_deployment = model or os.getenv("AZURE_OPENAI_DEPLOYMENT") or os.getenv("AZURE_OPENAI_MODEL")
-        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+        azure_key = (
+            api_key if (api_key and os.getenv("LLM_PROVIDER") == "azure")
+            else os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("AZURE_API_KEY")
+        )
+        azure_endpoint = (
+            base_url if (base_url and "azure" in (base_url or "").lower())
+            else os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("AZURE_ENDPOINT") or os.getenv("AZURE_OPENAI_BASE_URL") or os.getenv("AZURE_BASE_URL")
+        )
+        azure_deployment = (
+            model or 
+            os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME") or 
+            os.getenv("AZURE_OPENAI_DEPLOYMENT") or 
+            os.getenv("AZURE_OPENAI_MODEL") or 
+            os.getenv("AZURE_MODEL") or 
+            "gpt-4.1-mini"
+        )
+        azure_api_version = (
+            os.getenv("AZURE_OPENAI_API_VERSION") or 
+            os.getenv("AZURE_API_VERSION") or 
+            "2024-12-01-preview"
+        )
 
         is_azure = bool(
             azure_key or 
@@ -91,14 +108,17 @@ class PDFAgent:
         if is_azure and (azure_key or azure_endpoint):
             self.provider = "azure"
             self.api_key = azure_key or api_key
-            self.azure_endpoint = azure_endpoint or os.getenv("AZURE_OPENAI_ENDPOINT", "")
+            self.azure_endpoint = (azure_endpoint or "").strip()
             self.api_version = azure_api_version
-            self.model = azure_deployment or "gpt-4o"
+            self.model = azure_deployment
 
             if not self.api_key:
-                raise ValueError("Azure OpenAI API key not found. Please set AZURE_OPENAI_API_KEY in your environment or .env file.")
+                raise ValueError("Azure OpenAI API key not found. Please set AZURE_OPENAI_API_KEY in your .env file.")
             if not self.azure_endpoint:
-                raise ValueError("Azure OpenAI Endpoint not found. Please set AZURE_OPENAI_ENDPOINT in your environment or .env file.")
+                raise ValueError(
+                    "Azure OpenAI Endpoint no configurado. Por favor agrega AZURE_OPENAI_ENDPOINT en tu archivo .env "
+                    "(Ejemplo: AZURE_OPENAI_ENDPOINT=https://tu-recurso.openai.azure.com/)"
+                )
 
             self.client = AzureOpenAI(
                 azure_endpoint=self.azure_endpoint,
