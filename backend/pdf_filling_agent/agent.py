@@ -542,8 +542,8 @@ class PDFAgent:
             norm_left = self._normalize_label(item["left_text"])
             norm_above = self._normalize_label(item["above_text"])
             
-            # Exclusion rules: ignore foreign, counterparty, internal use, sucursal, or 'OTRA' / 'OTRO'
-            if any(ign in norm for ign in ["extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna", "sucursal", "nacionalidad", "nacimiento"]):
+            # Exclusion rules: ignore foreign, counterparty, internal use, sucursal, PEP, or 'OTRA' / 'OTRO'
+            if any(ign in norm for ign in ["extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna", "sucursal", "nacimiento", "pep", "politicamente expuesta", "expuesta politicamente", "persona expuesta"]):
                 continue
             if re.search(r'\b(otra|otro|otras|otros)\b', norm) and not any(k in norm for k in ["razon social", "representante legal"]):
                 continue
@@ -568,59 +568,85 @@ class PDFAgent:
                 elif ftype == "ComboBox":
                     val_to_set = "NIT"
             
-            # 4. Primer Apellido (Representante Legal)
+            # 4. Apellidos y Nombres / Nombres y Apellidos en una sola casilla
+            elif any(k in norm_left or k in norm_above for k in ["apellidos y nombres", "nombres y apellidos", "nombre y apellidos", "apellidos y nombre"]):
+                val_to_set = rep_full
+
+            # 5. Primer Apellido (Representante Legal)
             elif "primer apellido" in norm_left or "primer apellido" in norm_above:
                 val_to_set = primer_apellido
                 
-            # 5. Segundo Apellido (Representante Legal)
+            # 6. Segundo Apellido (Representante Legal)
             elif "segundo apellido" in norm_left or "segundo apellido" in norm_above:
                 val_to_set = segundo_apellido
                 
-            # 6. Nombres (Representante Legal)
+            # 7. Nombres (Representante Legal)
             elif "nombres" in norm_left or "nombres" in norm_above:
                 val_to_set = rep_nombre
                 
-            # 7. Representante Legal Full Name
+            # 8. Representante Legal Full Name
             elif "representante legal" in norm and ("nombre" in norm or "apellidos" in norm or "representante" in norm) and "p_rep_full" not in assigned_categories:
                 val_to_set = rep_full
                 assigned_categories.add("p_rep_full")
             
-            # 8. Cédula / Número ID
+            # 9. Cédula / Número ID
             elif (re.search(r'\b(numero id|nro id|no id|num id|numero de id|cedula|numero de documento|no documento)\b', norm_left) or re.search(r'\b(numero id|nro id|num id|numero de id|cedula)\b', norm_above)) and "tipo" not in norm_left and "tipo" not in norm_above:
                 val_to_set = profile.get("numero_cedula")
 
-            # 9. Document Type
+            # 10. Document Type
             elif re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', norm_left) or re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', norm_above):
                 if "empresa" in norm or "juridica" in norm:
                     val_to_set = "NIT"
                 else:
                     val_to_set = profile.get("tipo_documento", "C.C.")
             
-            # 10. Lugar Expedición
-            elif re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en)\b', norm_left) or re.search(r'\b(lugar de expedicion|lugar expedicion)\b', norm_above):
+            # 11. Lugar Expedición ('de' / 'De' tras cédula / expedida en)
+            elif (
+                re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en|ciudad de expedicion)\b', norm_left) or 
+                re.search(r'\b(lugar de expedicion|lugar expedicion)\b', norm_above) or
+                norm_left in ["de", "de:", "de :"] or norm_above in ["de", "de:", "de :"] or
+                norm_left.endswith(" de") or norm_above.endswith(" de")
+            ):
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
             
-            # 11. Dirección Domicilio Principal
+            # 12. Nacionalidad (Hace referencia al país: Colombiana)
+            elif re.search(r'\b(nacionalidad|nacionalidad 1|nacionalidad 2|pais de origen)\b', norm_left) or re.search(r'\b(nacionalidad|nacionalidad 1|nacionalidad 2|pais de origen)\b', norm_above):
+                val_to_set = profile.get("nacionalidad", "Colombiana")
+
+            # 13. Contacto Principal / Persona de Contacto
+            elif "contacto" in norm:
+                if any(k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
+                    val_to_set = profile.get("contacto_principal_nombre", rep_full)
+                elif "cargo" in norm:
+                    val_to_set = profile.get("contacto_cargo", "Representante Legal")
+                elif any(k in norm for k in ["celular", "movil"]):
+                    val_to_set = profile.get("celular_rep", "3104120217")
+                elif any(k in norm for k in ["telefono", "tel"]):
+                    val_to_set = profile.get("telefono", "2656868")
+                elif any(k in norm for k in ["correo", "email", "e mail"]):
+                    val_to_set = profile.get("correo_rep", "guillermo.canon@iaclatam.com")
+
+            # 14. Dirección Domicilio Principal
             elif (re.search(r'\b(direccion|domicilio|oficina principal direccion|direccion domicilio)\b', norm_left) or re.search(r'\b(direccion|domicilio)\b', norm_above)) and "p_dir" not in assigned_categories:
                 val_to_set = profile.get("direccion_principal")
                 assigned_categories.add("p_dir")
             
-            # 12. Ciudad
+            # 15. Ciudad
             elif (re.search(r'\b(ciudad|municipio)\b', norm_left) or re.search(r'\b(ciudad|municipio)\b', norm_above)) and "sucursal" not in norm and "expedicion" not in norm and "nacimiento" not in norm and "p_ciudad" not in assigned_categories:
                 val_to_set = profile.get("ciudad", "Medellin")
                 assigned_categories.add("p_ciudad")
             
-            # 13. Departamento
+            # 16. Departamento
             elif (re.search(r'\b(departamento|dpto)\b', norm_left) or re.search(r'\b(departamento|dpto)\b', norm_above)) and "p_dpto" not in assigned_categories:
                 val_to_set = profile.get("departamento", "Antioquia")
                 assigned_categories.add("p_dpto")
             
-            # 14. País
+            # 17. País
             elif (re.search(r'\b(pais|pais de domicilio)\b', norm_left) or re.search(r'\b(pais)\b', norm_above)) and "p_pais" not in assigned_categories:
                 val_to_set = profile.get("pais", "Colombia")
                 assigned_categories.add("p_pais")
             
-            # 15. Teléfono / Celular
+            # 18. Teléfono / Celular
             elif (re.search(r'\b(telefono celular|celular)\b', norm_left) or re.search(r'\b(telefono celular|celular)\b', norm_above)) and "p_cel" not in assigned_categories:
                 val_to_set = profile.get("celular_rep", profile.get("telefono"))
                 assigned_categories.add("p_cel")
@@ -628,16 +654,16 @@ class PDFAgent:
                 val_to_set = profile.get("telefono")
                 assigned_categories.add("p_tel")
             
-            # 16. Email / Correo
+            # 19. Email / Correo
             elif (re.search(r'\b(correo|e mail|email|correo electronico)\b', norm_left) or re.search(r'\b(correo|e mail|email)\b', norm_above)) and "p_email" not in assigned_categories:
                 val_to_set = profile.get("correo_rep")
                 assigned_categories.add("p_email")
             
-            # 17. Web
+            # 20. Web
             elif re.search(r'\b(pagina web|sitio web|web)\b', norm_left) or re.search(r'\b(pagina web|sitio web|web)\b', norm_above):
                 val_to_set = profile.get("pagina_web")
             
-            # 18. Banco / Cuenta
+            # 21. Banco / Cuenta
             elif re.search(r'\b(banco|entidad bancaria|entidad financiera)\b', norm_left) or re.search(r'\b(banco|entidad bancaria)\b', norm_above):
                 val_to_set = profile.get("entidad_bancaria")
             elif (re.search(r'\b(numero de cuenta|no cuenta|cuenta no)\b', norm_left) or re.search(r'\b(numero de cuenta|no cuenta)\b', norm_above)) and "tipo" not in norm:
@@ -645,7 +671,7 @@ class PDFAgent:
             elif re.search(r'\b(tipo de cuenta|tipo cuenta)\b', norm_left) or re.search(r'\b(tipo de cuenta|tipo cuenta)\b', norm_above):
                 val_to_set = profile.get("tipo_cuenta")
             
-            # 19. Tipo de empresa
+            # 22. Tipo de empresa
             elif re.search(r'\b(tipo de empresa)\b', norm_left) or re.search(r'\b(tipo de empresa)\b', norm_above):
                 val_to_set = "PRIVADA"
 
@@ -692,14 +718,18 @@ User Instructions:
 Assign the appropriate company profile values to matching fields.
 CRITICAL RULES:
 1. ONLY map fields that correspond to the company ({self.company_profile.get('razon_social', 'la empresa')}) or its main legal representative ({self.company_profile.get('representante_legal', 'el representante legal')}).
-2. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o subformularios repetitivos (ej. Fila1[0], Fila1[1], Fila1[2] o Subform[29], Subform[30], Subform[31]), llena ÚNICAMENTE la primera fila (índice 0 / Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
-3. NO DUPLICACIÓN: No coloques el mismo dato repetido en campos contiguos con finalidades distintas (ej. Sucursal no es Ciudad; Segundo Apellido no es Nombres; Nacionalidad no es Dirección).
-4. DO NOT fill sections for Foreigners ('Extranjeros'), Counterparties, or Internal entity use ('Uso exclusivo de la entidad').
-5. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
-6. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
-7. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
-8. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
-9. Return ONLY a valid JSON object mapping exact field IDs to string values.
+2. PERSONAS EXPUESTAS POLÍTICAMENTE (PEP): Ignora y NO respondas ni marques casillas en secciones como '6. PERSONA EXPUESTA POLÍTICAMENTE (PEP)', 'PEP', 'PEPs' o preguntas sobre PEP; déjalas totalmente vacías.
+3. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla o renglón, escribe el nombre completo: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'.
+4. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID', 'CÉDULA', llénalo con '{self.company_profile.get('numero_cedula', '98555384')}'. Si inmediatamente después hay una casilla que dice 'de' o 'De' (ej. No. ID: _____ de _____), pon el lugar de expedición: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')}'.
+5. NACIONALIDAD: Cuando un campo pida 'Nacionalidad', hace referencia al país y debe escribirse '{self.company_profile.get('nacionalidad', 'Colombiana')}'.
+6. CONTACTO PRINCIPAL: Cuando una sección solicite datos de 'Contacto Principal' o 'Persona de Contacto', llena los campos con los datos del contacto/representante (Nombre: {self.company_profile.get('representante_legal')}, Teléfono/Celular: {self.company_profile.get('celular_rep')}, Correo: {self.company_profile.get('correo_rep')}, Cargo: Representante Legal).
+7. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o subformularios repetitivos (ej. Fila1[0], Fila1[1], Fila1[2] o Subform[29], Subform[30], Subform[31]), llena ÚNICAMENTE la primera fila (índice 0 / Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
+8. NO DUPLICACIÓN: No coloques el mismo dato repetido en campos contiguos con finalidades distintas (ej. Sucursal no es Ciudad; Segundo Apellido no es Nombres).
+9. DO NOT fill sections for Foreigners ('Extranjeros'), Counterparties, or Internal entity use ('Uso exclusivo de la entidad').
+10. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+11. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
+12. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
+13. Return ONLY a valid JSON object mapping exact field IDs to string values.
 """
                 try:
                     raw_text = self._call_llm([
@@ -782,12 +812,16 @@ User Instructions for filling the form:
 
 Analyze each field label on this page using the synonyms dictionary from your system instructions.
 Strictly follow exclusion rules:
-1. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o bloques con varias filas repetidas (ej. socios, accionistas, referencias, junta directiva), llena ÚNICAMENTE la primera fila (Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
-2. NO DUPLICACIÓN: No repitas el mismo dato en casillas o etiquetas contiguas de la misma página.
-3. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
-4. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
-5. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
-6. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
+1. PERSONAS EXPUESTAS POLÍTICAMENTE (PEP): Ignora y NO respondas ni marques casillas en secciones como '6. PERSONA EXPUESTA POLÍTICAMENTE (PEP)', 'PEP', 'PEPs' o preguntas sobre PEP; déjalas totalmente vacías.
+2. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla o renglón, escribe el nombre completo: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'.
+3. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID', 'CÉDULA', llénalo con '{self.company_profile.get('numero_cedula', '98555384')}'. Si inmediatamente después hay una casilla que dice 'de' o 'De' (ej. No. ID: _____ de _____), pon el lugar de expedición: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')}'.
+4. NACIONALIDAD: Cuando un campo pida 'Nacionalidad', hace referencia al país y debe escribirse '{self.company_profile.get('nacionalidad', 'Colombiana')}'.
+5. CONTACTO PRINCIPAL: Cuando una sección solicite datos de 'Contacto Principal' o 'Persona de Contacto', llena los campos con los datos del contacto/representante (Nombre: {self.company_profile.get('representante_legal')}, Teléfono/Celular: {self.company_profile.get('celular_rep')}, Correo: {self.company_profile.get('correo_rep')}, Cargo: Representante Legal).
+6. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o bloques con varias filas repetidas (ej. socios, accionistas, referencias, junta directiva), llena ÚNICAMENTE la primera fila (Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
+7. NO DUPLICACIÓN: No repitas el mismo dato en casillas o etiquetas contiguas de la misma página.
+8. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
+9. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+10. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
 For each field to fill on PAGE {page_no}, provide:
 - "page": {page_no}
 - "rect": [x0, y0, x1, y1] bounding box where text should fit
@@ -881,12 +915,16 @@ User Instructions:
 
 Analyze the form image and identify where to place each requested piece of information.
 Match labels using the synonyms dictionary and strictly adhere to the exclusion rules from your system instructions:
-1. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o bloques con varias filas o líneas en blanco repetidas (ej. socios, accionistas, referencias, junta directiva), estampa ÚNICAMENTE en la primera fila (Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
-2. NO DUPLICACIÓN: No repitas el mismo dato en casillas contiguas de la misma página.
-3. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
-4. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
-5. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
-6. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
+1. PERSONAS EXPUESTAS POLÍTICAMENTE (PEP): Ignora y NO respondas ni marques casillas en secciones como '6. PERSONA EXPUESTA POLÍTICAMENTE (PEP)', 'PEP', 'PEPs' o preguntas sobre PEP; déjalas totalmente vacías.
+2. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla o renglón, escribe el nombre completo: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'.
+3. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID', 'CÉDULA', llénalo con '{self.company_profile.get('numero_cedula', '98555384')}'. Si inmediatamente después hay una casilla que dice 'de' o 'De' (ej. No. ID: _____ de _____), pon el lugar de expedición: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')}'.
+4. NACIONALIDAD: Cuando un campo pida 'Nacionalidad', hace referencia al país y debe escribirse '{self.company_profile.get('nacionalidad', 'Colombiana')}'.
+5. CONTACTO PRINCIPAL: Cuando una sección solicite datos de 'Contacto Principal' o 'Persona de Contacto', llena los campos con los datos del contacto/representante (Nombre: {self.company_profile.get('representante_legal')}, Teléfono/Celular: {self.company_profile.get('celular_rep')}, Correo: {self.company_profile.get('correo_rep')}, Cargo: Representante Legal).
+6. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o bloques con varias filas o líneas en blanco repetidas (ej. socios, accionistas, referencias, junta directiva), estampa ÚNICAMENTE en la primera fila (Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
+7. NO DUPLICACIÓN: No repitas el mismo dato en casillas contiguas de la misma página.
+8. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
+9. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+10. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
 For each field or checkbox to fill on THIS PAGE, provide:
 - "page": {page_no}
 - "rect_px": [x0, y0, x1, y1] in IMAGE PIXELS (top-left origin)
