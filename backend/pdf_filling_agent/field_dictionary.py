@@ -86,16 +86,51 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
         "Página Web", "Pagina Web", "Página Web / Sitio Web", "Sitio Web", 
         "URL / Portal Web", "Dirección Web", "Direccion Web", "Web", "Portal Web"
     ],
+    "dv": [
+        "dv", "DV", "D.V.", "Dígito de Verificación", "Digito de Verificacion", 
+        "Dígito Verificador", "Digito Verificador", "Dígito", "Digito"
+    ],
+    "tipo_empresa": [
+        "Tipo de Empresa", "Naturaleza Jurídica", "Naturaleza de la Empresa", 
+        "Tipo de Persona Jurídica", "Tipo de Entidad", "Clase de Empresa"
+    ],
+    "tipo_sociedad": [
+        "Tipo de Sociedad", "Forma Jurídica", "Tipo Societario", "Estructura Jurídica"
+    ],
+    "codigo_ciiu": [
+        "CIIU", "Código CIIU", "Codigo CIIU", "CIIU (Cod)", "Actividad Económica (CIIU)", 
+        "Actividad CIIU", "CIIU Principal", "Código de Actividad"
+    ],
+    "actividad_economica": [
+        "Actividad Económica", "Actividad Economica", "Objeto Social", "Actividad Principal", 
+        "Descripción de la Actividad", "Sector / Actividad"
+    ],
+    "origen_fondos": [
+        "Origen de Fondos", "Procedencia de Fondos", "Origen de los Recursos", 
+        "Procedencia de Recursos", "Fuente de Recursos", "Origen de Bienes / Fondos"
+    ],
+    "pais_origen_fondos": [
+        "País de Origen de Fondos", "Pais Origen Recursos", "País Origen de los Fondos"
+    ],
+    "gran_contribuyente": [
+        "Gran Contribuyente", "¿Es Gran Contribuyente?", "Calidad de Gran Contribuyente"
+    ],
+    "autorretenedor": [
+        "Autorretenedor", "¿Es Autorretenedor?", "Autorretenedor de Renta", "Resolución Autorretenedor"
+    ],
+    "responsable_iva": [
+        "Responsable de IVA", "¿Es Responsable de IVA?", "Régimen de IVA", "Régimen Común"
+    ],
     "entidad_bancaria": [
         "Banco", "Entidad Bancaria", "Entidad Bancaria / Financiera", "Nombre del Banco", 
-        "Institución Financiera", "Entidad Financiera"
+        "Institución Financiera", "Entidad Financiera", "Banco Principal"
     ],
     "numero_cuenta": [
         "Número de Cuenta", "Numero de Cuenta", "No. Cuenta / Cta. No.", "No. Cuenta", 
-        "Cuenta Bancaria No.", "Cuenta No.", "No. de Cuenta"
+        "Cuenta Bancaria No.", "Cuenta No.", "No. de Cuenta", "No. Cuenta Bancaria"
     ],
     "tipo_cuenta": [
-        "Tipo de Cuenta", "Tipo Cuenta", "Modalidad de Cuenta", "Tipo de Producto"
+        "Tipo de Cuenta", "Tipo Cuenta", "Modalidad de Cuenta", "Tipo de Producto", "Clase de Cuenta"
     ],
     "sucursal": [
         "Sucursal / Agencia", "Sucursal", "Sucursal del Banco", "Agencia"

@@ -186,7 +186,7 @@ class PDFAgent:
                 profile_path = os.path.join(base_dir, "company_profile.json")
 
         if os.path.exists(profile_path):
-            with open(profile_path, 'r', encoding='utf-8') as f:
+            with open(profile_path, 'r', encoding='utf-8-sig') as f:
                 profile = json.load(f)
             company_name = profile.get('razon_social') or profile.get('company_name', 'Unknown')
             print(f"[INFO] Loaded company profile: {company_name}")
