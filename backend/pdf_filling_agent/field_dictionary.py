@@ -109,18 +109,18 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
 IGNORE_RULES: List[str] = [
     "1. NO LLENAR SECCIONES PARA EXTRANJEROS: La empresa y el representante legal son colombianos (nacionales). Ignora tablas o casillas tituladas 'Persona Extranjera', 'No Residentes', 'Extranjero', 'Foreign Entity', 'Ciudadanos extranjeros'.",
     "2. NO LLENAR SECCIONES DE USO EXCLUSIVO DE LA ENTIDAD: Ignora cualquier sección con títulos como 'Espacio reservado para la entidad', 'Uso exclusivo de la empresa/banco', 'Aprobación interna', 'Para uso de la oficina', 'Firma y sello del funcionario'.",
-    "3. NO LLENAR SECCIONES PEP (PERSONA EXPUESTA POLÍTICAMENTE): Ignora y NO respondas ni marques casillas en secciones como '6. PERSONA EXPUESTA POLÍTICAMENTE (PEP)', 'PEP', 'PEPs', preguntas sobre si es PEP o tiene vínculos con PEP; déjalas totalmente vacías.",
-    "4. NO LLENAR DATOS DE LA CONTRAPARTE/CLIENTE: Si el formulario es de vinculación o registro, llena únicamente la sección de 'DATOS DEL SOLICITANTE / EMPRESA / TITULAR / PROVEEDOR'. No llenes datos del comprador o cliente si la casilla pertenece a la empresa que emitió el formulario.",
-    "5. NO LLENAR CONTACTOS COMERCIALES DE TERCEROS NO APLICABLES: Ignora campos como 'Datos de contacto sólo para proveedores' cuando sea una sección de terceros o referencias comerciales externas.",
-    "6. REPRESENTANTE LEGAL PRINCIPAL: La persona facultada y principal para firmar y representar a la empresa es Guillermo Humberto Cañón Sarria (C.C. 98555384 de Envigado). Completa siempre sus datos en los campos de Representante Legal.",
-    "7. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla o renglón, escribe el nombre completo: 'Guillermo Humberto Cañón Sarria'.",
-    "8. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID' o 'CÉDULA', llénalo con '98555384'. Si inmediatamente a continuación o al lado hay una casilla que dice 'de' o 'De' (ej. No. ID: _____ de _____), pon el lugar de expedición: 'Envigado'.",
-    "9. NACIONALIDAD: Cuando un campo pida 'Nacionalidad', hace referencia al país y debe escribirse 'Colombiana'.",
-    "10. CONTACTO PRINCIPAL: Cuando una sección solicite datos de 'Contacto Principal' o 'Persona de Contacto', llena los campos con los datos del contacto/representante (Nombre: Guillermo Humberto Cañón Sarria, Teléfono/Celular: 3104120217, Correo: guillermo.canon@iaclatam.com, Cargo: Representante Legal).",
-    "11. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o secciones con varias filas repetitivas (como socios/accionistas, miembros de junta directiva, cuentas bancarias adicionales, referencias comerciales o representantes suplentes), llena ÚNICAMENTE la primera fila (Fila 1). NO dupliques ni repitas los datos en la fila 2, 3, 4 ni siguientes.",
-    "12. CAMPOS 'OTRA' / 'OTRO': Si una casilla o etiqueta dice 'OTRA', 'OTRO', 'OTRAS', 'OTROS', NUNCA pongas datos y déjala completamente vacía.",
-    "13. OPCIONES MÚLTIPLES: Cuando se presenten bloques de opciones múltiples genéricas o encuestas de selección no específicas, ignóralas y no escribas nada.",
-    "14. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas (por ejemplo: 'Sucursal' debe dejarse vacía si ya se colocó la 'Ciudad'; 'Segundo Apellido' no debe colocarse en 'Nombres')."
+    "3. NO LLENAR SECCIONES PEP: Ignora y NO respondas nada en secciones '6. PERSONA EXPUESTA POLÍTICAMENTE (PEP)', 'PEP', preguntas sobre si es PEP; déjalas totalmente vacías.",
+    "4. NO LLENAR SECCIONES 'SÓLO PARA CLIENTES' NI 'SÓLO PARA VENDEDORES': Si la sección dice 'SÓLO PARA CLIENTES', 'DATOS DE CONTACTO SÓLO PARA CLIENTES', 'SÓLO PARA VENDEDORES' o similar, ignórala COMPLETAMENTE. No llenes ningún campo de esa sección aunque tengas los datos.",
+    "5. NO MEZCLAR NI DESPLAZAR VALORES ENTRE CAMPOS: Cada valor va EXACTAMENTE al campo que lo solicita. Nunca pongas 'Colombiana' en un campo de Teléfono ni 'Guillermo Humberto' en un campo de Nacionalidad. Si la etiqueta NO coincide exactamente con el tipo de dato, NO pongas nada.",
+    "6. REPRESENTANTE LEGAL PRINCIPAL: La persona facultada es Guillermo Humberto Cañón Sarria (C.C. 98555384 de Envigado). Completa sus datos en los campos de Representante Legal.",
+    "7. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla, escribe el nombre completo: 'Guillermo Humberto Cañón Sarria'.",
+    "8. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID' o 'CÉDULA', llénalo con '98555384'. Si al lado hay una casilla 'de' (ej. C.C. No. _____ de _____), pon: 'Envigado'.",
+    "9. NACIONALIDAD: Cuando un campo pida EXACTAMENTE 'Nacionalidad', escribe 'Colombiana'. No pongas 'Colombiana' en Teléfono ni en ningún otro campo.",
+    "10. CONTACTO PRINCIPAL (SOLO SI LA SECCIÓN NO ES EXCLUSIVA PARA CLIENTES): Cuando una sección solicite 'Contacto Principal', llena: Nombre: Guillermo Humberto Cañón Sarria, Celular: 3104120217, Correo: guillermo.canon@iaclatam.com, Cargo: Representante Legal.",
+    "11. TABLAS CON MÚLTIPLES FILAS: Llena ÚNICAMENTE la primera fila (Fila 1). Las filas 2, 3, 4, 5 deben quedar vacías.",
+    "12. CAMPOS 'OTRA' / 'OTRO': Dejar completamente vacíos.",
+    "13. OPCIONES MÚLTIPLES: Ignorar bloques de opciones múltiples genéricas.",
+    "14. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas."
 ]
 
 def get_dictionary_context() -> str:

@@ -541,10 +541,16 @@ class PDFAgent:
             norm = self._normalize_label(full_context)
             norm_left = self._normalize_label(item["left_text"])
             norm_above = self._normalize_label(item["above_text"])
-            
-            # Exclusion rules: ignore foreign, counterparty, internal use, sucursal, PEP, or 'OTRA' / 'OTRO'
+            norm_section = self._normalize_label(item["section"])
+
+            # --- EXCLUSION RULES ---
+            # A. Ignore PEP, foreign, internal-use, birth, OTRA/OTRO sections
             if any(ign in norm for ign in ["extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna", "sucursal", "nacimiento", "pep", "politicamente expuesta", "expuesta politicamente", "persona expuesta"]):
                 continue
+            # B. Ignore entire sections labeled "solo para clientes", "para clientes", "solo para vendedores", "para proveedores", "para uso del banco"
+            if any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "solo para proveedor", "para uso del banco", "para uso de la entidad", "uso del banco", "datos de contacto solo para"]):
+                continue
+            # C. Ignore OTRA/OTRO fields
             if re.search(r'\b(otra|otro|otras|otros)\b', norm) and not any(k in norm for k in ["razon social", "representante legal"]):
                 continue
 
@@ -609,16 +615,16 @@ class PDFAgent:
             ):
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
             
-            # 12. Nacionalidad (Hace referencia al país: Colombiana)
-            elif re.search(r'\b(nacionalidad|nacionalidad 1|nacionalidad 2|pais de origen)\b', norm_left) or re.search(r'\b(nacionalidad|nacionalidad 1|nacionalidad 2|pais de origen)\b', norm_above):
+            # 12. Nacionalidad (referencia al país: "Colombiana") — SOLO si la etiqueta dice explícitamente "nacionalidad"
+            elif re.search(r'\bnacionalidad\b', norm_left) or re.search(r'\bnacionalidad\b', norm_above):
                 val_to_set = profile.get("nacionalidad", "Colombiana")
 
-            # 13. Contacto Principal / Persona de Contacto
-            elif "contacto" in norm:
+            # 13. Contacto Principal / Persona de Contacto — SOLO si section NO es exclusiva para clientes
+            elif "contacto" in norm and not any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "solo para proveedor", "datos de contacto solo para"]):
                 if any(k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
-                    val_to_set = profile.get("contacto_principal_nombre", rep_full)
+                    val_to_set = profile.get("representante_legal", rep_full)
                 elif "cargo" in norm:
-                    val_to_set = profile.get("contacto_cargo", "Representante Legal")
+                    val_to_set = "Representante Legal"
                 elif any(k in norm for k in ["celular", "movil"]):
                     val_to_set = profile.get("celular_rep", "3104120217")
                 elif any(k in norm for k in ["telefono", "tel"]):
@@ -703,7 +709,10 @@ class PDFAgent:
         for pno, p_widgets in pages_dict.items():
             for i in range(0, len(p_widgets), chunk_size):
                 chunk = p_widgets[i:i + chunk_size]
-                fields_text = "\n".join([f"- ID: {f['field_name']} | Label: '{f['label']}' | Type: {f['field_type']}" for f in chunk])
+                fields_text = "\n".join([
+                    f"- ID: {f['field_name']} | Section: '{f['section'][:60]}' | Label: '{f['label']}' | Type: {f['field_type']}"
+                    for f in chunk
+                ])
                 
                 prompt = f"""
 Given the following interactive PDF form fields on Page {pno + 1}:
@@ -716,20 +725,18 @@ User Instructions:
 {user_instructions}
 
 Assign the appropriate company profile values to matching fields.
-CRITICAL RULES:
-1. ONLY map fields that correspond to the company ({self.company_profile.get('razon_social', 'la empresa')}) or its main legal representative ({self.company_profile.get('representante_legal', 'el representante legal')}).
-2. PERSONAS EXPUESTAS POLÍTICAMENTE (PEP): Ignora y NO respondas ni marques casillas en secciones como '6. PERSONA EXPUESTA POLÍTICAMENTE (PEP)', 'PEP', 'PEPs' o preguntas sobre PEP; déjalas totalmente vacías.
-3. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla o renglón, escribe el nombre completo: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'.
-4. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID', 'CÉDULA', llénalo con '{self.company_profile.get('numero_cedula', '98555384')}'. Si inmediatamente después hay una casilla que dice 'de' o 'De' (ej. No. ID: _____ de _____), pon el lugar de expedición: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')}'.
-5. NACIONALIDAD: Cuando un campo pida 'Nacionalidad', hace referencia al país y debe escribirse '{self.company_profile.get('nacionalidad', 'Colombiana')}'.
-6. CONTACTO PRINCIPAL: Cuando una sección solicite datos de 'Contacto Principal' o 'Persona de Contacto', llena los campos con los datos del contacto/representante (Nombre: {self.company_profile.get('representante_legal')}, Teléfono/Celular: {self.company_profile.get('celular_rep')}, Correo: {self.company_profile.get('correo_rep')}, Cargo: Representante Legal).
-7. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o subformularios repetitivos (ej. Fila1[0], Fila1[1], Fila1[2] o Subform[29], Subform[30], Subform[31]), llena ÚNICAMENTE la primera fila (índice 0 / Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
-8. NO DUPLICACIÓN: No coloques el mismo dato repetido en campos contiguos con finalidades distintas (ej. Sucursal no es Ciudad; Segundo Apellido no es Nombres).
-9. DO NOT fill sections for Foreigners ('Extranjeros'), Counterparties, or Internal entity use ('Uso exclusivo de la entidad').
-10. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
-11. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
-12. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
-13. Return ONLY a valid JSON object mapping exact field IDs to string values.
+CRITICAL RULES — READ CAREFULLY:
+1. SECTIONS 'SÓLO PARA CLIENTES' / 'SÓLO PARA VENDEDORES': If a section header contains 'SÓLO PARA CLIENTES', 'DATOS DE CONTACTO SÓLO PARA CLIENTES', 'SOLO PARA CLIENTES', 'SÓLO PARA VENDEDORES', or similar, DO NOT fill ANY field of that section. Leave all fields empty.
+2. PEP (PERSONA EXPUESTA POLÍTICAMENTE): Sections labeled 'PERSONA EXPUESTA POLÍTICAMENTE', 'PEP', 'PEPs' must be left completely empty. Do not respond, do not mark checkboxes.
+3. NO VALUE DISPLACEMENT — CRITICAL: Map each value ONLY to the field whose label EXACTLY matches the data type. DO NOT put 'Colombiana' into a Teléfono field. DO NOT put 'Guillermo Humberto' into a Nacionalidad field. Each field gets only the data that matches its label.
+4. APELLIDOS Y NOMBRES in a single field → write full name: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'.
+5. NÚMERO ID / CÉDULA → '{self.company_profile.get('numero_cedula', '98555384')}'. Adjacent 'de' field → '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')}'.
+6. NACIONALIDAD field (exactly) → 'Colombiana'. Not Teléfono, not Dirección.
+7. TABLAS — ONLY fill row index [0] (Fila1[0]). NEVER fill Fila1[1], Fila1[2] or any secondary rows.
+8. DO NOT fill: Foreigners, Counterparties, Internal entity use ('Uso exclusivo de la entidad').
+9. OTRA / OTRO fields → leave completely empty.
+10. CheckBoxes → '1' or 'Yes' when True, 'Off' when False.
+11. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
 """
                 try:
                     raw_text = self._call_llm([
