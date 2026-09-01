@@ -1123,7 +1123,38 @@ body {
 
 .mapped-box-overlay.is-image-box {
   border: 2px dashed #0284c7;
-  background-color: rgba(2, 132, 199, 0.12);
+  background-color: rgba(2, 132, 199, 0.08);
+  cursor: grab;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.mapped-box-overlay.is-image-box:active {
+  cursor: grabbing;
+}
+
+.mapped-box-overlay.is-image-box.is-selected-active {
+  border: 2.5px solid var(--brand-yellow, #F8B126) !important;
+  background-color: rgba(248, 177, 38, 0.12) !important;
+  box-shadow: 0 0 0 2px rgba(248, 177, 38, 0.5), 0 6px 16px rgba(0, 0, 0, 0.25) !important;
+}
+
+.box-dimension-indicator {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #121212;
+  color: #F8B126;
+  border: 1px solid rgba(248, 177, 38, 0.4);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 55;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  letter-spacing: 0.02em;
 }
 
 .mapped-box-image {
@@ -2813,58 +2844,83 @@ body {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
+/* Resize Handles for PDF Canvas */
 .canvas-resize-handle {
-  border-color: #f59e0b;
+  position: absolute;
+  width: 11px;
+  height: 11px;
   background-color: #ffffff;
+  border: 2px solid var(--brand-yellow, #F8B126);
+  border-radius: 50%;
+  z-index: 50;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.45);
+  transition: transform 0.12s ease, border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.canvas-resize-handle:hover {
+  transform: scale(1.4);
+  border-color: #FF6B00;
+  background-color: #fffbeb;
+}
+
+/* Pseudo-element for comfortable click/touch hitbox */
+.canvas-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  border-radius: 50%;
 }
 
 /* 4 Corners */
-.handle-nw {
-  top: -4px;
-  left: -4px;
+.canvas-resize-handle.handle-nw {
+  top: -6px;
+  left: -6px;
   cursor: nwse-resize;
 }
 
-.handle-ne {
-  top: -4px;
-  right: -4px;
+.canvas-resize-handle.handle-ne {
+  top: -6px;
+  right: -6px;
   cursor: nesw-resize;
 }
 
-.handle-se {
-  bottom: -4px;
-  right: -4px;
+.canvas-resize-handle.handle-se {
+  bottom: -6px;
+  right: -6px;
   cursor: nwse-resize;
 }
 
-.handle-sw {
-  bottom: -4px;
-  left: -4px;
+.canvas-resize-handle.handle-sw {
+  bottom: -6px;
+  left: -6px;
   cursor: nesw-resize;
 }
 
 /* 4 Edges */
-.handle-n {
-  top: -4px;
-  left: calc(50% - 4px);
+.canvas-resize-handle.handle-n {
+  top: -6px;
+  left: calc(50% - 6px);
   cursor: ns-resize;
 }
 
-.handle-s {
-  bottom: -4px;
-  left: calc(50% - 4px);
+.canvas-resize-handle.handle-s {
+  bottom: -6px;
+  left: calc(50% - 6px);
   cursor: ns-resize;
 }
 
-.handle-e {
-  top: calc(50% - 4px);
-  right: -4px;
+.canvas-resize-handle.handle-e {
+  top: calc(50% - 6px);
+  right: -6px;
   cursor: ew-resize;
 }
 
-.handle-w {
-  top: calc(50% - 4px);
-  left: -4px;
+.canvas-resize-handle.handle-w {
+  top: calc(50% - 6px);
+  left: -6px;
   cursor: ew-resize;
 }
 

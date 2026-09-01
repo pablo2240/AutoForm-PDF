@@ -343,48 +343,89 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
     const widthPx = maxX - minX;
     const heightPx = maxY - minY;
 
-    // Allow even small or narrow boxes (e.g. checkboxes, tight fields)
-    if (widthPx > 3 && heightPx > 3) {
-      const x0_pct = minX / imgWidth;
-      const x1_pct = maxX / imgWidth;
-      const y0_pct = minY / imgHeight;
-      const y1_pct = maxY / imgHeight;
+    const isFreeText = selectedField === 'texto_libre';
+    let x0: number, x1: number, y0: number, y1: number;
+    let x0_pct: number, x1_pct: number, y0_pct: number, y1_pct: number;
 
-      const x0 = x0_pct * page.page_width_pts;
-      const x1 = x1_pct * page.page_width_pts;
-      const y0 = y0_pct * page.page_height_pts;
-      const y1 = y1_pct * page.page_height_pts;
-
-      const isFreeText = selectedField === 'texto_libre';
+    // If user made a single click or tiny gesture (< 18px width or < 12px height), apply standard proportional default dimensions
+    if (widthPx < 18 || heightPx < 12) {
       if (activeImage) {
-        onAddBox(
-          { x0, y0, x1, y1 },
-          { x0_pct, y0_pct, x1_pct, y1_pct },
-          {
-            item_type: 'image',
-            image_base64: activeImage.base64,
-          }
-        );
+        // Natural signature / stamp proportions (e.g. ~170pt x 60pt)
+        const defaultWidthPts = Math.min(170, page.page_width_pts * 0.28);
+        const defaultHeightPts = Math.min(60, page.page_height_pts * 0.08);
+        const clickX_pts = (drawing.startX / imgWidth) * page.page_width_pts;
+        const clickY_pts = (drawing.startY / imgHeight) * page.page_height_pts;
+
+        x0 = Math.max(0, Math.min(page.page_width_pts - defaultWidthPts, clickX_pts - defaultWidthPts / 2));
+        y0 = Math.max(0, Math.min(page.page_height_pts - defaultHeightPts, clickY_pts - defaultHeightPts / 2));
+        x1 = x0 + defaultWidthPts;
+        y1 = y0 + defaultHeightPts;
       } else if (isFreeText) {
-        onAddBox(
-          { x0, y0, x1, y1 },
-          { x0_pct, y0_pct, x1_pct, y1_pct },
-          {
-            ...currentStyle,
-            item_type: 'text',
-            custom_text: 'Nuevo texto',
-          }
-        );
+        const defaultWidthPts = 140;
+        const defaultHeightPts = 22;
+        const clickX_pts = (drawing.startX / imgWidth) * page.page_width_pts;
+        const clickY_pts = (drawing.startY / imgHeight) * page.page_height_pts;
+
+        x0 = Math.max(0, Math.min(page.page_width_pts - defaultWidthPts, clickX_pts));
+        y0 = Math.max(0, Math.min(page.page_height_pts - defaultHeightPts, clickY_pts - 11));
+        x1 = x0 + defaultWidthPts;
+        y1 = y0 + defaultHeightPts;
       } else {
-        onAddBox(
-          { x0, y0, x1, y1 },
-          { x0_pct, y0_pct, x1_pct, y1_pct },
-          {
-            ...currentStyle,
-            item_type: 'text',
-          }
-        );
+        const defaultWidthPts = 130;
+        const defaultHeightPts = 18;
+        const clickX_pts = (drawing.startX / imgWidth) * page.page_width_pts;
+        const clickY_pts = (drawing.startY / imgHeight) * page.page_height_pts;
+
+        x0 = Math.max(0, Math.min(page.page_width_pts - defaultWidthPts, clickX_pts));
+        y0 = Math.max(0, Math.min(page.page_height_pts - defaultHeightPts, clickY_pts - 9));
+        x1 = x0 + defaultWidthPts;
+        y1 = y0 + defaultHeightPts;
       }
+
+      x0_pct = x0 / page.page_width_pts;
+      x1_pct = x1 / page.page_width_pts;
+      y0_pct = y0 / page.page_height_pts;
+      y1_pct = y1 / page.page_height_pts;
+    } else {
+      x0_pct = minX / imgWidth;
+      x1_pct = maxX / imgWidth;
+      y0_pct = minY / imgHeight;
+      y1_pct = maxY / imgHeight;
+
+      x0 = x0_pct * page.page_width_pts;
+      x1 = x1_pct * page.page_width_pts;
+      y0 = y0_pct * page.page_height_pts;
+      y1 = y1_pct * page.page_height_pts;
+    }
+
+    if (activeImage) {
+      onAddBox(
+        { x0, y0, x1, y1 },
+        { x0_pct, y0_pct, x1_pct, y1_pct },
+        {
+          item_type: 'image',
+          image_base64: activeImage.base64,
+        }
+      );
+    } else if (isFreeText) {
+      onAddBox(
+        { x0, y0, x1, y1 },
+        { x0_pct, y0_pct, x1_pct, y1_pct },
+        {
+          ...currentStyle,
+          item_type: 'text',
+          custom_text: 'Nuevo texto',
+        }
+      );
+    } else {
+      onAddBox(
+        { x0, y0, x1, y1 },
+        { x0_pct, y0_pct, x1_pct, y1_pct },
+        {
+          ...currentStyle,
+          item_type: 'text',
+        }
+      );
     }
 
     setDrawing(null);
@@ -633,6 +674,13 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
                       title="Redimensionar Izquierda"
                     />
                   </>
+                )}
+
+                {/* Selection Dimension Badge */}
+                {isSelected && !isBeingDragged && (
+                  <span className="box-dimension-indicator">
+                    {isImage ? '✍️ Firma / Imagen: ' : ''}{Math.round(item.box.x1 - item.box.x0)} × {Math.round(item.box.y1 - item.box.y0)} pt
+                  </span>
                 )}
               </div>
             );
