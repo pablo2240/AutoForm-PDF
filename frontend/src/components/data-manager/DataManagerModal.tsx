@@ -179,13 +179,12 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     return null;
   });
 
-  // Real-time synchronization helper
-  const syncAndPersist = (
+  // Helper to persist draft changes locally without closing modal or triggering global parent saves
+  const persistLocal = (
     nextCat: CategorizedCompanyData,
     nextProfiles: EmployerProfile[],
     nextSig: GlobalSignature | null
   ) => {
-    const flat = flattenToCompanyData(nextCat, nextProfiles, nextSig);
     localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(nextCat));
     localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(nextProfiles));
     if (nextSig) {
@@ -193,7 +192,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     } else {
       localStorage.removeItem(STORAGE_SIGNATURE_KEY);
     }
-    onSaveData(flat, nextProfiles, nextSig);
   };
 
   // Sync if initial data changes
@@ -243,7 +241,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         [field.category]: updatedList,
       };
 
-      syncAndPersist(next, profiles, signature);
+      persistLocal(next, profiles, signature);
       return next;
     });
   };
@@ -271,7 +269,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         ...prev,
         [category]: updatedList,
       };
-      syncAndPersist(next, profiles, signature);
+      persistLocal(next, profiles, signature);
       return next;
     });
   };
@@ -283,7 +281,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         ...prev,
         [category]: (prev[category] || []).filter(item => item.id !== id),
       };
-      syncAndPersist(next, profiles, signature);
+      persistLocal(next, profiles, signature);
       return next;
     });
   };
@@ -310,7 +308,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         updated = [...prev, newProf];
       }
 
-      syncAndPersist(categorizedCompany, updated, signature);
+      persistLocal(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -319,7 +317,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const handleUpdateProfile = (id: string, updatedProfile: EmployerProfile) => {
     setProfiles(prev => {
       const updated = prev.map(p => (p.id === id ? updatedProfile : p));
-      syncAndPersist(categorizedCompany, updated, signature);
+      persistLocal(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -328,25 +326,26 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const handleDeleteProfile = (id: string) => {
     setProfiles(prev => {
       const updated = prev.filter(p => p.id !== id);
-      syncAndPersist(categorizedCompany, updated, signature);
+      persistLocal(categorizedCompany, updated, signature);
       return updated;
     });
   };
 
-  // Save Signature
+  // Save Signature into local state (modal stays open for ongoing edits)
   const handleSaveSignature = (sig: GlobalSignature | null) => {
     setSignature(sig);
-    syncAndPersist(categorizedCompany, profiles, sig);
+    persistLocal(categorizedCompany, profiles, sig);
   };
 
-  // Save everything and sync
+  // Save everything to backend and apply to forms
   const handleFinalSaveAndClose = () => {
-    syncAndPersist(categorizedCompany, profiles, signature);
+    persistLocal(categorizedCompany, profiles, signature);
+    const flat = flattenToCompanyData(categorizedCompany, profiles, signature);
+    onSaveData(flat, profiles, signature);
     onClose();
   };
 
   const handleClose = () => {
-    syncAndPersist(categorizedCompany, profiles, signature);
     onClose();
   };
 
