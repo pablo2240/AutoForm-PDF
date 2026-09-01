@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Download, CheckCircle, FileText, ExternalLink, Trash2, Zap } from 'lucide-react';
+import { X, Download, CheckCircle, FileText, Zap } from 'lucide-react';
 import { getDownloadUrl } from '../api';
 
 interface ResultModalProps {
@@ -10,14 +10,12 @@ interface ResultModalProps {
     total_placed: number;
     is_temporary?: boolean;
   } | null;
-  onDownloadAndCleanup?: () => void;
 }
 
 export const ResultModal: React.FC<ResultModalProps> = ({
   isOpen,
   onClose,
   result,
-  onDownloadAndCleanup,
 }) => {
   if (!isOpen || !result) return null;
 
@@ -56,37 +54,13 @@ export const ResultModal: React.FC<ResultModalProps> = ({
           <div className="result-actions">
             <a 
               href={downloadUrl} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="btn btn-secondary btn-large"
-            >
-              <ExternalLink size={18} />
-              <span>Ver en Nueva Pestaña</span>
-            </a>
-
-            <a 
-              href={downloadUrl} 
               download={result.filename}
-              className="btn btn-primary btn-large"
+              className="btn btn-primary btn-large w-full"
             >
               <Download size={18} />
               <span>Descargar PDF Lleno</span>
             </a>
           </div>
-
-          {onDownloadAndCleanup && (
-            <div className="cleanup-action-box">
-              <button
-                type="button"
-                className="btn btn-outline-warning btn-large w-full"
-                onClick={onDownloadAndCleanup}
-                title="Descarga el PDF y elimina la plantilla temporal del servidor"
-              >
-                <Trash2 size={16} />
-                <span>⚡ Descargar y Limpiar Plantilla de la Sesión</span>
-              </button>
-            </div>
-          )}
         </div>
 
         <div className="modal-footer">
@@ -98,3 +72,4 @@ export const ResultModal: React.FC<ResultModalProps> = ({
     </div>
   );
 };
+

@@ -20,8 +20,7 @@ import {
   fetchTemplateMapping, 
   saveTemplateMapping, 
   generateFilledPdf,
-  aiFillPdf,
-  getDownloadUrl
+  aiFillPdf
 } from './api';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
@@ -511,25 +510,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleDownloadAndCleanup = async () => {
-    if (!resultModalData) return;
-    
-    // Trigger download
-    const url = getDownloadUrl(resultModalData.filename);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = resultModalData.filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    // If template is still active, clean it up
-    if (selectedTemplate) {
-      await executeDeleteTemplate(selectedTemplate);
-    }
-    setResultModalData(null);
-  };
-
   const handleSaveCompanyData = async (
     updatedData: CompanyData, 
     _profiles?: any, 
@@ -676,7 +656,6 @@ export const App: React.FC = () => {
         isOpen={!!resultModalData}
         onClose={() => setResultModalData(null)}
         result={resultModalData}
-        onDownloadAndCleanup={isTemporarySession || selectedTemplate ? handleDownloadAndCleanup : undefined}
       />
 
       {/* Custom Modern Confirmation Modal */}
