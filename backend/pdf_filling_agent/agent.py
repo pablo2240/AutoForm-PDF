@@ -16,7 +16,7 @@ import fitz
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -75,24 +75,65 @@ class PDFAgent:
                  knowledge_base: Optional[KnowledgeBase] = None,
                  company_profile_path: Optional[str] = None,
                  forms_dir: Optional[str] = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
         
-        # Configure endpoints for OpenAI or OpenRouter
-        if os.getenv("OPENAI_API_KEY"):
+        # Determine provider: Azure OpenAI, OpenAI Standard, or OpenRouter
+        azure_key = api_key if (api_key and os.getenv("LLM_PROVIDER") == "azure") else os.getenv("AZURE_OPENAI_API_KEY")
+        azure_endpoint = base_url if (base_url and "azure" in (base_url or "").lower()) else os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_deployment = model or os.getenv("AZURE_OPENAI_DEPLOYMENT") or os.getenv("AZURE_OPENAI_MODEL")
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+
+        is_azure = bool(
+            azure_key or 
+            os.getenv("LLM_PROVIDER") == "azure" or 
+            (azure_endpoint and not os.getenv("OPENROUTER_API_KEY") and not os.getenv("OPENAI_API_KEY"))
+        )
+
+        if is_azure and (azure_key or azure_endpoint):
+            self.provider = "azure"
+            self.api_key = azure_key or api_key
+            self.azure_endpoint = azure_endpoint or os.getenv("AZURE_OPENAI_ENDPOINT", "")
+            self.api_version = azure_api_version
+            self.model = azure_deployment or "gpt-4o"
+
+            if not self.api_key:
+                raise ValueError("Azure OpenAI API key not found. Please set AZURE_OPENAI_API_KEY in your environment or .env file.")
+            if not self.azure_endpoint:
+                raise ValueError("Azure OpenAI Endpoint not found. Please set AZURE_OPENAI_ENDPOINT in your environment or .env file.")
+
+            self.client = AzureOpenAI(
+                azure_endpoint=self.azure_endpoint,
+                api_key=self.api_key,
+                api_version=self.api_version
+            )
+            print(f"[INFO] Initialized Azure OpenAI Client (Endpoint: {self.azure_endpoint}, Deployment: {self.model}, API Version: {self.api_version})")
+
+        elif os.getenv("OPENAI_API_KEY"):
+            self.provider = "openai"
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
             self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-            self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
-        else:
+            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o")
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
+            print(f"[INFO] Initialized Standard OpenAI Client (Model: {self.model})")
+
+        elif os.getenv("OPENROUTER_API_KEY") or api_key:
+            self.provider = "openrouter"
+            self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
             self.base_url = base_url or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
             self.model = model or os.getenv("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
+            print(f"[INFO] Initialized OpenRouter Client (Model: {self.model})")
 
-
-        if not self.api_key:
-            raise ValueError("API key not found. Please set OPENAI_API_KEY or OPENROUTER_API_KEY in your environment or .env file.")
-
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
-        )
+        else:
+            raise ValueError(
+                "No LLM API keys found. Please configure AZURE_OPENAI_API_KEY & AZURE_OPENAI_ENDPOINT, "
+                "or OPENAI_API_KEY, or OPENROUTER_API_KEY in your environment or .env file."
+            )
 
         self.knowledge_base = knowledge_base or KnowledgeBase()
         self.pdf_processor = PDFProcessor()
