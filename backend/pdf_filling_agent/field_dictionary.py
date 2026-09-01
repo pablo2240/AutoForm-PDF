@@ -96,7 +96,9 @@ IGNORE_RULES: List[str] = [
     "5. REPRESENTANTE LEGAL PRINCIPAL: La persona facultada y principal para firmar y representar a la empresa es Guillermo Humberto Cañón Sarria (C.C. 98555384 de Envigado). Completa siempre sus datos en los campos de Representante Legal.",
     "6. CAMPOS 'OTRA' / 'OTRO': Si una casilla o etiqueta dice 'OTRA', 'OTRO', 'OTRAS', 'OTROS' (por ejemplo campos residuales 'Otra:', '¿Cuál?', 'Otras operaciones', etc.), NUNCA pongas datos y déjala completamente vacía.",
     "7. OPCIONES MÚLTIPLES: Cuando en los formularios se presenten grupos o bloques de opciones múltiples (listas para marcar múltiples alternativas, encuestas de opciones múltiples o bloques de selección no específicos), ignóralas y no escribas nada.",
-    "8. NÚMERO ID: Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID', 'NRO ID' o similar, debe llenarse con el número de Cédula de Ciudadanía del Representante Legal (98555384)."
+    "8. NÚMERO ID: Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID', 'NRO ID' o similar, debe llenarse con el número de Cédula de Ciudadanía del Representante Legal (98555384).",
+    "9. TABLAS CON MÚLTIPLES FILAS (SOLO LLENAR LA PRIMERA FILA): En tablas o secciones con varias filas o líneas en blanco repetitivas (como socios/accionistas, miembros de junta directiva, cuentas bancarias adicionales, referencias comerciales o representantes suplentes), llena ÚNICAMENTE la primera fila o primer renglón (Fila 1). NO dupliques ni repitas los datos de la empresa o representante en la fila 2, 3, 4 ni siguientes; déjalas totalmente vacías.",
+    "10. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas (por ejemplo: 'Sucursal' debe dejarse vacía si ya se colocó la 'Ciudad'; 'Segundo Apellido' no debe colocarse en 'Nombres'; 'Dirección' no debe colocarse en 'Nacionalidad' o 'Lugar de Nacimiento')."
 ]
 
 def get_dictionary_context() -> str:

@@ -439,10 +439,10 @@ class PDFAgent:
                 wr = w.rect
                 attr_label = getattr(w, 'field_label', '') or ''
                 
-                # Words to the left on the same horizontal line
-                left_words = [nw[4] for nw in sorted([wd for wd in words if abs(wd[1] - wr.y0) < 12 and wd[2] <= wr.x0 + 4 and (wr.x0 - wd[2]) < 220], key=lambda x: (x[1], x[0]))]
-                # Words immediately above the widget
-                above_words = [nw[4] for nw in sorted([wd for wd in words if 0 <= wr.y0 - wd[3] < 16 and (wd[0] >= wr.x0 - 40 and wd[2] <= wr.x1 + 40)], key=lambda x: (x[1], x[0]))]
+                # Words immediately above the widget strictly overlapping its column width
+                above_words = [nw[4] for nw in sorted([wd for wd in words if 0 <= wr.y0 - wd[3] < 14 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)], key=lambda x: (x[1], x[0]))]
+                # Words to the left on the same horizontal baseline band
+                left_words = [nw[4] for nw in sorted([wd for wd in words if abs(wd[1] - wr.y0) < 10 and wd[2] <= wr.x0 + 2 and (wr.x0 - wd[2]) < 130], key=lambda x: (x[1], x[0]))]
                 
                 left_str = " ".join(left_words)
                 above_str = " ".join(above_words)
@@ -492,103 +492,132 @@ class PDFAgent:
         segundo_apellido = rep_apellidos_split[1] if len(rep_apellidos_split) > 1 else ""
 
         mappings = {}
+        assigned_categories = set()
         
         for item in rich_widgets:
             fn = item["field_name"]
             ftype = item["field_type"]
             pno = item["page"]
+
+            # 1. SKIP RadioButtons / CheckBoxes in deterministic text matching
+            if ftype in ["RadioButton", "CheckBox", "Button"]:
+                continue
+
+            # 2. SKIP secondary table rows (Row index >= 1) - ONLY fill Row 1 [0]
+            row_match = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', fn, re.IGNORECASE)
+            if row_match and int(row_match.group(1)) > 0:
+                continue
+
             full_context = f"{item['attr_label']} {item['left_text']} {item['above_text']} {item['section']} {fn}".strip()
             norm = self._normalize_label(full_context)
+            norm_left = self._normalize_label(item["left_text"])
+            norm_above = self._normalize_label(item["above_text"])
             
-            # Exclusion rules: ignore foreign, counterparty, internal use, or 'OTRA' / 'OTRO'
-            if any(ign in norm for ign in ["extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna"]):
+            # Exclusion rules: ignore foreign, counterparty, internal use, sucursal, or 'OTRA' / 'OTRO'
+            if any(ign in norm for ign in ["extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna", "sucursal", "nacionalidad", "nacimiento"]):
                 continue
             if re.search(r'\b(otra|otro|otras|otros)\b', norm) and not any(k in norm for k in ["razon social", "representante legal"]):
                 continue
 
             val_to_set = None
             
-            # 1. Razón Social
-            if any(k in norm for k in ["razon social", "nombre empresa", "nombre o razon social", "denominacion social"]):
-                if "representante" not in norm and "intermediario" not in norm:
+            # 1. Razón Social (Assigned once to primary company name field)
+            if any(k in norm_left or k in norm_above for k in ["razon social", "nombre empresa", "nombre o razon social", "denominacion social"]):
+                if "representante" not in norm and "intermediario" not in norm and "p_razon_social" not in assigned_categories:
                     val_to_set = profile.get("razon_social")
+                    assigned_categories.add("p_razon_social")
             
             # 2. DV
-            elif re.search(r'\b(dv|digito verificacion|digito de verificacion)\b', norm):
+            elif re.search(r'\b(dv|digito verificacion|digito de verificacion)\b', norm_left) or re.search(r'\b(dv|digito verificacion|digito de verificacion)\b', norm_above):
                 val_to_set = nit_dv
             
             # 3. NIT / RUT
-            elif re.search(r'\b(nit|rut|identificacion tributaria)\b', norm) and "dv" not in norm:
-                if "tipo" not in norm:
+            elif (re.search(r'\b(nit|rut|identificacion tributaria)\b', norm_left) or re.search(r'\b(nit|rut|identificacion tributaria)\b', norm_above)) and "dv" not in norm_left and "dv" not in norm_above:
+                if "tipo" not in norm and "p_nit" not in assigned_categories:
                     val_to_set = nit_base or nit_val
+                    assigned_categories.add("p_nit")
                 elif ftype == "ComboBox":
                     val_to_set = "NIT"
             
-            # 4. Representante Legal Split & Full
-            elif "primer apellido" in norm and ("rep" in norm or "legal" in norm or "vinculacion" in norm or pno == 0):
+            # 4. Primer Apellido (Representante Legal)
+            elif "primer apellido" in norm_left or "primer apellido" in norm_above:
                 val_to_set = primer_apellido
-            elif "segundo apellido" in norm and ("rep" in norm or "legal" in norm or "vinculacion" in norm or pno == 0):
+                
+            # 5. Segundo Apellido (Representante Legal)
+            elif "segundo apellido" in norm_left or "segundo apellido" in norm_above:
                 val_to_set = segundo_apellido
-            elif "nombres" in norm and ("rep" in norm or "legal" in norm or "vinculacion" in norm or pno == 0):
+                
+            # 6. Nombres (Representante Legal)
+            elif "nombres" in norm_left or "nombres" in norm_above:
                 val_to_set = rep_nombre
-            elif "representante legal" in norm and ("nombre" in norm or "apellidos" in norm or "representante" in norm):
+                
+            # 7. Representante Legal Full Name
+            elif "representante legal" in norm and ("nombre" in norm or "apellidos" in norm or "representante" in norm) and "p_rep_full" not in assigned_categories:
                 val_to_set = rep_full
+                assigned_categories.add("p_rep_full")
             
-            # 5. Cédula / Número ID
-            elif (re.search(r'\b(numero id|nro id|no id|num id|numero de id|cedula|numero de documento|no documento)\b', norm) and ftype == "Text") or (re.search(r'\b(numero id|nro id|num id|numero de id|cedula)\b', norm) and "tipo" not in norm):
+            # 8. Cédula / Número ID
+            elif (re.search(r'\b(numero id|nro id|no id|num id|numero de id|cedula|numero de documento|no documento)\b', norm_left) or re.search(r'\b(numero id|nro id|num id|numero de id|cedula)\b', norm_above)) and "tipo" not in norm_left and "tipo" not in norm_above:
                 val_to_set = profile.get("numero_cedula")
 
-            # 6. Document Type
-            elif re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', norm):
+            # 9. Document Type
+            elif re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', norm_left) or re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', norm_above):
                 if "empresa" in norm or "juridica" in norm:
                     val_to_set = "NIT"
                 else:
                     val_to_set = profile.get("tipo_documento", "C.C.")
             
-            # 7. Lugar Expedición
-            elif re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en)\b', norm):
+            # 10. Lugar Expedición
+            elif re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en)\b', norm_left) or re.search(r'\b(lugar de expedicion|lugar expedicion)\b', norm_above):
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
             
-            # 8. Dirección
-            elif re.search(r'\b(direccion|domicilio|oficina principal direccion|direccion domicilio)\b', norm):
+            # 11. Dirección Domicilio Principal
+            elif (re.search(r'\b(direccion|domicilio|oficina principal direccion|direccion domicilio)\b', norm_left) or re.search(r'\b(direccion|domicilio)\b', norm_above)) and "p_dir" not in assigned_categories:
                 val_to_set = profile.get("direccion_principal")
+                assigned_categories.add("p_dir")
             
-            # 9. Ciudad
-            elif re.search(r'\b(ciudad|municipio)\b', norm) and "expedicion" not in norm and "nacimiento" not in norm:
+            # 12. Ciudad
+            elif (re.search(r'\b(ciudad|municipio)\b', norm_left) or re.search(r'\b(ciudad|municipio)\b', norm_above)) and "sucursal" not in norm and "expedicion" not in norm and "nacimiento" not in norm and "p_ciudad" not in assigned_categories:
                 val_to_set = profile.get("ciudad", "Medellin")
+                assigned_categories.add("p_ciudad")
             
-            # 10. Departamento
-            elif re.search(r'\b(departamento|dpto)\b', norm):
+            # 13. Departamento
+            elif (re.search(r'\b(departamento|dpto)\b', norm_left) or re.search(r'\b(departamento|dpto)\b', norm_above)) and "p_dpto" not in assigned_categories:
                 val_to_set = profile.get("departamento", "Antioquia")
+                assigned_categories.add("p_dpto")
             
-            # 11. País
-            elif re.search(r'\b(pais|pais de domicilio)\b', norm):
+            # 14. País
+            elif (re.search(r'\b(pais|pais de domicilio)\b', norm_left) or re.search(r'\b(pais)\b', norm_above)) and "p_pais" not in assigned_categories:
                 val_to_set = profile.get("pais", "Colombia")
+                assigned_categories.add("p_pais")
             
-            # 12. Teléfono / Celular
-            elif re.search(r'\b(telefono celular|celular)\b', norm):
+            # 15. Teléfono / Celular
+            elif (re.search(r'\b(telefono celular|celular)\b', norm_left) or re.search(r'\b(telefono celular|celular)\b', norm_above)) and "p_cel" not in assigned_categories:
                 val_to_set = profile.get("celular_rep", profile.get("telefono"))
-            elif re.search(r'\b(telefono|telefono fijo|tel)\b', norm):
+                assigned_categories.add("p_cel")
+            elif (re.search(r'\b(telefono|telefono fijo|tel)\b', norm_left) or re.search(r'\b(telefono|tel)\b', norm_above)) and "p_tel" not in assigned_categories:
                 val_to_set = profile.get("telefono")
+                assigned_categories.add("p_tel")
             
-            # 13. Email / Correo
-            elif re.search(r'\b(correo|e mail|email|correo electronico)\b', norm):
+            # 16. Email / Correo
+            elif (re.search(r'\b(correo|e mail|email|correo electronico)\b', norm_left) or re.search(r'\b(correo|e mail|email)\b', norm_above)) and "p_email" not in assigned_categories:
                 val_to_set = profile.get("correo_rep")
+                assigned_categories.add("p_email")
             
-            # 14. Web
-            elif re.search(r'\b(pagina web|sitio web|web)\b', norm):
+            # 17. Web
+            elif re.search(r'\b(pagina web|sitio web|web)\b', norm_left) or re.search(r'\b(pagina web|sitio web|web)\b', norm_above):
                 val_to_set = profile.get("pagina_web")
             
-            # 15. Banco / Cuenta
-            elif re.search(r'\b(banco|entidad bancaria|entidad financiera)\b', norm):
+            # 18. Banco / Cuenta
+            elif re.search(r'\b(banco|entidad bancaria|entidad financiera)\b', norm_left) or re.search(r'\b(banco|entidad bancaria)\b', norm_above):
                 val_to_set = profile.get("entidad_bancaria")
-            elif re.search(r'\b(numero de cuenta|no cuenta|cuenta no)\b', norm) and "tipo" not in norm:
+            elif (re.search(r'\b(numero de cuenta|no cuenta|cuenta no)\b', norm_left) or re.search(r'\b(numero de cuenta|no cuenta)\b', norm_above)) and "tipo" not in norm:
                 val_to_set = profile.get("numero_cuenta")
-            elif re.search(r'\b(tipo de cuenta|tipo cuenta)\b', norm):
+            elif re.search(r'\b(tipo de cuenta|tipo cuenta)\b', norm_left) or re.search(r'\b(tipo de cuenta|tipo cuenta)\b', norm_above):
                 val_to_set = profile.get("tipo_cuenta")
             
-            # 16. Tipo de empresa
-            elif re.search(r'\b(tipo de empresa)\b', norm):
+            # 19. Tipo de empresa
+            elif re.search(r'\b(tipo de empresa)\b', norm_left) or re.search(r'\b(tipo de empresa)\b', norm_above):
                 val_to_set = "PRIVADA"
 
             if val_to_set:
@@ -634,12 +663,14 @@ User Instructions:
 Assign the appropriate company profile values to matching fields.
 CRITICAL RULES:
 1. ONLY map fields that correspond to the company ({self.company_profile.get('razon_social', 'la empresa')}) or its main legal representative ({self.company_profile.get('representante_legal', 'el representante legal')}).
-2. DO NOT fill sections for Foreigners ('Extranjeros'), Counterparties, or Internal entity use ('Uso exclusivo de la entidad').
-3. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
-4. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
-5. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
-6. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
-7. Return ONLY a valid JSON object mapping exact field IDs to string values.
+2. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o subformularios repetitivos (ej. Fila1[0], Fila1[1], Fila1[2] o Subform[29], Subform[30], Subform[31]), llena ÚNICAMENTE la primera fila (índice 0 / Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
+3. NO DUPLICACIÓN: No coloques el mismo dato repetido en campos contiguos con finalidades distintas (ej. Sucursal no es Ciudad; Segundo Apellido no es Nombres; Nacionalidad no es Dirección).
+4. DO NOT fill sections for Foreigners ('Extranjeros'), Counterparties, or Internal entity use ('Uso exclusivo de la entidad').
+5. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
+6. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+7. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
+8. For CheckBoxes, use '1', 'Yes', or 'X' when True, or 'Off' when False.
+9. Return ONLY a valid JSON object mapping exact field IDs to string values.
 """
                 try:
                     raw_text = self._call_llm([
@@ -656,8 +687,16 @@ CRITICAL RULES:
                 except Exception as ex:
                     print(f"[WARN] AcroForm LLM chunk error on page {pno}: {ex}")
 
-        # Combine matches: deterministic matches take baseline, LLM adds complementary context
-        final_field_values = {**deterministic_matches, **llm_matches}
+        # Filter out secondary table rows from LLM matches to strictly avoid repetition
+        filtered_llm = {}
+        for k, v in llm_matches.items():
+            row_match = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', k, re.IGNORECASE)
+            if row_match and int(row_match.group(1)) > 0:
+                continue
+            filtered_llm[k] = v
+
+        # Combine matches: LLM adds complementary context, deterministic matches take authoritative baseline
+        final_field_values = {**filtered_llm, **deterministic_matches}
         print(f"[INFO] Total AcroForm field values mapped: {len(final_field_values)}")
         print(f"[INFO] Mapped field values: {final_field_values}")
 
@@ -714,10 +753,12 @@ User Instructions for filling the form:
 
 Analyze each field label on this page using the synonyms dictionary from your system instructions.
 Strictly follow exclusion rules:
-1. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
-2. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
-3. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
-4. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
+1. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o bloques con varias filas repetidas (ej. socios, accionistas, referencias, junta directiva), llena ÚNICAMENTE la primera fila (Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
+2. NO DUPLICACIÓN: No repitas el mismo dato en casillas o etiquetas contiguas de la misma página.
+3. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
+4. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
+5. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+6. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
 For each field to fill on PAGE {page_no}, provide:
 - "page": {page_no}
 - "rect": [x0, y0, x1, y1] bounding box where text should fit
@@ -810,7 +851,13 @@ User Instructions:
 {profile_context}
 
 Analyze the form image and identify where to place each requested piece of information.
-Match labels using the synonyms dictionary and strictly adhere to the exclusion rules from your system instructions.
+Match labels using the synonyms dictionary and strictly adhere to the exclusion rules from your system instructions:
+1. TABLAS CON MÚLTIPLES FILAS (SOLO PRIMERA FILA): En tablas o bloques con varias filas o líneas en blanco repetidas (ej. socios, accionistas, referencias, junta directiva), estampa ÚNICAMENTE en la primera fila (Fila 1). NUNCA repitas los datos en las filas 2, 3, 4 ni siguientes.
+2. NO DUPLICACIÓN: No repitas el mismo dato en casillas contiguas de la misma página.
+3. DO NOT fill sections for foreigners, counterparty, or exclusive use of the entity.
+4. NÚMERO ID: When 'NÚMERO ID', 'NUMERO ID', 'NO. ID', or 'NRO ID' is mentioned, fill with the Cédula number ({self.company_profile.get('numero_cedula')}).
+5. OTRA / OTRO: If a field or label mentions 'OTRA', 'OTRO', 'OTRAS', or 'OTROS', DO NOT put data (leave it completely empty).
+6. OPCIONES MÚLTIPLES: If a field or group represents multiple choice options ('opciones múltiples') or generic option lists, IGNORE and write nothing.
 For each field or checkbox to fill on THIS PAGE, provide:
 - "page": {page_no}
 - "rect_px": [x0, y0, x1, y1] in IMAGE PIXELS (top-left origin)
