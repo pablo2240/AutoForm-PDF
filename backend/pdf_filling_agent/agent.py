@@ -19,7 +19,12 @@ from dotenv import load_dotenv
 from openai import OpenAI, AzureOpenAI
 from pydantic import BaseModel, Field
 
-load_dotenv()
+PROJECT_ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+ENV_PATH = os.path.join(PROJECT_ROOT_DIR, ".env")
+if os.path.exists(ENV_PATH):
+    load_dotenv(dotenv_path=ENV_PATH, override=True)
+else:
+    load_dotenv(override=True)
 
 from .knowledge_base import KnowledgeBase
 from .pdf_processor import PDFProcessor
@@ -76,6 +81,10 @@ class PDFAgent:
                  company_profile_path: Optional[str] = None,
                  forms_dir: Optional[str] = None):
         
+        # Always reload environment from .env with explicit path
+        if os.path.exists(ENV_PATH):
+            load_dotenv(dotenv_path=ENV_PATH, override=True)
+
         # Determine provider: Azure OpenAI, OpenAI Standard, or OpenRouter
         azure_key = (
             api_key if (api_key and os.getenv("LLM_PROVIDER") == "azure")

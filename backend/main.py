@@ -13,6 +13,13 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from dotenv import load_dotenv
+env_file_path = os.path.join(PROJECT_ROOT, ".env")
+if os.path.exists(env_file_path):
+    load_dotenv(dotenv_path=env_file_path, override=True)
+else:
+    load_dotenv(override=True)
+
 from backend.pdf_filling_agent.visual_processor import VisualPDFProcessor, VisualPlacement
 
 app = FastAPI(title="AutoForm PDF API")
