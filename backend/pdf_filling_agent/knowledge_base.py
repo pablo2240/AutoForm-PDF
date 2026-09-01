@@ -41,12 +41,6 @@ Tu objetivo es diligenciar este formulario oficial (vinculación de clientes/pro
    - Filas secundarias (Fila 2, 3, 4, 5) en tablas de accionistas o referencias.
    - Casillas 'Otra', 'Otro' o listas genéricas de opciones múltiples.
 
-3. **ZONAS AMARILLAS (DECLARACIONES BINARIAS):**
-   - Tipo de Empresa: 'PRIVADA'.
-   - Gran Contribuyente: 'NO' | Autorretenedor: 'NO' | Responsable IVA: 'SI'.
-   - ¿Maneja recursos públicos?: 'NO' | ¿Es PEP?: 'NO' o dejar vacío.
-   - Origen de Fondos: 'Giro ordinario de las actividades comerciales y de servicios de ingeniería'.
-
 {get_dictionary_context()}
 """
 
