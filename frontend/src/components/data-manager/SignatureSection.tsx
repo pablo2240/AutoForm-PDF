@@ -17,6 +17,7 @@ import {
   Eraser,
   X
 } from 'lucide-react';
+import { UrlImageModal } from '../UrlImageModal';
 
 interface SignatureSectionProps {
   signature: GlobalSignature | null;
@@ -33,6 +34,7 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isDrawingMode, setIsDrawingMode] = useState<boolean>(false);
   const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
+  const [isUrlModalOpen, setIsUrlModalOpen] = useState<boolean>(false);
   
   // Position & Dimensions of signature object
   const [position, setPosition] = useState<{ x: number; y: number }>(() => 
@@ -164,7 +166,7 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
   const handleSaveDrawnSignature = () => {
     const canvas = drawCanvasRef.current;
     if (!canvas || !hasDrawnStrokes) {
-      alert('Por favor dibuja tu firma antes de guardar.');
+      showToast('Por favor dibuja tu firma antes de guardar.', 'info');
       return;
     }
 
@@ -188,7 +190,7 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
   // ----------------- FILE UPLOAD / DROP -----------------
   const processImageFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Por favor selecciona un archivo de imagen válido (PNG, JPG, WEBP, SVG).');
+      showToast('Por favor selecciona un archivo de imagen válido (PNG, JPG, WEBP, SVG).', 'info');
       return;
     }
 
@@ -341,7 +343,7 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
   // ----------------- MENU & ACTIONS -----------------
   const handleSaveCurrentSignature = () => {
     if (!signature) {
-      alert('No hay ninguna firma cargada para guardar.');
+      showToast('No hay ninguna firma cargada para guardar.', 'info');
       return;
     }
     onSaveSignature({
@@ -355,13 +357,11 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
   };
 
   const handleClearSignature = () => {
-    if (window.confirm('¿Estás seguro de que deseas limpiar y restablecer la firma actual?')) {
-      onSaveSignature(null);
-      setPosition({ x: 0, y: 0 });
-      setSize({ width: 160, height: 70 });
-      setIsMenuOpen(false);
-      showToast('Firma eliminada', 'info');
-    }
+    onSaveSignature(null);
+    setPosition({ x: 0, y: 0 });
+    setSize({ width: 160, height: 70 });
+    setIsMenuOpen(false);
+    showToast('Firma eliminada', 'info');
   };
 
   const handleResetPositionAndSize = () => {
@@ -377,22 +377,23 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
     showToast('Posición y tamaño restablecidos', 'info');
   };
 
-  const handleLoadFromUrl = () => {
-    const url = window.prompt('Pega la URL directa de la imagen de la firma:');
-    if (url && url.trim().startsWith('http')) {
-      const newSig: GlobalSignature = {
-        base64: url.trim(),
-        filename: 'firma_remota.png',
-        position: { x: 0, y: 0 },
-        size: { width: 160, height: 70 },
-        updatedAt: new Date().toISOString(),
-      };
-      setPosition({ x: 0, y: 0 });
-      setSize({ width: 160, height: 70 });
-      onSaveSignature(newSig);
-      setIsMenuOpen(false);
-      showToast('Firma cargada desde URL');
-    }
+  const handleOpenUrlModal = () => {
+    setIsUrlModalOpen(true);
+    setIsMenuOpen(false);
+  };
+
+  const handleConfirmUrl = (url: string) => {
+    const newSig: GlobalSignature = {
+      base64: url.trim(),
+      filename: 'firma_remota.png',
+      position: { x: 0, y: 0 },
+      size: { width: 170, height: 75 },
+      updatedAt: new Date().toISOString(),
+    };
+    setPosition({ x: 0, y: 0 });
+    setSize({ width: 170, height: 75 });
+    onSaveSignature(newSig);
+    showToast('Firma cargada exitosamente desde URL');
   };
 
   return (
@@ -474,7 +475,7 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
                 <button
                   type="button"
                   className="dropdown-menu-item"
-                  onClick={handleLoadFromUrl}
+                  onClick={handleOpenUrlModal}
                 >
                   <LinkIcon size={15} className="item-icon" />
                   <span>Cargar desde URL</span>
@@ -739,6 +740,18 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
                       <ImageIcon size={13} />
                       <span>Cargar Archivo</span>
                     </button>
+                    <button 
+                      type="button" 
+                      className="btn-select-file-mini"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenUrlModal();
+                      }}
+                      title="Cargar firma mediante enlace web o URL directa"
+                    >
+                      <LinkIcon size={13} />
+                      <span>Desde URL</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -784,6 +797,16 @@ export const SignatureSection: React.FC<SignatureSectionProps> = ({
           )}
         </div>
       )}
+
+      {/* URL Image Modal with Brand Design */}
+      <UrlImageModal
+        isOpen={isUrlModalOpen}
+        onClose={() => setIsUrlModalOpen(false)}
+        onConfirm={handleConfirmUrl}
+        title="Cargar Firma desde URL"
+        subtitle="Ingresa el enlace web directo a la imagen de tu firma o estampado (PNG, JPG, SVG o WEBP)."
+        confirmText="Cargar Firma"
+      />
     </div>
   );
 };
