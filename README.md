@@ -1,96 +1,113 @@
-# 📄 AutoForm PDF (SmartFormAI)
+<div align="center">
 
-**AutoForm PDF** es una solución web integral y modular diseñada para automatizar el llenado de formularios PDF planos (no interactivos) mediante un editor visual intuitivo (**WYSIWYG**), herramientas de formato tipográfico, estampado de firmas/imágenes y un gestor de datos basado en el patrón de **Revelación Progresiva (Progressive Disclosure)**.
+# 🤖 AutoForm PDF — SmartFormAI
 
----
+**Llenado inteligente de formularios PDF con IA · Editor Visual WYSIWYG · API FastAPI**
 
-## ✨ Características Principales
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![Azure OpenAI](https://img.shields.io/badge/Azure_OpenAI-GPT--4.1--mini-0078D4?logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/products/ai-services/openai-service)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-### 1. 🎨 Editor Visual (*Draw-to-Map*)
-* **Mapeo con el Ratón:** Selecciona cualquier variable y dibuja recuadros directamente sobre las celdas del documento.
-* **Arrastrar y Mover con Clic Derecho:** Reubica y ajusta la posición de cualquier recuadro arrastrándolo con el clic derecho.
-* **Barra de Formato Tipográfico:**
-  * **Fuentes Populares:** *Arial*, *Calibri*, *Helvetica*, *Times New Roman*.
-  * **Tamaño:** Selector con valores en puntos (`pt`) y botones de incremento/decremento (`+` / `-`).
-  * **Negrilla:** Interruptor para aplicar texto en negrita.
-  * **Color:** Paleta de colores preestablecidos (*Negro*, *Azul Oscuro*, *Azul Rey*, *Rojo*, *Verde*) y selector de color hexadecimal libre.
-  * **Edición Directa de Texto:** Modifica el texto en vivo de cualquier recuadro seleccionado.
-  * **Estampado de Firmas / Imágenes:** Sube cualquier firma, sello o logotipo en formato PNG/JPG y estampa su marco proporcional en el PDF.
-
-### 2. 🗂️ Gestor de Datos con Revelación Progresiva (2 Columnas)
-* **Columna Izquierda (Panel de Entrada):**
-  * **Dato Empresa:** Clasificación en 4 categorías (`🪪 ID`, `📍 Contacto`, `🏦 Banco`, `❓ Otros`) con sugerencias automáticas.
-  * **Perfil Empleador:** Ficha estructurada (Nombre, Apellido, Correo/Gmail, Celular) y campos personalizados ilimitados (clave/valor).
-* **Columna Derecha (Visualizador en Acordeón):**
-  * **Acordeón Empresa:** Pestañas internas para visualizar y gestionar cada categoría.
-  * **Acordeones de Perfiles:** Generación dinámica debajo del bloque de empresa con vista colapsable individual.
-
-### 3. ⚙️ Motor de Estampado de Alta Fidelidad
-* Renderizado de páginas PDF a imágenes de alta definición vía **PyMuPDF**.
-* Detección y emparejamiento automático de la fuente predominante del documento original.
-* Auto-ajuste de tamaño de texto para evitar desbordamiento de celdas.
+</div>
 
 ---
 
-## 🏛️ Estructura del Proyecto
+## 📌 ¿Qué es?
 
-```text
+**AutoForm PDF** es una solución web full-stack para automatizar el llenado de formularios PDF. Combina un **editor visual interactivo** (draw-to-map), un **gestor de datos empresariales** con revelación progresiva y un **agente de IA** (Azure OpenAI GPT-4.1-mini) que identifica inteligentemente qué campos llenar, con qué datos y qué secciones ignorar.
+
+---
+
+## ✨ Características
+
+### 🤖 Autollenado con IA
+- Agente CEO con perfil completo de la empresa y representante legal
+- Mapeo determinístico de +22 reglas antes de consultar al LLM
+- Exclusión automática de secciones: **PEP**, **Solo para Clientes**, **Uso exclusivo de la entidad**, **Extranjeros**
+- Prevención de desplazamiento de valores (Nacionalidad ≠ Teléfono)
+- Soporte para formularios AcroForm (interactivos) y PDFs planos
+
+### 🎨 Editor Visual WYSIWYG
+- **Draw-to-Map:** dibuja recuadros sobre celdas del PDF con el ratón
+- **Arrastrar con clic derecho** para reubicar elementos
+- **Barra de formato:** fuentes (Arial, Calibri, Helvetica, Times), tamaño `pt`, negrilla, color libre
+- **Estampado de firmas/imágenes:** sube PNG/JPG y posiciona en el documento
+
+### 🗂️ Gestor de Datos Empresariales
+- Panel de entrada clasificado en `🪪 ID`, `📍 Contacto`, `🏦 Banco`, `❓ Otros`
+- Perfil del representante legal con campos personalizados
+- Acordeón de visualización con revelación progresiva (2 columnas)
+
+### ⚙️ Motor de Estampado
+- Renderizado de alta definición vía **PyMuPDF**
+- Detección de fuente predominante del documento original
+- Auto-ajuste de tamaño para evitar desbordamiento de celdas
+
+---
+
+## 🏗️ Arquitectura
+
+```
 smartformai/
-├── backend/
-│   ├── data/                 # Almacenamiento local de perfiles y mapeos JSON
-│   ├── pdf_filling_agent/    # Motor de visión y procesamiento PDF (PyMuPDF + OpenCV)
-│   │   ├── cv_detector.py
-│   │   └── visual_processor.py
-│   └── main.py               # Servidor API FastAPI
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── data-manager/ # Interfaz modular de revelación progresiva
-│   │   │   │   ├── DataEntryPanel.tsx
-│   │   │   │   ├── DataAccordionViewer.tsx
-│   │   │   │   └── DataManagerModal.tsx
-│   │   │   ├── Navbar.tsx
-│   │   │   ├── Toolbar.tsx   # Barra de fuentes, colores, tamaños y firmas
-│   │   │   ├── Sidebar.tsx   # Listado de variables mapeables
-│   │   │   ├── PDFCanvas.tsx # Visor interactivo Draw-to-Map
-│   │   │   └── ResultModal.tsx
-│   │   ├── types.ts          # Modelos de datos TypeScript
-│   │   ├── api.ts            # Cliente HTTP
-│   │   └── App.tsx
-│   └── package.json
-├── input/                    # Plantillas PDF disponibles para mapear
-├── output/                   # Formularios PDF generados
-├── tests/                    # Pruebas de integración automatizadas
-├── run_demo.bat              # Script de inicio rápido (1 clic) para Windows
-├── run_demo.ps1              # Script de inicio rápido para PowerShell
-├── pyproject.toml            # Dependencias del Backend
-└── README.md
+├── 🐍 backend/
+│   ├── data/                       # Perfiles y mapeos JSON
+│   ├── pdf_filling_agent/
+│   │   ├── agent.py                # Motor IA: determinístico + LLM Azure OpenAI
+│   │   ├── field_dictionary.py     # Sinónimos de campos + reglas de exclusión
+│   │   ├── knowledge_base.py       # Contexto CEO / perfil empresa
+│   │   ├── visual_processor.py     # Overlay de texto en PDF plano
+│   │   └── pdf_processor.py        # AcroForm writer (PyMuPDF)
+│   └── main.py                     # API FastAPI (endpoints REST)
+│
+├── ⚛️ frontend/
+│   └── src/
+│       ├── components/
+│       │   ├── data-manager/       # Panel revelación progresiva
+│       │   ├── PDFCanvas.tsx       # Visor draw-to-map interactivo
+│       │   ├── Toolbar.tsx         # Barra de formato tipográfico
+│       │   ├── Sidebar.tsx         # Variables mapeables
+│       │   └── ResultModal.tsx     # Modal de descarga
+│       ├── api.ts                  # Cliente HTTP
+│       └── App.tsx
+│
+├── 📁 input/                       # Plantillas PDF de entrada
+├── 📁 output/                      # Formularios PDF generados
+├── 🧪 tests/                       # Pruebas de integración
+├── ▶️ run_demo.ps1                  # Inicio rápido PowerShell
+├── ▶️ run_demo.bat                  # Inicio rápido Windows (1 clic)
+└── pyproject.toml
 ```
 
 ---
 
-## 🚀 Inicio Rápido
+## 🚀 Inicio Rápido (Local)
 
-### Opción 1: Ejecución con 1 Clic (Recomendado)
-Haz doble clic sobre el archivo:
-```bash
+### ▶️ Opción 1 — 1 Clic (Windows)
+
+```
 run_demo.bat
 ```
-*(O ejecuta `.\run_demo.ps1` en PowerShell).*
+*O en PowerShell:*
+```powershell
+.\run_demo.ps1
+```
 
-Abre tu navegador en: **`http://localhost:5173`**
+Abre: **`http://localhost:5173`**
 
 ---
 
-### Opción 2: Ejecución Manual
+### 🔧 Opción 2 — Manual
 
-#### 1. Backend (FastAPI)
+**Backend (FastAPI)**
 ```powershell
-# En la raíz del proyecto
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-#### 2. Frontend (React + Vite)
+**Frontend (React + Vite)**
 ```powershell
 cd frontend
 npm install
@@ -99,9 +116,44 @@ npm run dev
 
 ---
 
-## 🧪 Pruebas Automatizadas
+### 🔑 Variables de Entorno
 
-Para validar que todos los endpoints y el motor de estampado funcionan correctamente:
+Crea un archivo `.env` en la raíz del proyecto:
+
+```env
+AZURE_OPENAI_ENDPOINT=https://tu-recurso.openai.azure.com/
+AZURE_OPENAI_API_KEY=tu_clave_aqui
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4.1-mini
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+```
+
+---
+
+## ☁️ Despliegue en Render
+
+> **No se necesita Docker.** Render soporta Python y Static Sites de forma nativa.
+
+### 1️⃣ Backend — Web Service
+
+| Campo | Valor |
+|---|---|
+| Runtime | Python 3 |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
+
+Agrega las 4 variables de entorno de Azure OpenAI en el panel de Render.
+
+### 2️⃣ Frontend — Static Site
+
+| Campo | Valor |
+|---|---|
+| Root Directory | `frontend` |
+| Build Command | `npm install && npm run build` |
+| Publish Directory | `dist` |
+
+---
+
+## 🧪 Pruebas
 
 ```powershell
 .\.venv\Scripts\python.exe tests/test_backend_api.py
@@ -109,6 +161,18 @@ Para validar que todos los endpoints y el motor de estampado funcionan correctam
 
 ---
 
+## 🛠️ Stack Tecnológico
+
+| Capa | Tecnología |
+|---|---|
+| 🧠 IA | Azure OpenAI GPT-4.1-mini |
+| 🐍 Backend | FastAPI + Uvicorn + PyMuPDF |
+| ⚛️ Frontend | React 19 + TypeScript + Vite |
+| 📄 PDF Engine | PyMuPDF (fitz) + OpenCV |
+| 🎨 UI Icons | Lucide React |
+
+---
+
 ## 📄 Licencia
 
-Distribuido bajo la Licencia MIT.
+Distribuido bajo la [Licencia MIT](LICENSE).
