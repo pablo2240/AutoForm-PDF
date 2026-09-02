@@ -116,7 +116,7 @@ def get_company_data():
         with open(path, "w", encoding="utf-8") as f:
             json.dump(default_data, f, indent=2)
         return default_data
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 @app.post("/api/company-data")
@@ -229,7 +229,7 @@ def get_mapping(template_id: str):
     path = os.path.join(DATA_DIR, f"{template_id}_mapping.json")
     if not os.path.exists(path):
         return {"template_id": template_id, "page_width": 0, "page_height": 0, "mappings": []}
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 @app.post("/api/generate")
