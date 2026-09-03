@@ -130,7 +130,7 @@ def test_type_guard_accepts_valid_nationality(validator):
         label="Nacionalidad",
         section="1.2 DATOS REPRESENTANTE LEGAL",
         field_name="txt_nacionalidad",
-        proposed_value="Colombiana"
+        proposed_value="Colombia"
     )
     assert res.is_valid
 
@@ -151,3 +151,41 @@ def test_type_guard_rejects_date_in_non_date_field(validator):
         proposed_value="1985-03-21"
     )
     assert not res.is_valid
+
+def test_negative_zone_rejects_nacionalidad_2(validator):
+    res = validator.validate(
+        label="Nacionalidad 2",
+        section="1.2 DATOS REPRESENTANTE LEGAL",
+        field_name="txt_nacionalidad_2",
+        proposed_value="Colombia"
+    )
+    assert not res.is_valid
+    assert "Negative Zone" in res.reason
+
+def test_negative_zone_rejects_doble_nacionalidad(validator):
+    res = validator.validate(
+        label="Segunda Nacionalidad",
+        section="1.2 DATOS REPRESENTANTE LEGAL",
+        field_name="txt_otra_nacionalidad",
+        proposed_value="Colombia"
+    )
+    assert not res.is_valid
+    assert "Negative Zone" in res.reason
+
+def test_green_zone_allows_proveedores_contact(validator):
+    res = validator.validate(
+        label="Nombre del contacto comercial",
+        section="3. DATOS DE CONTACTO SÓLO PARA PROVEEDORES",
+        field_name="contacto_proveedor",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res.is_valid
+
+def test_type_guard_accepts_colombia_as_nationality_value(validator):
+    res = validator.validate(
+        label="Nacionalidad 1",
+        section="1.2 DATOS REPRESENTANTE LEGAL",
+        field_name="txt_nacionalidad_1",
+        proposed_value="Colombia"
+    )
+    assert res.is_valid

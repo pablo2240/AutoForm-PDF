@@ -23,9 +23,9 @@ class FillingValidator:
         # Bank / Entity internal use
         "uso exclusivo", "espacio reservado", "aprobacion interna", "para uso de la entidad",
         "para uso del banco", "uso del banco", "para uso de la oficina", "firma y sello del funcionario",
-        # Counterparty / Customer-only
-        "solo para clientes", "sólo para clientes", "para clientes", "datos de contacto solo para",
-        "solo para vendedores", "solo para proveedor", "solo clientes",
+        # Counterparty / Customer-only (NOTE: 'SOLO PARA PROVEEDORES' is a GREEN ZONE when filling as a provider)
+        "solo para clientes", "sólo para clientes", "para clientes", "datos de contacto solo para clientes",
+        "solo para vendedores", "solo clientes",
         # Spouses / secondary family
         "conyuge", "compañero permanente", "datos familiares",
         # International operations / foreign debt
@@ -33,7 +33,9 @@ class FillingValidator:
         "moneda extranjera", "transacciones en moneda extranjera", "extranjero", "foreign",
         # Fund origin declarations
         "origen de fondos", "origen de recursos", "declaracion de origen",
-        "declaración de origen", "actividad economica secundaria", "actividades secundarias"
+        "declaración de origen", "actividad economica secundaria", "actividades secundarias",
+        # Secondary nationality
+        "nacionalidad 2", "segunda nacionalidad", "doble nacionalidad"
     ]
 
     NEGATIVE_FIELD_KEYWORDS = [
@@ -158,10 +160,10 @@ class FillingValidator:
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: Country value '{val_str}' cannot be assigned to phone/contact field '{norm_label}'"
                 )
-            if not any(k in norm_label for k in ["pais", "nacion", "republica", "origen", "domicilio"]):
+            if not any(k in norm_label for k in ["pais", "nacion", "republica", "origen", "domicilio", "nacionalidad"]):
                 return ValidationResult(
                     is_valid=False,
-                    reason=f"Tier 3 Type-Aware Guard: Country value '{val_str}' requires country label, found '{norm_label}'"
+                    reason=f"Tier 3 Type-Aware Guard: Country value '{val_str}' requires country or nationality label, found '{norm_label}'"
                 )
 
         # 3.3 Nationality values (e.g., 'Colombiana') strictly to nationality fields

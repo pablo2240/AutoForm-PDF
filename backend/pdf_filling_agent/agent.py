@@ -558,8 +558,17 @@ class PDFAgent:
 
             val_to_set = None
             
+            # Declarative In-line Sequence ("Yo, ...", "El suscrito ...")
+            if any(dec in norm_left for dec in ["yo ", "yo,", "el suscrito", "la suscrita"]):
+                val_to_set = rep_full
+            elif (
+                (re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_left) or re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_above))
+                and ("razon social" in norm_left or "razon social" in norm_above)
+            ):
+                # Compound: 'NOMBRES Y APELLIDOS / RAZÓN SOCIAL' -> Prioritize Legal Representative
+                val_to_set = rep_full
             # 1. Razón Social (Assigned once to primary company name field)
-            if any(k in norm_left or k in norm_above for k in ["razon social", "nombre empresa", "nombre o razon social", "denominacion social"]):
+            elif any(k in norm_left or k in norm_above for k in ["razon social", "nombre empresa", "nombre o razon social", "denominacion social"]):
                 if "representante" not in norm and "intermediario" not in norm and "p_razon_social" not in assigned_categories:
                     val_to_set = profile.get("razon_social")
                     assigned_categories.add("p_razon_social")
@@ -617,9 +626,9 @@ class PDFAgent:
             ):
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
             
-            # 12. Nacionalidad (referencia al país: "Colombiana") — SOLO si la etiqueta dice explícitamente "nacionalidad"
+            # 12. Nacionalidad (referencia al país: "Colombia", NO "Colombiana") — SOLO si la etiqueta dice explícitamente "nacionalidad"
             elif re.search(r'\bnacionalidad\b', norm_left) or re.search(r'\bnacionalidad\b', norm_above):
-                val_to_set = profile.get("nacionalidad", "Colombiana")
+                val_to_set = profile.get("pais", "Colombia")
 
             # 13. Contacto Principal / Persona de Contacto — SOLO si section NO es exclusiva para clientes
             elif "contacto" in norm and not any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "solo para proveedor", "datos de contacto solo para"]):
@@ -738,17 +747,31 @@ User Instructions:
 
 Assign the appropriate company profile values to matching fields.
 CRITICAL RULES — READ CAREFULLY:
-1. SECTIONS 'SÓLO PARA CLIENTES' / 'SÓLO PARA VENDEDORES': If a section header contains 'SÓLO PARA CLIENTES', 'DATOS DE CONTACTO SÓLO PARA CLIENTES', 'SOLO PARA CLIENTES', 'SÓLO PARA VENDEDORES', or similar, DO NOT fill ANY field of that section. Leave all fields empty.
-2. PEP (PERSONA EXPUESTA POLÍTICAMENTE): Sections labeled 'PERSONA EXPUESTA POLÍTICAMENTE', 'PEP', 'PEPs' must be left completely empty. Do not respond, do not mark checkboxes.
-3. NO VALUE DISPLACEMENT — CRITICAL: Map each value ONLY to the field whose label EXACTLY matches the data type. DO NOT put 'Colombiana' into a Teléfono field. DO NOT put 'Guillermo Humberto' into a Nacionalidad field. Each field gets only the data that matches its label.
-4. APELLIDOS Y NOMBRES in a single field → write full name: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'.
-5. NÚMERO ID / CÉDULA → '{self.company_profile.get('numero_cedula', '98555384')}'. Adjacent 'de' field → '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')}'.
-6. NACIONALIDAD field (exactly) → 'Colombiana'. Not Teléfono, not Dirección.
-7. TABLAS — ONLY fill row index [0] (Fila1[0]). NEVER fill Fila1[1], Fila1[2] or any secondary rows.
-8. DO NOT fill: Foreigners, Counterparties, Internal entity use ('Uso exclusivo de la entidad').
-9. OTRA / OTRO fields → leave completely empty.
-10. CheckBoxes → '1' or 'Yes' when True, 'Off' when False.
-11. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
+1. GREEN ZONES WHITELIST (MANDATORY HIGH-COVERAGE): Ensure 100% field coverage in:
+   - 'INFORMACIÓN GENERAL' / 'DATOS BÁSICOS' / 'DATOS BÁSICOS DEL SOLICITANTE'
+   - 'DATOS REPRESENTANTE LEGAL' / '2.1 Representante Legal'
+   - 'INFORMACIÓN BÁSICA DE LA PERSONA JURÍDICA'
+   - '3. DATOS DE CONTACTO SÓLO PARA PROVEEDORES' (This section MUST be filled when acting as a provider/vendor)
+   - 'SOCIOS Y/O ACCIONISTAS' / 'ACCIONISTAS CON PARTICIPACIÓN' / 'Beneficiarios Finales' (fill ONLY row index [0])
+   - 'Firma del Representante Legal'
+   Do NOT skip any valid fields in these sections (NIT, Email, Phone, Cédula, Nombres, Razón Social).
+2. SECTIONS 'SÓLO PARA CLIENTES' / 'SÓLO PARA VENDEDORES': If a section header contains 'SÓLO PARA CLIENTES', 'DATOS DE CONTACTO SÓLO PARA CLIENTES', 'SOLO PARA CLIENTES', or 'SÓLO PARA VENDEDORES', DO NOT fill ANY field of that section. Leave all fields empty.
+3. PEP (PERSONA EXPUESTA POLÍTICAMENTE): Sections labeled 'PERSONA EXPUESTA POLÍTICAMENTE', 'PEP', 'PEPs' must be left completely empty. Do not respond, do not mark checkboxes.
+4. DECLARATIVE IN-LINE SEQUENCES ("Yo, ______ identificado con ______ No. ______ de ______"):
+   - Name blank: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'
+   - Doc Type blank: 'C.C.'
+   - Number blank: '{self.company_profile.get('numero_cedula', '98555384')}'
+   - Expedition blank ('de'): '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')}'
+5. COMPOUND LABELS:
+   - If the label contains 'Nombres y Apellidos' (e.g. 'NOMBRES Y APELLIDOS / RAZÓN SOCIAL'), prioritize Legal Representative: '{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'.
+   - If strictly 'Razón Social' or 'Nombre o Razón Social', use: '{self.company_profile.get('razon_social')}'.
+6. NO VALUE DISPLACEMENT — CRITICAL: Map each value ONLY to the field whose label EXACTLY matches the data type. DO NOT put 'Colombia' into a Teléfono field. Each field gets only the data that matches its label.
+7. NACIONALIDAD: Field label 'Nacionalidad' or 'Nacionalidad 1' → write exactly 'Colombia'. If there is a 'Nacionalidad 2' or secondary nationality, leave it completely empty.
+8. TABLAS — ONLY fill row index [0] (Fila1[0]). NEVER fill Fila1[1], Fila1[2] or any secondary rows.
+9. DO NOT fill: Foreigners, Counterparties, Internal entity use ('Uso exclusivo de la entidad'), Fund Origins ('Origen de fondos').
+10. OTRA / OTRO fields → leave completely empty.
+11. CheckBoxes → '1' or 'Yes' when True, 'Off' when False.
+12. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
 """
                 try:
                     raw_text = self._call_llm([

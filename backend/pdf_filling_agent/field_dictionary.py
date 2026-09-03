@@ -115,12 +115,13 @@ IGNORE_RULES: List[str] = [
     "6. REPRESENTANTE LEGAL PRINCIPAL: La persona facultada es Guillermo Humberto Cañón Sarria (C.C. 98555384 de Envigado). Completa sus datos en los campos de Representante Legal.",
     "7. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla, escribe el nombre completo: 'Guillermo Humberto Cañón Sarria'.",
     "8. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID' o 'CÉDULA', llénalo con '98555384'. Si al lado hay una casilla 'de' (ej. C.C. No. _____ de _____), pon: 'Envigado'.",
-    "9. NACIONALIDAD: Cuando un campo pida EXACTAMENTE 'Nacionalidad', escribe 'Colombiana'. No pongas 'Colombiana' en Teléfono ni en ningún otro campo.",
+    "9. NACIONALIDAD: Cuando un campo pida EXACTAMENTE 'Nacionalidad' o 'Nacionalidad 1', escribe 'Colombia'. No pongas 'Colombiana', ni fecha, ni expedición. Si hay 'Nacionalidad 2' o campo de segunda nacionalidad, déjala completamente vacía.",
     "10. CONTACTO PRINCIPAL (SOLO SI LA SECCIÓN NO ES EXCLUSIVA PARA CLIENTES): Cuando una sección solicite 'Contacto Principal', llena: Nombre: Guillermo Humberto Cañón Sarria, Celular: 3104120217, Correo: guillermo.canon@iaclatam.com, Cargo: Representante Legal.",
     "11. TABLAS CON MÚLTIPLES FILAS: Llena ÚNICAMENTE la primera fila (Fila 1). Las filas 2, 3, 4, 5 deben quedar vacías.",
     "12. CAMPOS 'OTRA' / 'OTRO': Dejar completamente vacíos.",
     "13. OPCIONES MÚLTIPLES: Ignorar bloques de opciones múltiples genéricas.",
-    "14. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas."
+    "14. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas.",
+    "15. DOBLE NACIONALIDAD / NACIONALIDAD 2: Solo se reporta la nacionalidad principal ('Colombia'). Cualquier campo de segunda nacionalidad debe quedar vacío."
 ]
 
 def get_dictionary_context() -> str:
