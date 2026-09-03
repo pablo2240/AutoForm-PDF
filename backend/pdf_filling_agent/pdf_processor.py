@@ -36,14 +36,12 @@ class PDFProcessor:
                     if val is None:
                         continue
                     try:
-                        if widget.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
+                        if widget.field_type in [fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON]:
                             if str(val).lower() in ["true", "1", "yes", "si", "x", "on"]:
-                                widget.field_value = "1"
-                            else:
-                                widget.field_value = "Off"
-                        elif widget.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON:
-                            if str(val).lower() in ["true", "1", "yes", "si", "x", "on"]:
-                                widget.field_value = "1"
+                                states = getattr(widget, 'button_states', lambda: {})()
+                                normal_states = states.get('normal', []) if isinstance(states, dict) else []
+                                on_state = next((s for s in normal_states if s != "Off"), "On")
+                                widget.field_value = on_state
                             else:
                                 widget.field_value = "Off"
                         else:

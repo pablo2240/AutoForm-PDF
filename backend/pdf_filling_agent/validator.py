@@ -18,24 +18,33 @@ class FillingValidator:
     """
 
     NEGATIVE_ZONE_PHRASES = [
-        # PEP
+        # PEP and PEP Annexes
         "pep", "politicamente expuesta", "expuesta politicamente", "persona expuesta",
+        "conocimiento mejorado de personas expuestas", "conocimiento mejorado",
+        "identificacion de vinculados a personas expuestas", "vinculados a personas expuestas",
+        "anexo 1", "anexo 2",
+        # Conocimiento ampliado de accionistas / beneficiarios indirectos
+        "conocimiento ampliado", "conocimiento ampliado de accionistas", "anexo 3",
         # Bank / Entity internal use
         "uso exclusivo", "espacio reservado", "aprobacion interna", "para uso de la entidad",
         "para uso del banco", "uso del banco", "para uso de la oficina", "firma y sello del funcionario",
         # Counterparty / Customer-only (NOTE: 'SOLO PARA PROVEEDORES' is a GREEN ZONE when filling as a provider)
         "solo para clientes", "sólo para clientes", "para clientes", "datos de contacto solo para clientes",
-        "solo para vendedores", "solo clientes",
+        "solo para vendedores", "solo clientes", "anexos obligatorios clientes", "anexo obligatorio clientes",
         # Spouses / secondary family
         "conyuge", "compañero permanente", "datos familiares",
         # International operations / foreign debt
         "operaciones internacionales", "endeudamiento externo", "cuentas en el exterior",
         "moneda extranjera", "transacciones en moneda extranjera", "extranjero", "foreign",
+        # Transport / fleet (when not transport company)
+        "relacion de vehiculos", "plan de mantenimiento vehicular",
+        # Consorcios
+        "consorcios o uniones temporales", "consorcio", "union temporal",
         # Fund origin declarations
         "origen de fondos", "origen de recursos", "declaracion de origen",
         "declaración de origen", "actividad economica secundaria", "actividades secundarias",
-        # Secondary nationality
-        "nacionalidad 2", "segunda nacionalidad", "doble nacionalidad"
+        # Secondary nationality (do not match simple field_name 'Nacionalidad_2' which is legal rep nationality)
+        "segunda nacionalidad", "doble nacionalidad"
     ]
 
     NEGATIVE_FIELD_KEYWORDS = [
