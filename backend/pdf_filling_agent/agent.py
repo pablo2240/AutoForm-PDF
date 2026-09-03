@@ -572,9 +572,13 @@ class PDFAgent:
             val_to_set = None
             assigned_cat = None
             
-            # Declarative In-line Sequence ("Yo, ...", "El suscrito ...")
-            if any(dec in norm_left for dec in ["yo ", "yo,", "el suscrito", "la suscrita"]):
+            # Declarative In-line Sequence ("Yo, ...", "El suscrito ...", "obrando en representación de", etc.)
+            if norm_left in ["yo", "yo,"] or any(dec in norm_left for dec in ["yo ", "yo,", "el suscrito", "la suscrita"]):
                 val_to_set = rep_full
+            elif "representacion de" in norm_left or "nombre propio o en" in norm_left:
+                val_to_set = profile.get("razon_social")
+            elif "emitida en" in norm_left or norm_left.startswith("en la ciudad de"):
+                val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
             elif (
                 (re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_left) or re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_above))
                 and ("razon social" in norm_left or "razon social" in norm_above)
@@ -601,7 +605,7 @@ class PDFAgent:
                     assigned_cat = "p_razon_social"
 
             # 4. Apellidos y Nombres / Nombres y Apellidos en una sola casilla
-            elif any(k in eval_target for k in ["apellidos y nombres", "nombres y apellidos", "nombre y apellidos", "apellidos y nombre"]):
+            elif any(k in eval_target for k in ["apellidos y nombres", "nombres y apellidos", "nombre y apellidos", "apellidos y nombre", "nombre completo"]):
                 val_to_set = rep_full
 
             # 5. Primer Apellido (Representante Legal)
@@ -622,7 +626,16 @@ class PDFAgent:
                 assigned_cat = "p_rep_full"
             
             # 9. Cédula / Número ID
-            elif (re.search(r'\b(numero id|nro id|no id|num id|numero de id|cedula|numero de documento|no documento)\b', eval_target)) and "tipo" not in eval_target:
+            elif (
+                (
+                    re.search(r'\b(numero\s+id|nro\s+id|no\s+id|num\s+id|numero\s+de\s+id|cedula|numero\s+de\s+documento|no\s+documento|no\s+identificacion)\b', eval_target) or 
+                    (eval_target.endswith(" no") and "res" not in eval_target and "municipio" not in eval_target and not eval_target.endswith(" no no"))
+                )
+                and "tipo" not in eval_target
+                and "res" not in eval_target
+                and "resolucion" not in eval_target
+                and "municipio" not in eval_target
+            ):
                 val_to_set = profile.get("numero_cedula")
 
             # 10. Document Type
@@ -634,9 +647,14 @@ class PDFAgent:
             
             # 11. Lugar Expedición ('de' / 'De' tras cédula / expedida en)
             elif (
-                re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en|ciudad de expedicion)\b', eval_target) or 
-                norm_left in ["de", "de:", "de :"] or
-                norm_left.endswith(" de")
+                (
+                    re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en|ciudad de expedicion)\b', eval_target) or 
+                    norm_left in ["de", "de:", "de :", "identificacion: de", "identificacion de"] or
+                    norm_left.endswith(" de")
+                )
+                and "res" not in norm_left
+                and "resolucion" not in norm_left
+                and not any(phrase in norm for phrase in ["confirmacion certificados de calidad", "certificados de calidad"])
             ):
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
             
@@ -822,20 +840,22 @@ CRITICAL RULES — READ CAREFULLY:
             else:
                 print(f"[INFO] LLM match rejected for '{k}' ('{v}'): {v_res.reason}")
 
-        # Prepare proposal tuples for collision resolution: (field_name, label, category, value, score)
+        # Prepare proposal tuples for collision resolution: (field_name, label, category, value, score, section)
         proposals = []
         for k, v in deterministic_matches.items():
             meta = widget_meta_map.get(k, {})
             lbl = meta.get("label", k)
+            sec = meta.get("section", "")
             cat, score, _ = self.validator.score_field(lbl, k, FIELD_SYNONYMS)
-            proposals.append((k, lbl, cat, v, max(score, 0.95)))
+            proposals.append((k, lbl, cat, v, max(score, 0.95), sec))
 
         for k, v in filtered_llm.items():
             if k not in deterministic_matches:
                 meta = widget_meta_map.get(k, {})
                 lbl = meta.get("label", k)
+                sec = meta.get("section", "")
                 cat, score, _ = self.validator.score_field(lbl, k, FIELD_SYNONYMS)
-                proposals.append((k, lbl, cat, v, score))
+                proposals.append((k, lbl, cat, v, score, sec))
 
         # Resolve collisions across competing fields using ADR-0003 Max-Score Arbitration
         final_field_values = self.validator.resolve_collisions(proposals, self.company_profile)

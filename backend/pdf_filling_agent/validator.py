@@ -290,13 +290,13 @@ class FillingValidator:
 
     def resolve_collisions(
         self,
-        proposals: List[Tuple[str, str, str, str, float]],
+        proposals: list,
         profile: dict
     ) -> dict:
         """
-        ADR-0003 Max-Score Collision Arbitration:
-        proposals: List of (field_name, label, category, proposed_value, score)
-        Resolves contention where multiple fields compete for the same profile category.
+        ADR-0003 & ADR-0005 Max-Score Collision Arbitration:
+        proposals: List of (field_name, label, category, proposed_value, score[, section])
+        Resolves contention where multiple fields compete for the same profile category within the same section.
         The highest score wins primary. Evicted fields receive secondary or are left empty.
         Logs COLLISION_NO_SECONDARY when evicted field has no secondary.
         """
@@ -312,21 +312,28 @@ class FillingValidator:
             "pais": None
         }
 
-        # Group proposals by category
+        # Group proposals by category (scoped to section when provided per ADR-0005)
         by_category = {}
-        for fn, lbl, cat, val, score in proposals:
-            by_category.setdefault(cat, []).append((fn, lbl, val, score))
+        for prop in proposals:
+            if len(prop) >= 6:
+                fn, lbl, cat, val, score, sec = prop[:6]
+                group_key = (cat, self._normalize(sec)[:40]) if sec else cat
+            else:
+                fn, lbl, cat, val, score = prop[:5]
+                group_key = cat
+
+            by_category.setdefault(group_key, []).append((fn, lbl, val, score, cat))
 
         resolved = {}
 
-        for cat, items in by_category.items():
+        for group_key, items in by_category.items():
             # Sort items by score descending
             items.sort(key=lambda x: x[3], reverse=True)
-            winner_fn, winner_lbl, winner_val, winner_score = items[0]
+            winner_fn, winner_lbl, winner_val, winner_score, cat = items[0]
             resolved[winner_fn] = winner_val
 
             # Process evicted candidates
-            for evicted_fn, evicted_lbl, evicted_val, evicted_score in items[1:]:
+            for evicted_fn, evicted_lbl, evicted_val, evicted_score, _ in items[1:]:
                 sec_key = SECONDARY_MAP.get(cat)
                 sec_val = profile.get(sec_key) if sec_key else None
 
