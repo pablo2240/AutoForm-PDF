@@ -16,13 +16,16 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Elastic Ribbon Toolbar**: Formatting bar with an auto-constrained text input (`min-width: 140px; max-width: 320px`) and non-destructive horizontal smooth scrolling, guaranteeing permanent access to media tools ("Agregar Imagen", "Añadir Texto").
 - **Smart Action Collapse**: Priority navbar breakpoint behavior (`<= 1280px`) collapsing secondary actions ("Datos Empresa", "Guardar Mapeo", "Limpiar") to compact icon buttons, guaranteeing that the primary conversion action ("Generar PDF") remains fully expanded and visible.
 
-### Validation & Protective Barriers
+### Validation, Protection & Audit Reporting (ADR-0001, ADR-0002, ADR-0005)
 - **`FillingValidator`**: The centralized three-tier verification engine that inspects every proposed field value before writing to any document format.
 - **Negative Zones (Lista Negra Canónica)**: Mandatory non-fillable regions (PEP, Bank/Entity internal use, Customer-only, Spouses/secondary beneficiaries, International ops/debt, Fund origin declaration, Nacionalidad 2 / doble nacionalidad).
 - **Green Zones Whitelist**: Canonical priority sections (`INFORMACIÓN GENERAL`, `DATOS BÁSICOS`, `REPRESENTANTE LEGAL`, `CONTACTO SÓLO PARA PROVEEDORES`, `SOCIOS/ACCIONISTAS` [fila 0], `Firma`) where field coverage is strictly enforced with zero omitted values.
 - **Single-Row Enforcement**: Structural constraint restricting multi-row grid forms to index 0 (Row 1 only) to eliminate duplication.
 - **Type-Aware Guard**: Post-match semantic verification barrier that maps values to strict data types (`phone`, `email`, `nit`, `cedula`, `country`, `nationality`, `person_name`, `date`, `text`) and rejects assignments to conflicting destination labels.
 - **Value Displacement**: Anti-pattern where values leak into adjacent or wrongly mapped fields (e.g., placing Nationality into Phone). Eradicated by the Type-Aware Guard.
+- **Local-First Label Hierarchy**: Evaluation order prioritizing native widget labels and inline `left_text` over `above_text`, eliminating cross-row header contamination.
+- **Per-Section Multi-Occurrence `(category, section)`**: Granular category uniqueness allowing required identifiers (e.g., NIT, email) to populate both Company Info and Contact sections without mutual blocking.
+- **`UNFILLED_FIELDS_AUDIT`**: Structured audit report generated per filling run, detailing count of filled fields, policy-blocked fields (Negative Zones), and unfilled candidates needing `company_data.json` enrichment.
 - **Declarative In-line Sequence**: Pattern for inline authorization paragraphs (`"Yo, [Nombre]... identificado con [Tipo] No. [Cédula] de [Expedición]"`), mapped sequentially without skipping fields.
 - **Compound Label Priority**: Resolution strategy for merged labels: if containing `"Nombres y Apellidos"`, prioritize the Legal Representative; if strictly `"Razón Social"`, prioritize the Company Name.
 
