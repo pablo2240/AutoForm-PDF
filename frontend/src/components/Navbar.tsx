@@ -137,7 +137,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="Subir PDF como plantilla permanente"
           >
             <Upload size={15} />
-            <span>Subir PDF</span>
+            <span className="btn-label-responsive">Subir PDF</span>
           </button>
 
           <button 
@@ -193,7 +193,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           title="Editar datos de la empresa y perfiles"
         >
           <Building2 size={16} />
-          <span>Datos Empresa</span>
+          <span className="btn-label-responsive">Datos Empresa</span>
         </button>
 
         <button 
@@ -203,7 +203,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           title="Borrar todos los cuadros dibujados"
         >
           <RotateCcw size={16} />
-          <span>Limpiar</span>
+          <span className="btn-label-responsive">Limpiar</span>
         </button>
 
         <button 
@@ -213,17 +213,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           title="Guardar coordenadas en JSON"
         >
           <Save size={16} />
-          <span>{isSaving ? 'Guardando...' : 'Guardar Mapeo'}</span>
+          <span className="btn-label-responsive">{isSaving ? 'Guardando...' : 'Guardar Mapeo'}</span>
         </button>
 
         <button 
-          className={`btn ${isTemporarySession ? 'btn-warning-gradient' : 'btn-primary'}`} 
+          className={`btn btn-generate-primary ${isTemporarySession ? 'btn-warning-gradient' : 'btn-primary'}`} 
           onClick={() => onGeneratePdf(isTemporarySession)}
           disabled={isGenerating || mappingsCount === 0}
           title={isTemporarySession ? "Generar, descargar y limpiar plantilla temporal" : "Generar PDF estampado"}
         >
           {isTemporarySession ? <Zap size={16} /> : <Play size={16} />}
-          <span>
+          <span className="btn-label-always-visible">
             {isGenerating 
               ? 'Generando...' 
               : isTemporarySession 

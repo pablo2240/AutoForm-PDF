@@ -50,6 +50,14 @@ export const App: React.FC = () => {
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [mappings, setMappings] = useState<MappingItem[]>([]);
   const [isTemporarySession, setIsTemporarySession] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    // Default to collapsed on screens <= 1200px
+    if (typeof window !== 'undefined' && window.innerWidth <= 1200) {
+      return true;
+    }
+    const saved = localStorage.getItem('autoform_sidebar_collapsed');
+    return saved === 'true';
+  });
 
   // Custom Confirm Dialog State
   const [confirmModalData, setConfirmModalData] = useState<ConfirmModalState | null>(null);
@@ -610,6 +618,14 @@ export const App: React.FC = () => {
           globalSignature={globalSignature}
           onSelectSignature={handleSelectSignatureToStamp}
           isSignatureActive={isSignatureActive}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => {
+            setIsSidebarCollapsed(prev => {
+              const next = !prev;
+              localStorage.setItem('autoform_sidebar_collapsed', String(next));
+              return next;
+            });
+          }}
         />
 
         {/* Center Canvas */}

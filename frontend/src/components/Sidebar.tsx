@@ -9,7 +9,9 @@ import {
   MousePointerClick,
   Info,
   Tag,
-  PenTool
+  PenTool,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -22,6 +24,8 @@ interface SidebarProps {
   globalSignature?: GlobalSignature | null;
   onSelectSignature?: () => void;
   isSignatureActive?: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -34,6 +38,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   globalSignature,
   onSelectSignature,
   isSignatureActive,
+  isCollapsed = false,
+  onToggleCollapse,
 }) => {
   const [activeTab, setActiveTab] = useState<'variables' | 'mapped'>('variables');
   const [searchTerm, setSearchTerm] = useState('');
@@ -59,6 +65,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
       .join(' ');
   };
 
+  if (isCollapsed) {
+    return (
+      <aside className="sidebar sidebar-collapsed-rail" title="Panel lateral colapsado">
+        <button 
+          className="btn-sidebar-collapse-toggle rail-toggle"
+          onClick={onToggleCollapse}
+          title="Expandir panel lateral (340px)"
+        >
+          <ChevronRight size={18} />
+        </button>
+        <div className="rail-actions">
+          <button 
+            className={`rail-icon-btn ${activeTab === 'variables' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('variables');
+              if (onToggleCollapse) onToggleCollapse();
+            }}
+            title={`Variables (${keys.length})`}
+          >
+            <Tag size={18} />
+            <span className="rail-badge">{keys.length}</span>
+          </button>
+          <button 
+            className={`rail-icon-btn ${activeTab === 'mapped' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('mapped');
+              if (onToggleCollapse) onToggleCollapse();
+            }}
+            title={`Mapeados (${mappings.length})`}
+          >
+            <Layers size={18} />
+            <span className="rail-badge">{mappings.length}</span>
+          </button>
+          {globalSignature && (
+            <button 
+              className={`rail-icon-btn ${isSignatureActive ? 'active-signature' : ''}`}
+              onClick={() => {
+                if (onSelectSignature) onSelectSignature();
+              }}
+              title="Estampar Firma Global"
+            >
+              <PenTool size={18} />
+            </button>
+          )}
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="sidebar">
       {/* Tabs */}
@@ -77,6 +132,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <Layers size={15} />
           <span>Mapeados ({mappings.length})</span>
         </button>
+        {onToggleCollapse && (
+          <button
+            className="btn-sidebar-collapse-toggle header-toggle"
+            onClick={onToggleCollapse}
+            title="Colapsar panel lateral (Modo Riel 48px)"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        )}
       </div>
 
       {activeTab === 'variables' ? (

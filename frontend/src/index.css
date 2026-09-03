@@ -284,16 +284,29 @@ body {
   gap: 12px;
   z-index: 15;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+  flex-shrink: 0;
+}
+
+.editor-secondary-toolbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
 }
 
 .toolbar-section {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .toolbar-section.flex-grow {
   flex: 1;
+  flex-shrink: 1;
+  min-width: 140px;
+  max-width: 320px;
 }
 
 .toolbar-item {
@@ -519,10 +532,103 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  transition: width 0.2s ease;
+  flex-shrink: 0;
+}
+
+.sidebar.sidebar-collapsed-rail {
+  width: 48px;
+  align-items: center;
+  padding: 8px 0;
+  background-color: #0f172a;
+  border-right: 1px solid #1e293b;
+}
+
+.btn-sidebar-collapse-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.btn-sidebar-collapse-toggle:hover {
+  background-color: #1e293b;
+  color: #fff;
+}
+
+.btn-sidebar-collapse-toggle.header-toggle {
+  margin-right: 6px;
+}
+
+.btn-sidebar-collapse-toggle.rail-toggle {
+  color: #94a3b8;
+  margin-bottom: 12px;
+  width: 36px;
+  height: 36px;
+}
+
+.rail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  align-items: center;
+}
+
+.rail-icon-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.rail-icon-btn:hover {
+  background-color: #1e293b;
+  color: #fff;
+}
+
+.rail-icon-btn.active {
+  background-color: rgba(248, 177, 38, 0.2);
+  color: var(--brand-yellow, #F8B126);
+  border: 1px solid rgba(248, 177, 38, 0.4);
+}
+
+.rail-icon-btn.active-signature {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.rail-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background-color: #e65100;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 1px 4px;
+  min-width: 14px;
+  text-align: center;
 }
 
 .sidebar-tabs {
   display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--border-color);
   background-color: var(--bg-app);
 }
@@ -3638,6 +3744,100 @@ body {
   gap: 10px;
   border-top: 1px solid var(--border-color);
 }
+
+/* ==========================================================================
+   ADR-0004: RESPONSIVE WORKSPACE & ACTION VISIBILITY (<= 1280px, <= 1024px)
+   ========================================================================== */
+
+/* Navbar Brand & Controls Scalability */
+@media (max-width: 1280px) {
+  .navbar {
+    padding: 0 12px;
+    gap: 10px;
+  }
+
+  .select-input {
+    max-width: 170px;
+  }
+
+  /* Smart Action Collapse: Hide labels on secondary buttons to preserve 'Generar PDF' */
+  .btn .btn-label-responsive {
+    display: none;
+  }
+
+  .navbar-actions {
+    gap: 6px;
+  }
+
+  .btn {
+    padding: 7px 10px;
+  }
+
+  .btn-generate-primary {
+    padding: 7px 14px;
+  }
+
+  .btn-label-always-visible {
+    display: inline-block;
+    font-weight: 700;
+  }
+
+  .pagination-group {
+    padding: 2px 6px;
+    gap: 4px;
+  }
+
+  .page-indicator {
+    min-width: 80px;
+    font-size: 0.76rem;
+  }
+
+  /* Toolbar ribbon compacting */
+  .editor-secondary-toolbar {
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  .font-select {
+    min-width: 100px;
+  }
+
+  .toolbar-section.flex-grow {
+    min-width: 110px;
+    max-width: 220px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .app-title {
+    font-size: 0.95rem;
+  }
+
+  .navbar-brand {
+    gap: 8px;
+  }
+
+  .logo-badge.logo-iac-badge {
+    min-width: 36px;
+    padding: 2px 6px;
+  }
+
+  .navbar-iac-logo {
+    height: 20px;
+    max-width: 48px;
+  }
+
+  .select-input {
+    max-width: 130px;
+    font-size: 0.78rem;
+  }
+
+  /* Ensure sidebar defaults to rail behavior on tablets */
+  .sidebar:not(.sidebar-collapsed-rail) {
+    width: 280px;
+  }
+}
+
 
 
 
