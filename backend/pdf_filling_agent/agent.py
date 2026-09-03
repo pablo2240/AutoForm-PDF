@@ -30,6 +30,7 @@ from .knowledge_base import KnowledgeBase
 from .pdf_processor import PDFProcessor
 from .visual_processor import VisualPDFProcessor, VisualPlacement, PageImage
 from .field_dictionary import FIELD_SYNONYMS, IGNORE_RULES, get_dictionary_context
+from .validator import FillingValidator
 
 
 class FieldMapping(BaseModel):
@@ -167,6 +168,7 @@ class PDFAgent:
         self.knowledge_base = knowledge_base or KnowledgeBase()
         self.pdf_processor = PDFProcessor()
         self.visual_processor = VisualPDFProcessor()
+        self.validator = FillingValidator()
 
         # Load company profile
         self.company_profile = self._load_company_profile(company_profile_path)
@@ -682,7 +684,17 @@ class PDFAgent:
                 val_to_set = "PRIVADA"
 
             if val_to_set:
-                mappings[fn] = str(val_to_set)
+                val_str = str(val_to_set).strip()
+                v_res = self.validator.validate(
+                    label=item.get("label", ""),
+                    section=item.get("section", ""),
+                    field_name=fn,
+                    proposed_value=val_str
+                )
+                if v_res.is_valid:
+                    mappings[fn] = val_str
+                else:
+                    print(f"[INFO] Deterministic match skipped for '{fn}': {v_res.reason}")
 
         return mappings
 
@@ -753,13 +765,23 @@ CRITICAL RULES — READ CAREFULLY:
                 except Exception as ex:
                     print(f"[WARN] AcroForm LLM chunk error on page {pno}: {ex}")
 
-        # Filter out secondary table rows from LLM matches to strictly avoid repetition
+        # Build lookup map for widgets metadata
+        widget_meta_map = {rw["field_name"]: rw for rw in rich_widgets}
+
+        # Filter LLM proposals strictly through FillingValidator (Negative zones, Single-row, Type-Aware)
         filtered_llm = {}
         for k, v in llm_matches.items():
-            row_match = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', k, re.IGNORECASE)
-            if row_match and int(row_match.group(1)) > 0:
-                continue
-            filtered_llm[k] = v
+            meta = widget_meta_map.get(k, {})
+            v_res = self.validator.validate(
+                label=meta.get("label", k),
+                section=meta.get("section", ""),
+                field_name=k,
+                proposed_value=v
+            )
+            if v_res.is_valid:
+                filtered_llm[k] = v
+            else:
+                print(f"[INFO] LLM match rejected for '{k}' ('{v}'): {v_res.reason}")
 
         # Combine matches: LLM adds complementary context, deterministic matches take authoritative baseline
         final_field_values = {**filtered_llm, **deterministic_matches}
@@ -874,14 +896,25 @@ Example:
                         text_val = p.get("text") or p.get("value") or ""
                         rect_val = p.get("rect") or p.get("bbox") or p.get("rect_px")
                         if text_val and rect_val and isinstance(rect_val, list) and len(rect_val) == 4:
-                            all_placements.append(VisualPlacement(
-                                page=page_no,
-                                rect=[float(c) for c in rect_val],
-                                text=str(text_val),
-                                font_size=float(p.get("font_size", 8.5)),
-                                align=p.get("align", 0),
-                                field_description=p.get("field_description") or p.get("label") or p.get("field", "")
-                            ))
+                            f_desc = p.get("field_description") or p.get("label") or p.get("field", "")
+                            # Validate placement against FillingValidator (Tier 1, Tier 2, Tier 3)
+                            v_res = self.validator.validate(
+                                label=str(f_desc),
+                                section=f"Page {page_no}",
+                                field_name=str(f_desc),
+                                proposed_value=str(text_val)
+                            )
+                            if v_res.is_valid:
+                                all_placements.append(VisualPlacement(
+                                    page=page_no,
+                                    rect=[float(c) for c in rect_val],
+                                    text=str(text_val),
+                                    font_size=float(p.get("font_size", 8.5)),
+                                    align=p.get("align", 0),
+                                    field_description=str(f_desc)
+                                ))
+                            else:
+                                print(f"[INFO] Visual placement rejected for '{f_desc}' ('{text_val}'): {v_res.reason}")
 
         print(f"[INFO] Total generated {len(all_placements)} visual placements across {len(layouts)} pages.")
         for p in all_placements:
@@ -981,15 +1014,25 @@ Example:
                         text_val = p.get("text") or p.get("value") or ""
                         rect_px_val = p.get("rect_px") or p.get("bbox") or p.get("rect")
                         if text_val and rect_px_val and isinstance(rect_px_val, list) and len(rect_px_val) == 4:
-                            rect_pts = self.visual_processor.rect_pixels_to_points(page_image, [float(c) for c in rect_px_val])
-                            all_placements.append(VisualPlacement(
-                                page=page_no,
-                                rect=rect_pts,
-                                text=str(text_val),
-                                font_size=float(p.get("font_size", 8.5)),
-                                align=p.get("align", 0),
-                                field_description=p.get("field_description") or p.get("label") or p.get("field", "")
-                            ))
+                            f_desc = p.get("field_description") or p.get("label") or p.get("field", "")
+                            v_res = self.validator.validate(
+                                label=str(f_desc),
+                                section=f"Page {page_no}",
+                                field_name=str(f_desc),
+                                proposed_value=str(text_val)
+                            )
+                            if v_res.is_valid:
+                                rect_pts = self.visual_processor.rect_pixels_to_points(page_image, [float(c) for c in rect_px_val])
+                                all_placements.append(VisualPlacement(
+                                    page=page_no,
+                                    rect=rect_pts,
+                                    text=str(text_val),
+                                    font_size=float(p.get("font_size", 8.5)),
+                                    align=p.get("align", 0),
+                                    field_description=str(f_desc)
+                                ))
+                            else:
+                                print(f"[INFO] Vision placement rejected for '{f_desc}' ('{text_val}'): {v_res.reason}")
 
         print(f"[INFO] Vision mode: total {len(all_placements)} placements generated")
         for p in all_placements:
