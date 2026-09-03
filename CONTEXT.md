@@ -11,6 +11,11 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Flat PDF (Visual Form)**: A standard, non-interactive PDF without form fields, requiring coordinate-based visual placement overlay.
 - **Scanned / Image PDF**: A PDF without an extractable text layer, requiring OCR or Multimodal Vision processing.
 
+### Responsive UI & Workspace Layout (ADR-0004)
+- **Collapsible Rail Sidebar**: Two-state lateral panel: Expanded (340px full view) and Rail Mode (48px icon tab view) ensuring maximum PDF canvas real-estate on compact displays.
+- **Elastic Ribbon Toolbar**: Formatting bar with an auto-constrained text input (`min-width: 140px; max-width: 320px`) and non-destructive horizontal smooth scrolling, guaranteeing permanent access to media tools ("Agregar Imagen", "Añadir Texto").
+- **Smart Action Collapse**: Priority navbar breakpoint behavior (`<= 1280px`) collapsing secondary actions ("Datos Empresa", "Guardar Mapeo", "Limpiar") to compact icon buttons, guaranteeing that the primary conversion action ("Generar PDF") remains fully expanded and visible.
+
 ### Validation & Protective Barriers
 - **`FillingValidator`**: The centralized three-tier verification engine that inspects every proposed field value before writing to any document format.
 - **Negative Zones (Lista Negra Canónica)**: Mandatory non-fillable regions (PEP, Bank/Entity internal use, Customer-only, Spouses/secondary beneficiaries, International ops/debt, Fund origin declaration, Nacionalidad 2 / doble nacionalidad).
