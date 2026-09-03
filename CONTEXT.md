@@ -13,10 +13,13 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 
 ### Validation & Protective Barriers
 - **`FillingValidator`**: The centralized three-tier verification engine that inspects every proposed field value before writing to any document format.
-- **Negative Zones (Lista Negra Canónica)**: Mandatory non-fillable regions (PEP, Bank/Entity internal use, Customer-only, Spouses/secondary beneficiaries, International ops/debt, Fund origin declaration).
+- **Negative Zones (Lista Negra Canónica)**: Mandatory non-fillable regions (PEP, Bank/Entity internal use, Customer-only, Spouses/secondary beneficiaries, International ops/debt, Fund origin declaration, Nacionalidad 2 / doble nacionalidad).
+- **Green Zones Whitelist**: Canonical priority sections (`INFORMACIÓN GENERAL`, `DATOS BÁSICOS`, `REPRESENTANTE LEGAL`, `CONTACTO SÓLO PARA PROVEEDORES`, `SOCIOS/ACCIONISTAS` [fila 0], `Firma`) where field coverage is strictly enforced with zero omitted values.
 - **Single-Row Enforcement**: Structural constraint restricting multi-row grid forms to index 0 (Row 1 only) to eliminate duplication.
-- **Type-Aware Guard**: Post-match semantic verification barrier that maps values to strict data types (`phone`, `email`, `nit`, `cedula`, `country`, `person_name`, `date`, `text`) and rejects assignments to conflicting destination labels.
+- **Type-Aware Guard**: Post-match semantic verification barrier that maps values to strict data types (`phone`, `email`, `nit`, `cedula`, `country`, `nationality`, `person_name`, `date`, `text`) and rejects assignments to conflicting destination labels.
 - **Value Displacement**: Anti-pattern where values leak into adjacent or wrongly mapped fields (e.g., placing Nationality into Phone). Eradicated by the Type-Aware Guard.
+- **Declarative In-line Sequence**: Pattern for inline authorization paragraphs (`"Yo, [Nombre]... identificado con [Tipo] No. [Cédula] de [Expedición]"`), mapped sequentially without skipping fields.
+- **Compound Label Priority**: Resolution strategy for merged labels: if containing `"Nombres y Apellidos"`, prioritize the Legal Representative; if strictly `"Razón Social"`, prioritize the Company Name.
 
 ### Filling Modes & Processing
 - **Deterministic Matcher (`_deterministic_acroform_match`)**: High-priority rule-based mapper that pairs form labels with company profile fields directly via regex and fuzzy keyword matching (+22 canonical rules), bypassing the LLM when certainty is high.
@@ -28,6 +31,6 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 ---
 
 ## 2. Shared Data Entities
-- **`company_profile` (`company_data.json`)**: Single source of truth containing official corporate data (NIT, Razón Social, Representante Legal, Cédula, Bancos). Grounding rule: if not present in this file, it must never be written.
+- **`company_profile` (`company_data.json`)**: Single source of truth containing official corporate data (NIT, Razón Social, Representante Legal, Cédula, Bancos). Grounding rule: if not present in this file, it must never be written. Nationality is strictly standardized to `"Colombia"`.
 - **`field_dictionary.py`**: Semantic synonyms mapping real corporate profile keys to common Colombian form variations, alongside exclusion rules.
 - **`KnowledgeBase` (`knowledge_base.py`)**: CEO persona prompt builder embodying Guillermo Cañón Sarria (CEO of IAC) with Red/Green zone compliance boundaries.
