@@ -100,3 +100,25 @@ export interface TemplateMapping {
   page_height: number;
   mappings: MappingItem[];
 }
+
+export interface UnfilledAuditItem {
+  field: string;
+  label?: string;
+  reason: string;
+  suggestion?: string;
+  rule?: string;
+}
+
+export interface AuditReport {
+  filled: number;
+  unfilled: UnfilledAuditItem[];
+  blocked: UnfilledAuditItem[];
+}
+
+export interface FillResultData {
+  filename: string;
+  total_placed: number;
+  is_temporary?: boolean;
+  audit_report?: AuditReport | null;
+}
+

@@ -268,3 +268,29 @@ def test_collision_no_secondary_leaves_empty_and_logs(validator, capsys):
     assert field_b["name"] not in resolved  # Evicted and left empty
     captured = capsys.readouterr().out
     assert "COLLISION_NO_SECONDARY" in captured
+
+# --- ADR-0005: Audit Reporting & Recall Tests ---
+def test_audit_reporting_categorizes_filled_unfilled_and_blocked(validator):
+    widgets = [
+        {"field_name": "txt_razon", "label": "Razón Social", "section": "1. INFORMACIÓN GENERAL"},
+        {"field_name": "txt_fax_sec", "label": "Número de Fax", "section": "1. INFORMACIÓN GENERAL"},
+        {"field_name": "pep_radio_1", "label": "¿Es usted PEP?", "section": "6. PERSONA EXPUESTA POLÍTICAMENTE (PEP)"}
+    ]
+
+    filled_map = {
+        "txt_razon": "Ingeniería Asistida Por Computador S.A.S"
+    }
+
+    audit = validator.generate_audit_report(widgets, filled_map)
+
+    assert audit["filled"] == 1
+    # Check blocked by negative zone
+    blocked_names = [b["field"] for b in audit["blocked"]]
+    assert "pep_radio_1" in blocked_names
+    assert audit["blocked"][0]["reason"] == "NEGATIVE_ZONE"
+
+    # Check unfilled due to missing data in profile
+    unfilled_names = [u["field"] for u in audit["unfilled"]]
+    assert "txt_fax_sec" in unfilled_names
+    assert audit["unfilled"][0]["reason"] == "NO_DATA_IN_JSON"
+    assert "suggestion" in audit["unfilled"][0]

@@ -373,7 +373,8 @@ def ai_fill_pdf(req: AiFillRequest):
             "filename": out_filename,
             "download_url": f"/api/download/{out_filename}",
             "message": "PDF autollenado con IA exitosamente",
-            "total_placed": -1
+            "total_placed": agent.last_audit_report.get("filled", -1) if agent.last_audit_report else -1,
+            "audit_report": agent.last_audit_report
         }
     except Exception as e:
         print(f"[ERROR] ai_fill_pdf error: {e}")

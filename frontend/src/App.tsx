@@ -8,7 +8,8 @@ import type {
   BoxCoords,
   BoxPct,
   ItemStyle,
-  GlobalSignature 
+  GlobalSignature,
+  FillResultData
 } from './types';
 import { 
   fetchTemplates, 
@@ -91,7 +92,7 @@ export const App: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState<boolean>(false);
-  const [resultModalData, setResultModalData] = useState<{ filename: string; total_placed: number; is_temporary?: boolean } | null>(null);
+  const [resultModalData, setResultModalData] = useState<FillResultData | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToastMessage({ text, type });
@@ -508,6 +509,7 @@ export const App: React.FC = () => {
         filename: res.filename,
         total_placed: res.total_placed ?? 0,
         is_temporary: false,
+        audit_report: res.audit_report || null,
       });
 
       showToast('✨ ¡PDF autollenado con IA exitosamente!', 'success');

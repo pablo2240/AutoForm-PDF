@@ -91,7 +91,7 @@ export async function generateFilledPdf(
 
 export async function aiFillPdf(
   templateId: string
-): Promise<{ status: string; filename: string; download_url: string; message: string; total_placed?: number }> {
+): Promise<{ status: string; filename: string; download_url: string; message: string; total_placed?: number; audit_report?: any }> {
   const res = await fetch(`${API_BASE}/api/ai-fill`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

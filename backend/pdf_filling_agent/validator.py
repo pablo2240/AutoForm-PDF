@@ -73,7 +73,15 @@ class FillingValidator:
         if val_norm in ["colombiana", "colombiano"]:
             return "nationality"
 
-        # Phone: 7-12 digits without letters
+        # Corporate NIT (e.g. 8110047212 or 811004721)
+        if digits_only in ["8110047212", "811004721"]:
+            return "nit"
+
+        # Personal ID / Cédula (e.g. 98555384)
+        if digits_only == "98555384":
+            return "cedula"
+
+        # Phone: 7-12 digits without letters (excluding exact NIT or Cédula)
         if len(digits_only) >= 7 and len(digits_only) <= 12 and not re.search(r'[a-zA-Z]', val_str):
             return "phone"
 
@@ -197,6 +205,22 @@ class FillingValidator:
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: Date '{val_str}' cannot be assigned to non-date field '{norm_label}'"
+                )
+
+        # 3.7 NIT values strictly to NIT / Identificación Tributaria fields
+        if sem_type == "nit":
+            if not any(k in norm_label or k in norm_context for k in ["nit", "rut", "identificacion tributaria", "tributaria"]):
+                return ValidationResult(
+                    is_valid=False,
+                    reason=f"Tier 3 Type-Aware Guard: NIT '{val_str}' requires NIT/RUT field, found '{norm_label}'"
+                )
+
+        # 3.8 Cédula values strictly to Cédula / Documento fields
+        if sem_type == "cedula":
+            if any(k in norm_label for k in ["nit", "rut", "pais", "telefono", "celular", "email", "correo"]):
+                return ValidationResult(
+                    is_valid=False,
+                    reason=f"Tier 3 Type-Aware Guard: Cédula '{val_str}' cannot be assigned to '{norm_label}'"
                 )
 
         return ValidationResult(is_valid=True, reason="Passed all 3 tiers")
@@ -323,3 +347,54 @@ class FillingValidator:
                     print(f"[WARN] COLLISION_NO_SECONDARY: Field '{evicted_fn}' (score={evicted_score}) evicted from category '{cat}'. No secondary value available.")
 
         return resolved
+
+    def generate_audit_report(self, all_widgets: list, filled_map: dict) -> dict:
+        """
+        ADR-0005: Compiles a structured UNFILLED_FIELDS_AUDIT report.
+        Categorizes fields into:
+        - filled: Total count of successfully mapped and validated fields.
+        - unfilled: Fields in valid zones omitted due to missing profile data (NO_DATA_IN_JSON).
+        - blocked: Fields deliberately not filled per security/compliance rules (NEGATIVE_ZONE).
+        """
+        blocked_list = []
+        unfilled_list = []
+
+        for w in all_widgets:
+            fn = w.get("field_name", "")
+            lbl = w.get("label", fn)
+            sec = w.get("section", "")
+
+            # If already filled, skip
+            if fn in filled_map:
+                continue
+
+            # Check if blocked by Tier 1 Negative Zone
+            v_dummy = self.validate(
+                label=lbl,
+                section=sec,
+                field_name=fn,
+                proposed_value="TEST_SAMPLE_VALUE"
+            )
+
+            if not v_dummy.is_valid and "Negative Zone" in v_dummy.reason:
+                blocked_list.append({
+                    "field": fn,
+                    "label": lbl,
+                    "reason": "NEGATIVE_ZONE",
+                    "rule": "ADR-0002 Tier 1"
+                })
+            else:
+                # Suggest snake_case field key for profile
+                clean_key = self._normalize(lbl).replace(" ", "_")[:30]
+                unfilled_list.append({
+                    "field": fn,
+                    "label": lbl,
+                    "reason": "NO_DATA_IN_JSON",
+                    "suggestion": f"Agregar '{clean_key}' a company_data.json"
+                })
+
+        return {
+            "filled": len(filled_map),
+            "unfilled": unfilled_list,
+            "blocked": blocked_list
+        }
