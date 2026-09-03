@@ -806,9 +806,24 @@ CRITICAL RULES — READ CAREFULLY:
             else:
                 print(f"[INFO] LLM match rejected for '{k}' ('{v}'): {v_res.reason}")
 
-        # Combine matches: LLM adds complementary context, deterministic matches take authoritative baseline
-        final_field_values = {**filtered_llm, **deterministic_matches}
-        print(f"[INFO] Total AcroForm field values mapped: {len(final_field_values)}")
+        # Prepare proposal tuples for collision resolution: (field_name, label, category, value, score)
+        proposals = []
+        for k, v in deterministic_matches.items():
+            meta = widget_meta_map.get(k, {})
+            lbl = meta.get("label", k)
+            cat, score, _ = self.validator.score_field(lbl, k, FIELD_SYNONYMS)
+            proposals.append((k, lbl, cat, v, max(score, 0.95)))
+
+        for k, v in filtered_llm.items():
+            if k not in deterministic_matches:
+                meta = widget_meta_map.get(k, {})
+                lbl = meta.get("label", k)
+                cat, score, _ = self.validator.score_field(lbl, k, FIELD_SYNONYMS)
+                proposals.append((k, lbl, cat, v, score))
+
+        # Resolve collisions across competing fields using ADR-0003 Max-Score Arbitration
+        final_field_values = self.validator.resolve_collisions(proposals, self.company_profile)
+        print(f"[INFO] Total AcroForm field values mapped after collision resolution: {len(final_field_values)}")
         print(f"[INFO] Mapped field values: {final_field_values}")
 
         doc.close()

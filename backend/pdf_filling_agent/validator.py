@@ -200,3 +200,126 @@ class FillingValidator:
                 )
 
         return ValidationResult(is_valid=True, reason="Passed all 3 tiers")
+
+    def _token_set_similarity(self, s1: str, s2: str) -> float:
+        """
+        Calculates balanced token overlap and sequence similarity between two normalized strings.
+        Avoids false positives from single-word overlaps while rewarding phrase alignment.
+        """
+        import difflib
+        n1 = self._normalize(s1)
+        n2 = self._normalize(s2)
+        if not n1 or not n2:
+            return 0.0
+        if n1 == n2:
+            return 1.0
+
+        t1 = set(n1.split())
+        t2 = set(n2.split())
+        if not t1 or not t2:
+            return 0.0
+
+        intersection = t1.intersection(t2)
+        if not intersection:
+            return difflib.SequenceMatcher(None, n1, n2).ratio()
+
+        # Token overlap metrics: Jaccard and Coverage of the smaller token set
+        jaccard = len(intersection) / len(t1.union(t2))
+        smaller_len = min(len(t1), len(t2))
+        coverage = len(intersection) / smaller_len if smaller_len > 0 else 0.0
+        seq_ratio = difflib.SequenceMatcher(None, n1, n2).ratio()
+
+        # Weighted combination: high coverage with partial sequence similarity
+        score = (coverage * 0.5) + (jaccard * 0.3) + (seq_ratio * 0.2)
+        return min(1.0, max(0.0, score))
+
+    def score_field(
+        self,
+        label: str,
+        field_name: str,
+        synonyms_dict: dict
+    ) -> Tuple[str, float, List[Tuple[str, float]]]:
+        """
+        ADR-0003 Three-Band Confidence Scoring:
+        Evaluates label + field_name against FIELD_SYNONYMS.
+        Returns: (best_category, max_score, top_3_candidates)
+        """
+        combined = f"{label} {field_name}".strip()
+        category_scores: List[Tuple[str, float]] = []
+
+        for category, syn_list in synonyms_dict.items():
+            best_cat_score = 0.0
+            for syn in syn_list:
+                score_label = self._token_set_similarity(label, syn)
+                score_field = self._token_set_similarity(field_name, syn)
+                score_combined = self._token_set_similarity(combined, syn)
+                best_cat_score = max(best_cat_score, score_label, score_field, score_combined)
+            category_scores.append((category, round(best_cat_score, 4)))
+
+        # Sort descending by score
+        category_scores.sort(key=lambda x: x[1], reverse=True)
+        top3 = category_scores[:3]
+
+        best_category = top3[0][0] if top3 else ""
+        best_score = top3[0][1] if top3 else 0.0
+        return best_category, best_score, top3
+
+    def resolve_collisions(
+        self,
+        proposals: List[Tuple[str, str, str, str, float]],
+        profile: dict
+    ) -> dict:
+        """
+        ADR-0003 Max-Score Collision Arbitration:
+        proposals: List of (field_name, label, category, proposed_value, score)
+        Resolves contention where multiple fields compete for the same profile category.
+        The highest score wins primary. Evicted fields receive secondary or are left empty.
+        Logs COLLISION_NO_SECONDARY when evicted field has no secondary.
+        """
+        # Secondary value mappings for common Colombian profile categories
+        SECONDARY_MAP = {
+            "celular_rep": "telefono",
+            "telefono": "celular_rep",
+            "representante_legal": "representante_nombre",
+            "numero_cedula": None,
+            "nit": None,
+            "razon_social": None,
+            "nacionalidad": None,
+            "pais": None
+        }
+
+        # Group proposals by category
+        by_category = {}
+        for fn, lbl, cat, val, score in proposals:
+            by_category.setdefault(cat, []).append((fn, lbl, val, score))
+
+        resolved = {}
+
+        for cat, items in by_category.items():
+            # Sort items by score descending
+            items.sort(key=lambda x: x[3], reverse=True)
+            winner_fn, winner_lbl, winner_val, winner_score = items[0]
+            resolved[winner_fn] = winner_val
+
+            # Process evicted candidates
+            for evicted_fn, evicted_lbl, evicted_val, evicted_score in items[1:]:
+                sec_key = SECONDARY_MAP.get(cat)
+                sec_val = profile.get(sec_key) if sec_key else None
+
+                if sec_val:
+                    # Validate secondary value with Type-Aware Guard
+                    v_res = self.validate(
+                        label=evicted_lbl,
+                        section="",
+                        field_name=evicted_fn,
+                        proposed_value=str(sec_val)
+                    )
+                    if v_res.is_valid:
+                        resolved[evicted_fn] = str(sec_val)
+                        print(f"[INFO] COLLISION_RESOLVED_SECONDARY: Field '{evicted_fn}' assigned secondary '{sec_key}' = '{sec_val}'")
+                    else:
+                        print(f"[WARN] COLLISION_NO_SECONDARY: Field '{evicted_fn}' (score={evicted_score}) evicted from category '{cat}'. Secondary '{sec_key}' failed validation: {v_res.reason}")
+                else:
+                    print(f"[WARN] COLLISION_NO_SECONDARY: Field '{evicted_fn}' (score={evicted_score}) evicted from category '{cat}'. No secondary value available.")
+
+        return resolved

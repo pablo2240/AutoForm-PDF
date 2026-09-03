@@ -189,3 +189,82 @@ def test_type_guard_accepts_colombia_as_nationality_value(validator):
         proposed_value="Colombia"
     )
     assert res.is_valid
+
+# --- ADR-0003: Confidence Scoring & Collision Arbitration Tests ---
+def test_confidence_score_exact_match(validator):
+    from backend.pdf_filling_agent.field_dictionary import FIELD_SYNONYMS
+    # 'Número de Identificación Tributaria' matches synonym in FIELD_SYNONYMS['nit']
+    best_cat, score, top3 = validator.score_field(
+        label="Número de Identificación Tributaria",
+        field_name="txt_nit",
+        synonyms_dict=FIELD_SYNONYMS
+    )
+    assert best_cat == "nit"
+    assert score >= 0.85  # Banda 1: Green
+
+def test_confidence_score_grey_zone(validator):
+    from backend.pdf_filling_agent.field_dictionary import FIELD_SYNONYMS
+    # A label that is partially similar (e.g. 'Denominación Social Empresa')
+    best_cat, score, top3 = validator.score_field(
+        label="Denominación Social de la Entidad",
+        field_name="txt_denominacion",
+        synonyms_dict=FIELD_SYNONYMS
+    )
+    assert best_cat == "razon_social"
+    assert 0.60 <= score < 0.85  # Banda 2: Yellow (forwarded with top 3)
+    assert len(top3) <= 3
+
+def test_confidence_score_rejection_floor(validator):
+    from backend.pdf_filling_agent.field_dictionary import FIELD_SYNONYMS
+    # Random non-matching text
+    best_cat, score, top3 = validator.score_field(
+        label="Volumen de ventas en miles de unidades trimestrales",
+        field_name="txt_volumen",
+        synonyms_dict=FIELD_SYNONYMS
+    )
+    assert score < 0.60  # Banda 3: Red (Noise rejection)
+
+def test_collision_arbitration_highest_score_wins(validator):
+    # Two fields contend for 'celular_rep'
+    field_a = {"name": "txt_celular_directo", "label": "Teléfono Celular", "score": 0.95}
+    field_b = {"name": "txt_telefono_movil", "label": "Móvil", "score": 0.72}
+
+    profile = {
+        "celular_rep": "3104120217",
+        "telefono": "2656868"
+    }
+
+    resolved = validator.resolve_collisions(
+        proposals=[
+            (field_a["name"], field_a["label"], "celular_rep", profile["celular_rep"], field_a["score"]),
+            (field_b["name"], field_b["label"], "celular_rep", profile["celular_rep"], field_b["score"])
+        ],
+        profile=profile
+    )
+
+    # Winner gets primary
+    assert resolved[field_a["name"]] == "3104120217"
+    # Evicted gets secondary phone
+    assert resolved.get(field_b["name"]) == "2656868"
+
+def test_collision_no_secondary_leaves_empty_and_logs(validator, capsys):
+    # Two fields contend for 'nit', which has no secondary value
+    field_a = {"name": "txt_nit_1", "label": "NIT", "score": 0.98}
+    field_b = {"name": "txt_nit_2", "label": "Identificación Tributaria", "score": 0.86}
+
+    profile = {
+        "nit": "8110047212"
+    }
+
+    resolved = validator.resolve_collisions(
+        proposals=[
+            (field_a["name"], field_a["label"], "nit", profile["nit"], field_a["score"]),
+            (field_b["name"], field_b["label"], "nit", profile["nit"], field_b["score"])
+        ],
+        profile=profile
+    )
+
+    assert resolved[field_a["name"]] == "8110047212"
+    assert field_b["name"] not in resolved  # Evicted and left empty
+    captured = capsys.readouterr().out
+    assert "COLLISION_NO_SECONDARY" in captured
