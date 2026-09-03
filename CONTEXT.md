@@ -21,6 +21,14 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Declarative In-line Sequence**: Pattern for inline authorization paragraphs (`"Yo, [Nombre]... identificado con [Tipo] No. [Cédula] de [Expedición]"`), mapped sequentially without skipping fields.
 - **Compound Label Priority**: Resolution strategy for merged labels: if containing `"Nombres y Apellidos"`, prioritize the Legal Representative; if strictly `"Razón Social"`, prioritize the Company Name.
 
+### Confidence Scoring & Collision Resolution (ADR-0003)
+- **Three-Band Hybrid Confidence Scoring**: Matcher grading mechanism:
+  - **Banda 1 (Score $\ge 0.85$ - Green)**: Immediate deterministic assignment. Bypasses LLM.
+  - **Banda 2 ($0.60 \le \text{Score} < 0.85$ - Yellow)**: Grey-zone candidate forwarded to LLM with Top 3 candidate categories and section context for arbitration.
+  - **Banda 3 (Score $< 0.60$ - Red)**: Noise rejection floor. Discarded immediately without LLM consultation.
+- **Max-Score Collision Arbitration**: Principle resolving multi-field contention for a single profile category: the highest-scoring field wins the primary value; evicted fields receive available secondary data or remain empty.
+- **`COLLISION_NO_SECONDARY`**: Actionable telemetry log generated when an evicted field has no remaining secondary profile data, flagging candidates for `company_data.json` enrichment.
+
 ### Filling Modes & Processing
 - **Deterministic Matcher (`_deterministic_acroform_match`)**: High-priority rule-based mapper that pairs form labels with company profile fields directly via regex and fuzzy keyword matching (+22 canonical rules), bypassing the LLM when certainty is high.
 - **LLM Mapper (`_fill_acroform`)**: Progressive chunk-by-chunk Azure OpenAI mapping pass (using `gpt-4.1-mini`) for ambiguous or unmapped fields, strictly filtered through `FillingValidator`.
