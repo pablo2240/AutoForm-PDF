@@ -451,19 +451,31 @@ body {
   padding: 0;
 }
 
+.toolbar-item-edit-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .toolbar-text-input {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   background: transparent;
   border: none;
   color: #0f172a;
   font-size: 0.8rem;
   padding: 4px 6px;
   outline: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .toolbar-text-input:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
+  color: var(--text-muted);
 }
 
 .badge-selected-field {
@@ -475,6 +487,10 @@ body {
   border-radius: 4px;
   font-weight: 600;
   white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 90px;
+  flex-shrink: 0;
 }
 
 .btn-toolbar-action {

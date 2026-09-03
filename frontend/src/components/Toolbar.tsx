@@ -199,18 +199,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* 6. Editar Texto */}
       <div className="toolbar-section flex-grow">
-        <div className="toolbar-item w-full" title="Editar texto del recuadro">
+        <div className="toolbar-item toolbar-item-edit-text w-full" title="Editar texto del recuadro">
           <Edit3 size={15} className="toolbar-icon" />
           <input 
             type="text"
             className="toolbar-text-input"
-            placeholder={selectedBoxId ? `Editar valor de ${selectedBoxLabel || 'campo'}...` : 'Selecciona un cuadro para editar su texto...'}
+            placeholder={selectedBoxId ? `Editar ${selectedBoxLabel || 'campo'}...` : 'Editar texto...'}
             value={selectedBoxText}
             onChange={(e) => onTextChange(e.target.value)}
             disabled={!selectedBoxId}
           />
           {selectedBoxId && (
-            <span className="badge-selected-field">
+            <span className="badge-selected-field" title={selectedBoxLabel || 'Seleccionado'}>
               {selectedBoxLabel || 'Seleccionado'}
             </span>
           )}
