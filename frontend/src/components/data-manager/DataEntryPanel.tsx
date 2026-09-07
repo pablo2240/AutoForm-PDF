@@ -20,6 +20,7 @@ const CATEGORY_OPTIONS: { id: CompanyCategory; label: string; icon: string }[] =
   { id: 'id', label: 'ID', icon: '🪪' },
   { id: 'contacto', label: 'Contacto', icon: '📍' },
   { id: 'banco', label: 'Banco', icon: '🏦' },
+  { id: 'financiero', label: 'Financiero', icon: '💰' },
   { id: 'otros', label: 'Otros', icon: '❓' },
 ];
 
@@ -27,6 +28,7 @@ const SUGGESTED_COMPANY_FIELDS: Record<CompanyCategory, string[]> = {
   id: ['NIT', 'Razón Social', 'Matrícula Mercantil', 'Cámara de Comercio', 'RUT'],
   contacto: ['Dirección Principal', 'Teléfono / PBX', 'Correo Electrónico', 'Ciudad / Municipio', 'Página Web'],
   banco: ['Nombre del Banco', 'Tipo de Cuenta', 'Número de Cuenta', 'Titular de Cuenta', 'Certificación Bancaria'],
+  financiero: ['Total Activos', 'Total Pasivos', 'Total Patrimonio', 'Total Ingresos Mensuales', 'Total Egresos Mensuales'],
   otros: ['Actividad Económica (CIIU)', 'Régimen Tributario', 'Representante Legal', 'Fecha de Constitución'],
 };
 

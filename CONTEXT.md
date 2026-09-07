@@ -44,9 +44,23 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Draw-to-Map**: Interactive frontend canvas mode where users draw bounding boxes directly over PDF cells to bind variables.
 - **Progressive Disclosure**: UI pattern in the Data Manager separating entry categorization (`ID`, `Contacto`, `Banco`, `Otros`) from preview accordions.
 
+### Universal Persistence & Asset Management (ADR-0006)
+- **Centralized Universal Persistence**: Backend-hosted Single Source of Truth for corporate data, categorized metadata, employer profiles, and physical signature assets. Eliminates cross-browser divergence and storage quota limitations.
+- **Physical Signature Asset (`/api/signature`)**: Server-persisted image (`backend/data/signatures/global_signature.png`) and companion metadata contract, enabling direct PyMuPDF filesystem loading and multi-client access.
+- **Backend-Authoritative State**: Architectural principle where all active entities originate exclusively from the backend REST API on application boot. `localStorage` is completely eliminated from business data and signature persistence.
+- **Discrete Collection Endpoints**: Segregated server stores (`/api/company-data`, `/api/categorized-company`, `/api/employer-profiles`, `/api/signature`) preserving single responsibility, keeping `company_data.json` flat and pure for filling pipelines.
+
+### Financial Domain & Amount Isolation (ADR-0007)
+- **`financial_amount` Semantic Type**: High-priority type-aware semantic barrier ensuring accounting balances (Activos, Pasivos, Patrimonio, Ingresos, Egresos) evaluate *before* phone length heuristics to eliminate false-positive rejections.
+- **`financiero` Category**: Dedicated domain category separating corporate statutory balance sheets from operational payment accounts (`banco`).
+- **Accounting Invariant**: Corporate balance sheet rule enforced in canonical data: $\text{Activos} - \text{Pasivos} = \text{Patrimonio}$.
+
 ---
 
 ## 2. Shared Data Entities
-- **`company_profile` (`company_data.json`)**: Single source of truth containing official corporate data (NIT, Razón Social, Representante Legal, Cédula, Bancos). Grounding rule: if not present in this file, it must never be written. Nationality is strictly standardized to `"Colombia"`.
+- **`company_profile` (`company_data.json`)**: Single source of truth containing official corporate data (NIT, Razón Social, Representante Legal, Cédula, Bancos, Activos, Pasivos, Patrimonio, Ingresos, Egresos). Grounding rule: if not present in this file, it must never be written. Nationality is strictly standardized to `"Colombia"`.
+- **`categorized_company.json`**: UI accordion categorizations (`id`, `contacto`, `banco`, `financiero`, `otros`) persisted independently in the backend.
+- **`employer_profiles.json`**: Secondary signatory and contact profiles (e.g. Kelly Delgado) persisted independently in the backend.
 - **`field_dictionary.py`**: Semantic synonyms mapping real corporate profile keys to common Colombian form variations, alongside exclusion rules.
 - **`KnowledgeBase` (`knowledge_base.py`)**: CEO persona prompt builder embodying Guillermo Cañón Sarria (CEO of IAC) with Red/Green zone compliance boundaries.
+

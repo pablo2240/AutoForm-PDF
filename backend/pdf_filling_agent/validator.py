@@ -90,7 +90,15 @@ class FillingValidator:
         if digits_only == "98555384":
             return "cedula"
 
-        # Phone: 7-12 digits without letters (excluding exact NIT or Cédula)
+        # Financial amounts (Exact known company financial balances)
+        # Evaluated BEFORE phone to prevent 9-11 digit figures from being falsely categorized as phones
+        FINANCIAL_VALUES = {
+            "16151175009", "8831977528", "7319197482", "1110748257", "975086377"
+        }
+        if digits_only in FINANCIAL_VALUES:
+            return "financial_amount"
+
+        # Phone: 7-12 digits without letters (excluding exact NIT, Cédula or Financial amounts)
         if len(digits_only) >= 7 and len(digits_only) <= 12 and not re.search(r'[a-zA-Z]', val_str):
             return "phone"
 
@@ -162,7 +170,10 @@ class FillingValidator:
         # 3.1 Phone values must not go into non-phone fields
         if sem_type == "phone":
             # Target must have phone signals, and NOT non-phone keywords
-            forbidden_phone_targets = ["pais", "ciudad", "email", "correo", "nit", "nombre", "apellido", "razon social"]
+            forbidden_phone_targets = [
+                "pais", "ciudad", "email", "correo", "nit", "nombre", "apellido", "razon social",
+                "activo", "activos", "pasivo", "pasivos", "patrimonio", "ingreso", "ingresos", "egreso", "egresos", "balance", "financier"
+            ]
             if any(k in norm_label for k in forbidden_phone_targets):
                 return ValidationResult(
                     is_valid=False,
@@ -226,10 +237,25 @@ class FillingValidator:
 
         # 3.8 Cédula values strictly to Cédula / Documento fields
         if sem_type == "cedula":
-            if any(k in norm_label for k in ["nit", "rut", "pais", "telefono", "celular", "email", "correo"]):
+            if any(k in norm_label for k in ["nit", "rut", "pais", "telefono", "celular", "email", "correo", "activo", "pasivo", "patrimonio", "ingreso", "egreso"]):
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: Cédula '{val_str}' cannot be assigned to '{norm_label}'"
+                )
+
+        # 3.9 Financial Amount values strictly to Financial / Accounting fields
+        if sem_type == "financial_amount":
+            financial_signals = ["activo", "activos", "pasivo", "pasivos", "patrimonio", "ingreso", "ingresos", "egreso", "egresos", "balance", "financier", "monto", "cifra"]
+            if not any(k in norm_context or k in norm_label for k in financial_signals):
+                return ValidationResult(
+                    is_valid=False,
+                    reason=f"Tier 3 Type-Aware Guard: Financial amount '{val_str}' requires financial/accounting label, found '{norm_label}'"
+                )
+            forbidden_financial_targets = ["tel", "cel", "telefono", "correo", "email", "nit", "cedula", "nombre", "apellido", "direccion", "pais", "ciudad"]
+            if any(k in norm_label for k in forbidden_financial_targets):
+                return ValidationResult(
+                    is_valid=False,
+                    reason=f"Tier 3 Type-Aware Guard: Financial amount '{val_str}' cannot be assigned to identity/contact field '{norm_label}'"
                 )
 
         return ValidationResult(is_valid=True, reason="Passed all 3 tiers")

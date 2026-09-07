@@ -15,8 +15,15 @@ interface DataManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialCompanyData: CompanyData;
+  initialCategorizedCompany?: CategorizedCompanyData;
+  initialEmployerProfiles?: EmployerProfile[];
   globalSignature: GlobalSignature | null;
-  onSaveData: (flatData: CompanyData, profiles: EmployerProfile[], signature: GlobalSignature | null) => void;
+  onSaveData: (
+    flatData: CompanyData, 
+    categorized: CategorizedCompanyData, 
+    profiles: EmployerProfile[], 
+    signature: GlobalSignature | null
+  ) => void;
 }
 
 // Initial fallback categorization helper
@@ -25,12 +32,14 @@ function categorizeFlatCompanyData(data: CompanyData): CategorizedCompanyData {
     id: [],
     contacto: [],
     banco: [],
+    financiero: [],
     otros: [],
   };
 
   const idKeys = ['nit', 'rut', 'razon_social', 'matricula', 'cedula', 'cedula_representante', 'empresa_id'];
   const contactoKeys = ['direccion', 'telefono', 'email', 'correo', 'ciudad', 'pais', 'web'];
   const bancoKeys = ['banco', 'cuenta', 'tipo_cuenta', 'titular'];
+  const financieroKeys = ['activo', 'activos', 'pasivo', 'pasivos', 'patrimonio', 'ingreso', 'ingresos', 'egreso', 'egresos'];
 
   Object.entries(data).forEach(([key, val]) => {
     const valueStr = String(val || '').trim();
@@ -49,6 +58,8 @@ function categorizeFlatCompanyData(data: CompanyData): CategorizedCompanyData {
       category = 'contacto';
     } else if (bancoKeys.some(k => lowerKey.includes(k))) {
       category = 'banco';
+    } else if (financieroKeys.some(k => lowerKey.includes(k))) {
+      category = 'financiero';
     }
 
     result[category].push({
@@ -129,28 +140,30 @@ export const DEFAULT_INITIAL_COMPANY_CATEGORIES: CategorizedCompanyData = {
     { id: 'f-ban-2', key: 'numero_cuenta', label: 'Número de Cuenta', value: '00300833888', category: 'banco' },
     { id: 'f-ban-3', key: 'tipo_cuenta', label: 'Tipo de Cuenta', value: 'Ahorros', category: 'banco' },
   ],
+  financiero: [
+    { id: 'f-fin-1', key: 'total_activos', label: 'Total Activos', value: '16151175009', category: 'financiero' },
+    { id: 'f-fin-2', key: 'total_pasivos', label: 'Total Pasivos', value: '8831977528', category: 'financiero' },
+    { id: 'f-fin-3', key: 'total_patrimonio', label: 'Total Patrimonio', value: '7319197482', category: 'financiero' },
+    { id: 'f-fin-4', key: 'total_ingresos_mensuales', label: 'Total Ingresos Mensuales', value: '1110748257', category: 'financiero' },
+    { id: 'f-fin-5', key: 'total_egresos_mensuales', label: 'Total Egresos Mensuales', value: '975086377', category: 'financiero' },
+  ],
   otros: [],
 };
 
 export const DEFAULT_INITIAL_EMPLOYER_PROFILES: EmployerProfile[] = [];
 
-const STORAGE_PROFILES_KEY = 'autoform_employer_profiles_v3';
-const STORAGE_COMPANY_KEY = 'autoform_categorized_company_v3';
-const STORAGE_SIGNATURE_KEY = 'autoform_global_signature_v1';
-
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   isOpen,
   onClose,
   initialCompanyData,
+  initialCategorizedCompany,
+  initialEmployerProfiles,
   globalSignature,
   onSaveData,
 }) => {
   const [categorizedCompany, setCategorizedCompany] = useState<CategorizedCompanyData>(() => {
-    const saved = localStorage.getItem(STORAGE_COMPANY_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
+    if (initialCategorizedCompany && Object.keys(initialCategorizedCompany).length > 0) {
+      return initialCategorizedCompany;
     }
     if (initialCompanyData && Object.keys(initialCompanyData).length > 0) {
       return categorizeFlatCompanyData(initialCompanyData);
@@ -159,56 +172,29 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   });
 
   const [profiles, setProfiles] = useState<EmployerProfile[]>(() => {
-    const saved = localStorage.getItem(STORAGE_PROFILES_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return DEFAULT_INITIAL_EMPLOYER_PROFILES;
+    return initialEmployerProfiles && initialEmployerProfiles.length > 0
+      ? initialEmployerProfiles
+      : DEFAULT_INITIAL_EMPLOYER_PROFILES;
   });
 
   const [signature, setSignature] = useState<GlobalSignature | null>(() => {
-    if (globalSignature) return globalSignature;
-    const saved = localStorage.getItem(STORAGE_SIGNATURE_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return null;
+    return globalSignature || null;
   });
 
-  // Helper to persist draft changes locally without closing modal or triggering global parent saves
-  const persistLocal = (
-    nextCat: CategorizedCompanyData,
-    nextProfiles: EmployerProfile[],
-    nextSig: GlobalSignature | null
-  ) => {
-    localStorage.setItem(STORAGE_COMPANY_KEY, JSON.stringify(nextCat));
-    localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(nextProfiles));
-    if (nextSig) {
-      localStorage.setItem(STORAGE_SIGNATURE_KEY, JSON.stringify(nextSig));
-    } else {
-      localStorage.removeItem(STORAGE_SIGNATURE_KEY);
-    }
-  };
-
-  // Sync if initial data changes
+  // Sync draft state strictly from incoming server props whenever modal opens
   useEffect(() => {
-    if (initialCompanyData && Object.keys(initialCompanyData).length > 0) {
-      const saved = localStorage.getItem(STORAGE_COMPANY_KEY);
-      if (!saved) {
+    if (isOpen) {
+      if (initialCategorizedCompany && Object.keys(initialCategorizedCompany).length > 0) {
+        setCategorizedCompany(initialCategorizedCompany);
+      } else if (initialCompanyData && Object.keys(initialCompanyData).length > 0) {
         setCategorizedCompany(categorizeFlatCompanyData(initialCompanyData));
       }
+      if (initialEmployerProfiles !== undefined) {
+        setProfiles(initialEmployerProfiles);
+      }
+      setSignature(globalSignature || null);
     }
-  }, [initialCompanyData]);
-
-  useEffect(() => {
-    if (globalSignature !== undefined) {
-      setSignature(globalSignature);
-    }
-  }, [globalSignature]);
+  }, [isOpen, initialCategorizedCompany, initialEmployerProfiles, initialCompanyData, globalSignature]);
 
   if (!isOpen) return null;
 
@@ -240,8 +226,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         ...prev,
         [field.category]: updatedList,
       };
-
-      persistLocal(next, profiles, signature);
       return next;
     });
   };
@@ -269,7 +253,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         ...prev,
         [category]: updatedList,
       };
-      persistLocal(next, profiles, signature);
       return next;
     });
   };
@@ -281,7 +264,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         ...prev,
         [category]: (prev[category] || []).filter(item => item.id !== id),
       };
-      persistLocal(next, profiles, signature);
       return next;
     });
   };
@@ -307,8 +289,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         };
         updated = [...prev, newProf];
       }
-
-      persistLocal(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -317,7 +297,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const handleUpdateProfile = (id: string, updatedProfile: EmployerProfile) => {
     setProfiles(prev => {
       const updated = prev.map(p => (p.id === id ? updatedProfile : p));
-      persistLocal(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -326,7 +305,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const handleDeleteProfile = (id: string) => {
     setProfiles(prev => {
       const updated = prev.filter(p => p.id !== id);
-      persistLocal(categorizedCompany, updated, signature);
       return updated;
     });
   };
@@ -334,14 +312,12 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   // Save Signature into local state (modal stays open for ongoing edits)
   const handleSaveSignature = (sig: GlobalSignature | null) => {
     setSignature(sig);
-    persistLocal(categorizedCompany, profiles, sig);
   };
 
   // Save everything to backend and apply to forms
   const handleFinalSaveAndClose = () => {
-    persistLocal(categorizedCompany, profiles, signature);
     const flat = flattenToCompanyData(categorizedCompany, profiles, signature);
-    onSaveData(flat, profiles, signature);
+    onSaveData(flat, categorizedCompany, profiles, signature);
     onClose();
   };
 

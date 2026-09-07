@@ -2,7 +2,7 @@ export interface CompanyData {
   [key: string]: string | number;
 }
 
-export type CompanyCategory = 'id' | 'contacto' | 'banco' | 'otros';
+export type CompanyCategory = 'id' | 'contacto' | 'banco' | 'financiero' | 'otros';
 
 export interface CompanyFieldItem {
   id: string;
@@ -32,12 +32,14 @@ export interface CategorizedCompanyData {
   id: CompanyFieldItem[];
   contacto: CompanyFieldItem[];
   banco: CompanyFieldItem[];
+  financiero: CompanyFieldItem[];
   otros: CompanyFieldItem[];
 }
 
 export interface GlobalSignature {
   base64: string;
   filename: string;
+  url?: string;
   position?: { x: number; y: number };
   size?: { width: number; height: number };
   scale?: number;

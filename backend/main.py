@@ -35,9 +35,28 @@ app.add_middleware(
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 INPUT_DIR = os.path.join(PROJECT_ROOT, "input")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
+SIGNATURES_DIR = os.path.join(DATA_DIR, "signatures")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(SIGNATURES_DIR, exist_ok=True)
+
+class SignaturePayload(BaseModel):
+    image_base64: str
+    filename: Optional[str] = "global_signature.png"
+    position: Optional[Dict[str, float]] = None
+    size: Optional[Dict[str, float]] = None
+
+class CategorizedCompanyPayload(BaseModel):
+    id: Optional[List[Dict[str, Any]]] = []
+    contacto: Optional[List[Dict[str, Any]]] = []
+    banco: Optional[List[Dict[str, Any]]] = []
+    financiero: Optional[List[Dict[str, Any]]] = []
+    otros: Optional[List[Dict[str, Any]]] = []
+
+class EmployerProfilesPayload(BaseModel):
+    profiles: Optional[List[Dict[str, Any]]] = []
+
 
 class ItemStyle(BaseModel):
     font_family: Optional[str] = "Arial"
@@ -123,8 +142,219 @@ def get_company_data():
 def update_company_data(data: Dict[str, Any]):
     path = os.path.join(DATA_DIR, "company_data.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, ensure_ascii=False)
     return {"status": "success", "message": "Company data saved successfully"}
+
+@app.get("/api/signature")
+def get_global_signature():
+    sig_img_path = os.path.join(SIGNATURES_DIR, "global_signature.png")
+    meta_path = os.path.join(SIGNATURES_DIR, "signature_metadata.json")
+    if not os.path.exists(sig_img_path):
+        return {"signature": None}
+    
+    metadata = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8-sig") as f:
+                metadata = json.load(f)
+        except Exception:
+            pass
+
+    import base64
+    with open(sig_img_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+        data_url = f"data:image/png;base64,{b64}"
+
+    return {
+        "signature": {
+            "filename": metadata.get("filename", "global_signature.png"),
+            "base64": data_url,
+            "url": "/api/signature/image",
+            "position": metadata.get("position", {"x": 0, "y": 0}),
+            "size": metadata.get("size", {"width": 160, "height": 70})
+        }
+    }
+
+@app.get("/api/signature/image")
+def get_signature_image():
+    sig_img_path = os.path.join(SIGNATURES_DIR, "global_signature.png")
+    if not os.path.exists(sig_img_path):
+        raise HTTPException(status_code=404, detail="No global signature found")
+    return FileResponse(
+        path=sig_img_path,
+        media_type="image/png",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
+
+@app.post("/api/signature")
+def save_global_signature(payload: SignaturePayload):
+    import base64
+    b64_str = payload.image_base64
+    if "," in b64_str:
+        b64_str = b64_str.split(",", 1)[1]
+    try:
+        img_bytes = base64.b64decode(b64_str)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 image: {str(e)}")
+
+    sig_img_path = os.path.join(SIGNATURES_DIR, "global_signature.png")
+    with open(sig_img_path, "wb") as f:
+        f.write(img_bytes)
+
+    meta = {
+        "filename": payload.filename or "global_signature.png",
+        "position": payload.position or {"x": 0, "y": 0},
+        "size": payload.size or {"width": 160, "height": 70}
+    }
+    meta_path = os.path.join(SIGNATURES_DIR, "signature_metadata.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+
+    comp_path = os.path.join(DATA_DIR, "company_data.json")
+    if os.path.exists(comp_path):
+        try:
+            with open(comp_path, "r", encoding="utf-8-sig") as f:
+                cd = json.load(f)
+            cd["firma_global"] = "global_signature.png"
+            with open(comp_path, "w", encoding="utf-8") as f:
+                json.dump(cd, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[WARNING] Error updating firma_global in company_data.json: {e}")
+
+    return {
+        "status": "success",
+        "message": "Global signature saved successfully",
+        "signature": {
+            "filename": meta["filename"],
+            "url": "/api/signature/image",
+            "position": meta["position"],
+            "size": meta["size"]
+        }
+    }
+
+@app.delete("/api/signature")
+def delete_global_signature():
+    sig_img_path = os.path.join(SIGNATURES_DIR, "global_signature.png")
+    meta_path = os.path.join(SIGNATURES_DIR, "signature_metadata.json")
+    if os.path.exists(sig_img_path):
+        os.remove(sig_img_path)
+    if os.path.exists(meta_path):
+        os.remove(meta_path)
+
+    comp_path = os.path.join(DATA_DIR, "company_data.json")
+    if os.path.exists(comp_path):
+        try:
+            with open(comp_path, "r", encoding="utf-8-sig") as f:
+                cd = json.load(f)
+            if "firma_global" in cd:
+                del cd["firma_global"]
+                with open(comp_path, "w", encoding="utf-8") as f:
+                    json.dump(cd, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    return {"status": "success", "message": "Global signature deleted successfully"}
+
+@app.get("/api/categorized-company")
+def get_categorized_company():
+    path = os.path.join(DATA_DIR, "categorized_company.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+
+    comp_path = os.path.join(DATA_DIR, "company_data.json")
+    comp_data = {}
+    if os.path.exists(comp_path):
+        with open(comp_path, "r", encoding="utf-8-sig") as f:
+            comp_data = json.load(f)
+
+    id_keys = ['nit', 'rut', 'razon_social', 'matricula', 'cedula', 'representante', 'tipo_documento', 'lugar_expedicion', 'ciudad', 'departamento', 'pais']
+    contacto_keys = ['direccion', 'telefono', 'email', 'correo', 'celular', 'web', 'pagina']
+    banco_keys = ['banco', 'cuenta', 'tipo_cuenta', 'titular']
+    financiero_keys = ['activo', 'activos', 'pasivo', 'pasivos', 'patrimonio', 'ingreso', 'ingresos', 'egreso', 'egresos']
+
+    default_cat = {
+        "id": [],
+        "contacto": [],
+        "banco": [],
+        "financiero": [],
+        "otros": []
+    }
+
+    for key, val in comp_data.items():
+        if key.startswith("kelly_") or key == "firma_global":
+            continue
+        val_str = str(val or "").strip()
+        if not val_str:
+            continue
+        lower_key = key.lower()
+        label = key.replace('_', ' ').title()
+
+        category = 'otros'
+        if any(k in lower_key for k in id_keys):
+            category = 'id'
+        elif any(k in lower_key for k in contacto_keys):
+            category = 'contacto'
+        elif any(k in lower_key for k in banco_keys):
+            category = 'banco'
+        elif any(k in lower_key for k in financiero_keys):
+            category = 'financiero'
+
+        default_cat[category].append({
+            "id": f"cf-{key}",
+            "key": key,
+            "label": label,
+            "value": val_str,
+            "category": category
+        })
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(default_cat, f, indent=2, ensure_ascii=False)
+    return default_cat
+
+@app.post("/api/categorized-company")
+def update_categorized_company(payload: Dict[str, Any]):
+    path = os.path.join(DATA_DIR, "categorized_company.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    return {"status": "success", "message": "Categorized company data saved successfully"}
+
+@app.get("/api/employer-profiles")
+def get_employer_profiles():
+    path = os.path.join(DATA_DIR, "employer_profiles.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+
+    comp_path = os.path.join(DATA_DIR, "company_data.json")
+    comp_data = {}
+    if os.path.exists(comp_path):
+        with open(comp_path, "r", encoding="utf-8-sig") as f:
+            comp_data = json.load(f)
+
+    default_profiles = []
+    if "kelly_delgado_nombre" in comp_data or "kelly_delgado_email" in comp_data:
+        default_profiles.append({
+            "id": "prof-kelly-delgado",
+            "profileName": "Kelly Delgado",
+            "nombre": comp_data.get("kelly_delgado_nombre", "Kelly Yohana"),
+            "apellido": comp_data.get("kelly_delgado_apellido", "Delgado Macea"),
+            "email": comp_data.get("kelly_delgado_email", "Kelly.Delgado@iaclatam.com"),
+            "celular": comp_data.get("kelly_delgado_celular", "301 4750760"),
+            "customFields": []
+        })
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(default_profiles, f, indent=2, ensure_ascii=False)
+    return default_profiles
+
+@app.post("/api/employer-profiles")
+def update_employer_profiles(payload: List[Dict[str, Any]]):
+    path = os.path.join(DATA_DIR, "employer_profiles.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    return {"status": "success", "message": "Employer profiles saved successfully"}
+
 
 @app.get("/api/templates")
 def list_templates():
@@ -270,16 +500,24 @@ def generate_pdf(req: GenerateRequest):
         box = item["box"]
         rect = [box["x0"], box["y0"], box["x1"], box["y1"]]
 
-        if item_type == "image" and style.get("image_base64"):
-            placements.append(
-                VisualPlacement(
-                    page=item["page_number"],
-                    rect=rect,
-                    item_type="image",
-                    image_base64=style.get("image_base64"),
-                    field_description=item.get("label", "Imagen / Firma")
+        if item_type == "image":
+            img_b64 = style.get("image_base64")
+            if not img_b64:
+                sig_img_path = os.path.join(SIGNATURES_DIR, "global_signature.png")
+                if os.path.exists(sig_img_path):
+                    import base64
+                    with open(sig_img_path, "rb") as f:
+                        img_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
+            if img_b64:
+                placements.append(
+                    VisualPlacement(
+                        page=item["page_number"],
+                        rect=rect,
+                        item_type="image",
+                        image_base64=img_b64,
+                        field_description=item.get("label", "Imagen / Firma")
+                    )
                 )
-            )
         else:
             custom_text = style.get("custom_text")
             if custom_text is not None and custom_text != "":

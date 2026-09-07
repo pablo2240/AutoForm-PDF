@@ -852,6 +852,31 @@ class PDFAgent:
                 val_to_set = "SI"
                 assigned_cat = "p_beneficiario_final"
 
+            # 25. Total Activos
+            elif re.search(r'\b(total activos|activos)\b', eval_target) and "pasivo" not in eval_target and "ingreso" not in eval_target:
+                val_to_set = profile.get("total_activos")
+                assigned_cat = "p_activos"
+
+            # 26. Total Pasivos
+            elif re.search(r'\b(total pasivos|pasivos)\b', eval_target) and "activo" not in eval_target:
+                val_to_set = profile.get("total_pasivos")
+                assigned_cat = "p_pasivos"
+
+            # 27. Total Patrimonio
+            elif re.search(r'\b(total patrimonio|patrimonio)\b', eval_target):
+                val_to_set = profile.get("total_patrimonio")
+                assigned_cat = "p_patrimonio"
+
+            # 28. Total Ingresos Mensuales
+            elif re.search(r'\b(total ingresos mensuales|ingresos mensuales|ingresos operacionales)\b', eval_target) and "egreso" not in eval_target:
+                val_to_set = profile.get("total_ingresos_mensuales")
+                assigned_cat = "p_ingresos"
+
+            # 29. Total Egresos Mensuales
+            elif re.search(r'\b(total egresos mensuales|egresos mensuales|gastos mensuales)\b', eval_target) and "ingreso" not in eval_target:
+                val_to_set = profile.get("total_egresos_mensuales")
+                assigned_cat = "p_egresos"
+
             if val_to_set:
                 val_str = str(val_to_set).strip()
                 v_res = self.validator.validate(

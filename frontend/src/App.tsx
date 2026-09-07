@@ -9,6 +9,8 @@ import type {
   BoxPct,
   ItemStyle,
   GlobalSignature,
+  CategorizedCompanyData,
+  EmployerProfile,
   FillResultData
 } from './types';
 import { 
@@ -21,7 +23,14 @@ import {
   fetchTemplateMapping, 
   saveTemplateMapping, 
   generateFilledPdf,
-  aiFillPdf
+  aiFillPdf,
+  fetchGlobalSignature,
+  saveGlobalSignature,
+  deleteGlobalSignature,
+  fetchCategorizedCompany,
+  saveCategorizedCompany,
+  fetchEmployerProfiles,
+  saveEmployerProfiles
 } from './api';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
@@ -48,6 +57,8 @@ export const App: React.FC = () => {
   const [pages, setPages] = useState<PDFPage[]>([]);
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [companyData, setCompanyData] = useState<CompanyData>({});
+  const [categorizedCompany, setCategorizedCompany] = useState<CategorizedCompanyData | undefined>(undefined);
+  const [employerProfiles, setEmployerProfiles] = useState<EmployerProfile[]>([]);
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [mappings, setMappings] = useState<MappingItem[]>([]);
   const [isTemporarySession, setIsTemporarySession] = useState<boolean>(false);
@@ -63,16 +74,8 @@ export const App: React.FC = () => {
   // Custom Confirm Dialog State
   const [confirmModalData, setConfirmModalData] = useState<ConfirmModalState | null>(null);
   
-  // Global Signature State
-  const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(() => {
-    const saved = localStorage.getItem('autoform_global_signature_v1');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return null;
-  });
+  // Global Signature State (Strictly Backend Authoritative, no localStorage)
+  const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(null);
 
   // Style and editing states
   const [currentStyle, setCurrentStyle] = useState<ItemStyle>({
@@ -101,80 +104,24 @@ export const App: React.FC = () => {
     }, 3500);
   };
 
-  // Initial load
+  // Initial load - Strictly Backend Authoritative
   useEffect(() => {
     async function init() {
       try {
         setIsLoading(true);
-        const [tplList, compData] = await Promise.all([
+        const [tplList, compData, catCompany, profiles, sig] = await Promise.all([
           fetchTemplates(),
           fetchCompanyData(),
+          fetchCategorizedCompany().catch(() => undefined),
+          fetchEmployerProfiles().catch(() => []),
+          fetchGlobalSignature().catch(() => null),
         ]);
-
-        let hasNewVariables = false;
-
-        // 1. Merge categorized company data from localStorage if exists
-        try {
-          const savedCatStr = localStorage.getItem('autoform_categorized_company_v3');
-          if (savedCatStr) {
-            const savedCat = JSON.parse(savedCatStr);
-            if (savedCat && typeof savedCat === 'object') {
-              Object.values(savedCat).forEach((fields: any) => {
-                if (Array.isArray(fields)) {
-                  fields.forEach((f: any) => {
-                    if (f && f.key && f.value) {
-                      if (compData[f.key] !== f.value) {
-                        compData[f.key] = f.value;
-                        hasNewVariables = true;
-                      }
-                    }
-                  });
-                }
-              });
-            }
-          }
-        } catch (e) {
-          console.warn('Error merging categorized company data on init:', e);
-        }
-
-        // 2. Merge employer profiles from localStorage so their variables are always available
-        try {
-          const savedProfilesStr = localStorage.getItem('autoform_employer_profiles_v3');
-          if (savedProfilesStr) {
-            const savedProfiles = JSON.parse(savedProfilesStr);
-            if (Array.isArray(savedProfiles) && savedProfiles.length > 0) {
-              savedProfiles.forEach((p: any) => {
-                if (!p || !p.profileName) return;
-                const prefix = p.profileName.toLowerCase().replace(/\s+/g, '_').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                if (p.nombre) { compData[`${prefix}_nombre`] = p.nombre; hasNewVariables = true; }
-                if (p.apellido) { compData[`${prefix}_apellido`] = p.apellido; hasNewVariables = true; }
-                if (p.nombre && p.apellido) { compData[`${prefix}_nombre_completo`] = `${p.nombre} ${p.apellido}`; hasNewVariables = true; }
-                if (p.email) { compData[`${prefix}_email`] = p.email; hasNewVariables = true; }
-                if (p.celular) { compData[`${prefix}_celular`] = p.celular; hasNewVariables = true; }
-
-                if (p.customFields && Array.isArray(p.customFields)) {
-                  p.customFields.forEach((cf: any) => {
-                    if (cf && cf.key && cf.value) {
-                      const cfKey = cf.key.toLowerCase().replace(/\s+/g, '_').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                      compData[`${prefix}_${cfKey}`] = cf.value;
-                      hasNewVariables = true;
-                    }
-                  });
-                }
-              });
-            }
-          }
-        } catch (e) {
-          console.warn('Error merging profiles on init:', e);
-        }
 
         setTemplates(tplList);
         setCompanyData({ ...compData });
-
-        // If local storage had extra variables not yet in backend, sync them
-        if (hasNewVariables) {
-          saveCompanyData(compData).catch(() => {});
-        }
+        if (catCompany) setCategorizedCompany(catCompany);
+        setEmployerProfiles(profiles || []);
+        setGlobalSignature(sig || null);
 
         if (tplList.length > 0) {
           setSelectedTemplate(tplList[0].id);
@@ -522,26 +469,41 @@ export const App: React.FC = () => {
 
   const handleSaveCompanyData = async (
     updatedData: CompanyData, 
-    _profiles?: any, 
+    categorized?: CategorizedCompanyData,
+    profiles?: EmployerProfile[], 
     signature?: GlobalSignature | null
   ) => {
     try {
-      await saveCompanyData(updatedData);
-      setCompanyData(updatedData);
-      
+      setIsSaving(true);
+      const promises: Promise<any>[] = [saveCompanyData(updatedData)];
+
+      if (categorized) {
+        promises.push(saveCategorizedCompany(categorized));
+      }
+      if (profiles) {
+        promises.push(saveEmployerProfiles(profiles));
+      }
       if (signature !== undefined) {
-        setGlobalSignature(signature);
         if (signature) {
-          localStorage.setItem('autoform_global_signature_v1', JSON.stringify(signature));
+          promises.push(saveGlobalSignature(signature));
         } else {
-          localStorage.removeItem('autoform_global_signature_v1');
+          promises.push(deleteGlobalSignature());
         }
       }
+
+      await Promise.all(promises);
+
+      setCompanyData(updatedData);
+      if (categorized) setCategorizedCompany(categorized);
+      if (profiles) setEmployerProfiles(profiles);
+      if (signature !== undefined) setGlobalSignature(signature);
       
       setIsCompanyModalOpen(false);
-      showToast('Datos de la empresa guardados correctamente', 'success');
+      showToast('Datos de la empresa y firma guardados exitosamente en el servidor', 'success');
     } catch (err: any) {
       showToast(`Error al guardar datos: ${err.message}`, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -665,6 +627,8 @@ export const App: React.FC = () => {
         isOpen={isCompanyModalOpen}
         onClose={() => setIsCompanyModalOpen(false)}
         initialCompanyData={companyData}
+        initialCategorizedCompany={categorizedCompany}
+        initialEmployerProfiles={employerProfiles}
         globalSignature={globalSignature}
         onSaveData={handleSaveCompanyData}
       />

@@ -31,6 +31,7 @@ const TABS: { id: CompanyCategory; label: string; icon: string }[] = [
   { id: 'id', label: 'ID', icon: '🪪' },
   { id: 'contacto', label: 'Contacto', icon: '📍' },
   { id: 'banco', label: 'Banco', icon: '🏦' },
+  { id: 'financiero', label: 'Financiero', icon: '💰' },
   { id: 'otros', label: 'Otros', icon: '❓' },
 ];
 

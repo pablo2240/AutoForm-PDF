@@ -194,7 +194,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
               <div className="signature-preview-row">
                 <img 
-                  src={globalSignature.base64} 
+                  src={globalSignature.base64 || globalSignature.url} 
                   alt="Firma" 
                   className="sidebar-sig-thumb" 
                 />

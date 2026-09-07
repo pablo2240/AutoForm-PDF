@@ -103,6 +103,21 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "sucursal": [
         "Sucursal / Agencia", "Sucursal", "Sucursal del Banco", "Agencia"
+    ],
+    "total_activos": [
+        "Total Activos", "Activos", "Activos (Pesos)", "Valor Activos", "Total de Activos"
+    ],
+    "total_pasivos": [
+        "Total Pasivos", "Pasivos", "Pasivos (Pesos)", "Valor Pasivos", "Total de Pasivos"
+    ],
+    "total_patrimonio": [
+        "Total Patrimonio", "Patrimonio", "Patrimonio (Activos - Pasivos)", "Patrimonio Líquido", "Total de Patrimonio"
+    ],
+    "total_ingresos_mensuales": [
+        "Total Ingresos Mensuales", "Ingresos Mensuales", "Ingresos Operacionales", "Ingresos Mensuales (Pesos)", "Total Ingresos", "Ingresos"
+    ],
+    "total_egresos_mensuales": [
+        "Total Egresos Mensuales", "Egresos Mensuales", "Gastos Mensuales", "Egresos Mensuales (Pesos)", "Total Egresos", "Egresos"
     ]
 }
 

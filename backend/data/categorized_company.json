@@ -1,0 +1,179 @@
+{
+  "id": [
+    {
+      "id": "cf-razon_social",
+      "key": "razon_social",
+      "label": "Razon Social",
+      "value": "Ingeniería Asistida Por Computador S.A.S",
+      "category": "id"
+    },
+    {
+      "id": "cf-nit",
+      "key": "nit",
+      "label": "Nit",
+      "value": "8110047212",
+      "category": "id"
+    },
+    {
+      "id": "cf-numero_cedula",
+      "key": "numero_cedula",
+      "label": "Numero Cedula",
+      "value": "98555384",
+      "category": "id"
+    },
+    {
+      "id": "cf-ciudad",
+      "key": "ciudad",
+      "label": "Ciudad",
+      "value": "Medellin",
+      "category": "id"
+    },
+    {
+      "id": "cf-pais",
+      "key": "pais",
+      "label": "Pais",
+      "value": "Colombia",
+      "category": "id"
+    },
+    {
+      "id": "cf-representante_legal",
+      "key": "representante_legal",
+      "label": "Representante Legal",
+      "value": "Guillermo Humberto Cañón Sarria",
+      "category": "id"
+    },
+    {
+      "id": "cf-representante_nombre",
+      "key": "representante_nombre",
+      "label": "Representante Nombre",
+      "value": "Guillermo Humberto",
+      "category": "id"
+    },
+    {
+      "id": "cf-representante_apellido",
+      "key": "representante_apellido",
+      "label": "Representante Apellido",
+      "value": "Cañón Sarria",
+      "category": "id"
+    },
+    {
+      "id": "cf-tipo_documento",
+      "key": "tipo_documento",
+      "label": "Tipo Documento",
+      "value": "C.C",
+      "category": "id"
+    },
+    {
+      "id": "cf-lugar_expedicion_rep",
+      "key": "lugar_expedicion_rep",
+      "label": "Lugar Expedicion Rep",
+      "value": "Envigado",
+      "category": "id"
+    },
+    {
+      "id": "cf-departamento",
+      "key": "departamento",
+      "label": "Departamento",
+      "value": "Antioquia",
+      "category": "id"
+    }
+  ],
+  "contacto": [
+    {
+      "id": "cf-correo_rep",
+      "key": "correo_rep",
+      "label": "Correo Rep",
+      "value": "guillermo.canon@iaclatam.com",
+      "category": "contacto"
+    },
+    {
+      "id": "cf-telefono",
+      "key": "telefono",
+      "label": "Telefono",
+      "value": "2656868",
+      "category": "contacto"
+    },
+    {
+      "id": "cf-direccion_principal",
+      "key": "direccion_principal",
+      "label": "Direccion Principal",
+      "value": "Carrera 63 B # 32 E -25 OFC 206",
+      "category": "contacto"
+    },
+    {
+      "id": "cf-pagina_web",
+      "key": "pagina_web",
+      "label": "Pagina Web",
+      "value": "iaclatam.com",
+      "category": "contacto"
+    },
+    {
+      "id": "cf-celular_rep",
+      "key": "celular_rep",
+      "label": "Celular Rep",
+      "value": "3104120217",
+      "category": "contacto"
+    }
+  ],
+  "banco": [
+    {
+      "id": "cf-numero_cuenta",
+      "key": "numero_cuenta",
+      "label": "Numero Cuenta",
+      "value": "00300833888",
+      "category": "banco"
+    },
+    {
+      "id": "cf-tipo_cuenta",
+      "key": "tipo_cuenta",
+      "label": "Tipo Cuenta",
+      "value": "Ahorros",
+      "category": "banco"
+    },
+    {
+      "id": "cf-entidad_bancaria",
+      "key": "entidad_bancaria",
+      "label": "Entidad Bancaria",
+      "value": "BANCOLOMBIA",
+      "category": "banco"
+    }
+  ],
+  "financiero": [
+    {
+      "id": "cf-total_activos",
+      "key": "total_activos",
+      "label": "Total Activos",
+      "value": "16151175009",
+      "category": "financiero"
+    },
+    {
+      "id": "cf-total_pasivos",
+      "key": "total_pasivos",
+      "label": "Total Pasivos",
+      "value": "8831977528",
+      "category": "financiero"
+    },
+    {
+      "id": "cf-total_patrimonio",
+      "key": "total_patrimonio",
+      "label": "Total Patrimonio",
+      "value": "7319197482",
+      "category": "financiero"
+    },
+    {
+      "id": "cf-total_ingresos_mensuales",
+      "key": "total_ingresos_mensuales",
+      "label": "Total Ingresos Mensuales",
+      "value": "1110748257",
+      "category": "financiero"
+    },
+    {
+      "id": "cf-total_egresos_mensuales",
+      "key": "total_egresos_mensuales",
+      "label": "Total Egresos Mensuales",
+      "value": "975086377",
+      "category": "financiero"
+    }
+  ],
+  "otros": []
+}
