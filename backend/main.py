@@ -257,6 +257,10 @@ def delete_global_signature():
 
 @app.get("/api/categorized-company")
 def get_categorized_company():
+    """
+    Retorna la estructura categorizada de datos de la empresa (ADR-0006, ADR-0007).
+    Incluye categorías: id, contacto, banco, financiero y otros.
+    """
     path = os.path.join(DATA_DIR, "categorized_company.json")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8-sig") as f:
