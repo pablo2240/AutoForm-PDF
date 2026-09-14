@@ -24,6 +24,9 @@ htmlcov/
 output/*.pdf
 !output/.gitkeep
 archive/
+*.db
+*.sqlite
+*.sqlite3
 
 # OS / Editor Files
 .DS_Store
