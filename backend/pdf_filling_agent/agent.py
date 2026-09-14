@@ -80,6 +80,7 @@ class PDFAgent:
                  model: Optional[str] = None,
                  knowledge_base: Optional[KnowledgeBase] = None,
                  company_profile_path: Optional[str] = None,
+                 commercial_profile: Optional[Dict[str, Any]] = None,
                  forms_dir: Optional[str] = None):
         
         # Always reload environment from .env with explicit path
@@ -173,6 +174,7 @@ class PDFAgent:
 
         # Load company profile
         self.company_profile = self._load_company_profile(company_profile_path)
+        self.commercial_profile = commercial_profile
 
         # Load static form maps
         self.forms_dir = forms_dir or os.path.join(os.path.dirname(__file__), "..", "forms")
@@ -777,21 +779,43 @@ class PDFAgent:
 
             # 13. Contacto Principal / Persona de Contacto en Sección de Proveedores
             elif "contacto" in norm and not any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "datos de contacto solo para clientes"]):
-                if any(k in eval_target for k in ["correo", "email", "e mail"]):
-                    val_to_set = profile.get("correo_rep", "guillermo.canon@iaclatam.com")
-                    assigned_cat = "contacto_correo"
-                elif any(k in eval_target for k in ["celular", "movil"]):
-                    val_to_set = profile.get("celular_rep", "3104120217")
-                    assigned_cat = "contacto_celular"
-                elif any(k in eval_target for k in ["telefono", "tel"]):
-                    val_to_set = profile.get("telefono", "2656868")
-                    assigned_cat = "contacto_telefono"
-                elif "cargo" in eval_target:
-                    val_to_set = "Representante Legal"
-                    assigned_cat = "contacto_cargo"
-                elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
-                    val_to_set = profile.get("representante_legal", rep_full)
-                    assigned_cat = "contacto_nombre"
+                cp = self.commercial_profile
+                if cp:
+                    cp_nombre = f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() or cp.get("profile_name", "")
+                    if any(k in eval_target for k in ["correo", "email", "e mail"]):
+                        val_to_set = cp.get("email") or profile.get("correo_rep")
+                        assigned_cat = "contacto_correo"
+                    elif any(k in eval_target for k in ["celular", "movil"]):
+                        val_to_set = cp.get("celular") or profile.get("celular_rep")
+                        assigned_cat = "contacto_celular"
+                    elif any(k in eval_target for k in ["telefono", "tel"]):
+                        val_to_set = cp.get("celular") or profile.get("telefono")
+                        assigned_cat = "contacto_telefono"
+                    elif "cargo" in eval_target:
+                        val_to_set = cp.get("cargo") or "Asesor Comercial"
+                        assigned_cat = "contacto_cargo"
+                    elif any(k in eval_target or k in norm for k in ["documento", "cedula", "identificacion"]):
+                        val_to_set = cp.get("documento_identidad")
+                        assigned_cat = "contacto_cedula"
+                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
+                        val_to_set = cp_nombre or profile.get("representante_legal", rep_full)
+                        assigned_cat = "contacto_nombre"
+                else:
+                    if any(k in eval_target for k in ["correo", "email", "e mail"]):
+                        val_to_set = profile.get("correo_rep", "guillermo.canon@iaclatam.com")
+                        assigned_cat = "contacto_correo"
+                    elif any(k in eval_target for k in ["celular", "movil"]):
+                        val_to_set = profile.get("celular_rep", "3104120217")
+                        assigned_cat = "contacto_celular"
+                    elif any(k in eval_target for k in ["telefono", "tel"]):
+                        val_to_set = profile.get("telefono", "2656868")
+                        assigned_cat = "contacto_telefono"
+                    elif "cargo" in eval_target:
+                        val_to_set = "Representante Legal"
+                        assigned_cat = "contacto_cargo"
+                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
+                        val_to_set = profile.get("representante_legal", rep_full)
+                        assigned_cat = "contacto_nombre"
 
             # 14. Dirección Domicilio Principal
             elif (re.search(r'\b(direccion|domicilio|oficina principal direccion|direccion domicilio)\b', eval_target)) and ("p_dir", sec_key) not in assigned_section_categories:

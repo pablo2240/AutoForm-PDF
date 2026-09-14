@@ -2,10 +2,10 @@ import os
 import sys
 import json
 import shutil
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any, Optional, Tuple
 
 # Ensure project root is in sys.path
@@ -21,12 +21,21 @@ else:
     load_dotenv(override=True)
 
 from backend.pdf_filling_agent.visual_processor import VisualPDFProcessor, VisualPlacement
+from backend.db.session import get_db, SessionLocal
+from backend.db.models import CommercialProfile
+from backend.db.auth import hash_password, verify_password, create_session_token, verify_session_token, SESSION_MAX_AGE_SECONDS
 
 app = FastAPI(title="AutoForm PDF API")
 
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if cors_origins_env:
+    allow_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+else:
+    allow_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,6 +86,72 @@ class MappingItem(BaseModel):
     box_pct: Optional[Dict[str, float]] = None # x0_pct, y0_pct, x1_pct, y1_pct (0 to 1)
     style: Optional[ItemStyle] = None
 
+class CommercialProfilePublicDTO(BaseModel):
+    id: str
+    profile_name: str
+    nombre: str
+    apellido: str
+    cargo: str
+    email: str
+    celular: str
+    is_active: bool
+
+class CommercialProfileAdminDTO(BaseModel):
+    id: str
+    profile_name: str
+    nombre: str
+    apellido: str
+    cargo: str
+    email: str
+    celular: str
+    tipo_documento: Optional[str] = "C.C"
+    documento_identidad: Optional[str] = None
+    role: str
+    is_active: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_modified_by_ip: Optional[str] = None
+
+class CommercialProfileCreateDTO(BaseModel):
+    profile_name: str
+    nombre: str
+    apellido: str
+    cargo: str
+    email: str
+    celular: str
+    tipo_documento: Optional[str] = "C.C"
+    documento_identidad: Optional[str] = None
+    role: Optional[str] = "commercial"
+    password: Optional[str] = None
+
+class CommercialProfileUpdateDTO(BaseModel):
+    profile_name: Optional[str] = None
+    nombre: Optional[str] = None
+    apellido: Optional[str] = None
+    cargo: Optional[str] = None
+    email: Optional[str] = None
+    celular: Optional[str] = None
+    tipo_documento: Optional[str] = None
+    documento_identidad: Optional[str] = None
+    role: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class AdminLoginDTO(BaseModel):
+    email: str
+    password: str
+
+class CommercialRegisterDTO(BaseModel):
+    profile_name: Optional[str] = None
+    nombre: str
+    apellido: str
+    cargo: str
+    email: str
+    celular: str
+    tipo_documento: Optional[str] = "CC"
+    documento_identidad: Optional[str] = None
+    password: str
+
 class TemplateMapping(BaseModel):
     template_id: str
     page_width: float
@@ -87,9 +162,11 @@ class GenerateRequest(BaseModel):
     template_id: str
     mappings: Optional[List[MappingItem]] = None
     is_temporary: Optional[bool] = False
+    commercial_profile_id: Optional[str] = None
 
 class AiFillRequest(BaseModel):
     template_id: str
+    commercial_profile_id: Optional[str] = None
 
 
 def hex_to_rgb_tuple(hex_color: Optional[str]) -> Tuple[float, float, float]:
@@ -359,6 +436,280 @@ def update_employer_profiles(payload: List[Dict[str, Any]]):
         json.dump(payload, f, indent=2, ensure_ascii=False)
     return {"status": "success", "message": "Employer profiles saved successfully"}
 
+# ---------------------------------------------------------------------------
+# ADR-0008: Commercial Profiles & Administrative Security Endpoints
+# ---------------------------------------------------------------------------
+
+def resolve_commercial_profile(commercial_profile_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Validates and resolves the commercial profile for PDF generation.
+    Enforces conscious selection: requires either a valid active commercial profile ID or 'legal_rep_only'.
+    Fails fast with HTTP 422 if omitted or empty.
+    """
+    if not commercial_profile_id or not str(commercial_profile_id).strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Se requiere seleccionar un responsable comercial o elegir 'legal_rep_only' antes de generar el PDF."
+        )
+    clean_id = str(commercial_profile_id).strip()
+    if clean_id == "legal_rep_only":
+        return None
+
+    db = SessionLocal()
+    try:
+        cp = db.query(CommercialProfile).filter(
+            CommercialProfile.id == clean_id,
+            CommercialProfile.is_active == True
+        ).first()
+        if not cp:
+            raise HTTPException(
+                status_code=404,
+                detail=f"El responsable comercial con ID '{clean_id}' no existe o está inactivo."
+            )
+        return cp.to_admin_dict()
+    finally:
+        db.close()
+
+def get_current_admin_user(request: Request, db = Depends(get_db)):
+    """Verifies HttpOnly cookie session or Authorization header for admin access."""
+    token = request.cookies.get("admin_session")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Sesión administrativa no encontrada o credenciales requeridas.")
+
+    payload = verify_session_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Sesión expirada o token inválido.")
+
+    email = payload["email"]
+    user = db.query(CommercialProfile).filter(
+        CommercialProfile.email.ilike(email),
+        CommercialProfile.is_active == True
+    ).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo.")
+    return user
+
+@app.get("/api/commercial-profiles", response_model=List[CommercialProfilePublicDTO])
+def list_commercial_profiles_public(db = Depends(get_db)):
+    """Retorna catálogo público de perfiles comerciales activos (sin documentos de identidad)."""
+    rows = db.query(CommercialProfile).filter(CommercialProfile.is_active == True).all()
+    return [CommercialProfilePublicDTO(**r.to_public_dict()) for r in rows]
+
+@app.post("/api/admin/login")
+@app.post("/api/auth/login")
+def admin_login(dto: AdminLoginDTO, response: Response, db = Depends(get_db)):
+    email_clean = dto.email.strip().lower()
+    user = db.query(CommercialProfile).filter(
+        CommercialProfile.email.ilike(email_clean),
+        CommercialProfile.is_active == True
+    ).first()
+
+    if not user or not user.password_hash or not verify_password(dto.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas o usuario inactivo.")
+
+    token = create_session_token(user.email, user.role)
+    is_prod = os.getenv("ENVIRONMENT", "").lower() == "production"
+    response.set_cookie(
+        key="admin_session",
+        value=token,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=is_prod
+    )
+    return {
+        "status": "success",
+        "authenticated": True,
+        "id": str(user.id),
+        "email": user.email,
+        "role": user.role,
+        "profile_name": user.profile_name,
+        "nombre": user.nombre,
+        "apellido": user.apellido,
+        "cargo": user.cargo,
+        "token": token
+    }
+
+@app.post("/api/auth/register")
+def auth_register(dto: CommercialRegisterDTO, request: Request, response: Response, db = Depends(get_db)):
+    """Registra un nuevo responsable comercial individual y abre su sesión de inmediato."""
+    email_clean = dto.email.strip().lower()
+    if not email_clean or "@" not in email_clean:
+        raise HTTPException(status_code=400, detail="El correo electrónico ingresado no es válido.")
+    
+    if len(dto.password.strip()) < 6:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
+
+    if not dto.nombre.strip() or not dto.apellido.strip():
+        raise HTTPException(status_code=400, detail="Nombres y apellidos son obligatorios.")
+
+    existing = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(email_clean)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Ya existe un perfil registrado con el correo {email_clean}")
+
+    client_ip = request.client.host if request.client else None
+    pwd_hash = hash_password(dto.password.strip())
+
+    display_name = dto.profile_name.strip() if (dto.profile_name and dto.profile_name.strip()) else f"{dto.nombre.strip()} {dto.apellido.strip()}"
+
+    new_profile = CommercialProfile(
+        profile_name=display_name,
+        nombre=dto.nombre.strip(),
+        apellido=dto.apellido.strip(),
+        cargo=dto.cargo.strip() or "Comercial",
+        email=email_clean,
+        celular=dto.celular.strip(),
+        tipo_documento=dto.tipo_documento or "CC",
+        documento_identidad=dto.documento_identidad.strip() if dto.documento_identidad else None,
+        role="commercial",
+        password_hash=pwd_hash,
+        is_active=True,
+        last_modified_by_ip=client_ip
+    )
+    db.add(new_profile)
+    db.commit()
+    db.refresh(new_profile)
+
+    # Establish session immediately
+    token = create_session_token(new_profile.email, new_profile.role)
+    is_prod = os.getenv("ENVIRONMENT", "").lower() == "production"
+    response.set_cookie(
+        key="admin_session",
+        value=token,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=is_prod
+    )
+    return {
+        "status": "success",
+        "authenticated": True,
+        "id": str(new_profile.id),
+        "email": new_profile.email,
+        "role": new_profile.role,
+        "profile_name": new_profile.profile_name,
+        "nombre": new_profile.nombre,
+        "apellido": new_profile.apellido,
+        "cargo": new_profile.cargo,
+        "token": token
+    }
+
+@app.get("/api/admin/check")
+@app.get("/api/auth/check")
+def admin_check(request: Request, db = Depends(get_db)):
+    try:
+        user = get_current_admin_user(request, db)
+        return {
+            "authenticated": True,
+            "id": str(user.id),
+            "email": user.email,
+            "role": user.role,
+            "profile_name": user.profile_name,
+            "nombre": user.nombre,
+            "apellido": user.apellido,
+            "cargo": user.cargo
+        }
+    except HTTPException:
+        return {"authenticated": False}
+
+@app.post("/api/admin/logout")
+@app.post("/api/auth/logout")
+def admin_logout(response: Response):
+    response.delete_cookie("admin_session")
+    return {"status": "success", "message": "Sesión cerrada"}
+
+@app.get("/api/admin/commercial-profiles", response_model=List[CommercialProfileAdminDTO])
+def list_commercial_profiles_admin(current_user: CommercialProfile = Depends(get_current_admin_user), db = Depends(get_db)):
+    rows = db.query(CommercialProfile).order_by(CommercialProfile.created_at.desc()).all()
+    return [CommercialProfileAdminDTO(**r.to_admin_dict()) for r in rows]
+
+@app.post("/api/admin/commercial-profiles", response_model=CommercialProfileAdminDTO)
+def create_commercial_profile(
+    dto: CommercialProfileCreateDTO,
+    request: Request,
+    current_user: CommercialProfile = Depends(get_current_admin_user),
+    db = Depends(get_db)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden registrar nuevos perfiles comerciales.")
+
+    existing = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(dto.email.strip())).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Ya existe un perfil con el correo {dto.email}")
+
+    client_ip = request.client.host if request.client else None
+    pwd_hash = hash_password(dto.password) if dto.password else None
+    new_profile = CommercialProfile(
+        profile_name=dto.profile_name.strip(),
+        nombre=dto.nombre.strip(),
+        apellido=dto.apellido.strip(),
+        cargo=dto.cargo.strip(),
+        email=dto.email.strip().lower(),
+        celular=dto.celular.strip(),
+        tipo_documento=dto.tipo_documento or "C.C",
+        documento_identidad=dto.documento_identidad.strip() if dto.documento_identidad else None,
+        role=dto.role or "commercial",
+        password_hash=pwd_hash,
+        last_modified_by_ip=client_ip
+    )
+    db.add(new_profile)
+    db.commit()
+    db.refresh(new_profile)
+    return CommercialProfileAdminDTO(**new_profile.to_admin_dict())
+
+@app.put("/api/admin/commercial-profiles/{profile_id}", response_model=CommercialProfileAdminDTO)
+def update_commercial_profile(
+    profile_id: str,
+    dto: CommercialProfileUpdateDTO,
+    request: Request,
+    current_user: CommercialProfile = Depends(get_current_admin_user),
+    db = Depends(get_db)
+):
+    profile = db.query(CommercialProfile).filter(CommercialProfile.id == profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no encontrado.")
+
+    # Non-admins can only edit their own profile
+    if current_user.role != "admin" and current_user.id != profile.id:
+        raise HTTPException(status_code=403, detail="No tienes permisos para modificar otros perfiles.")
+
+    if dto.profile_name is not None: profile.profile_name = dto.profile_name.strip()
+    if dto.nombre is not None: profile.nombre = dto.nombre.strip()
+    if dto.apellido is not None: profile.apellido = dto.apellido.strip()
+    if dto.cargo is not None: profile.cargo = dto.cargo.strip()
+    if dto.email is not None: profile.email = dto.email.strip().lower()
+    if dto.celular is not None: profile.celular = dto.celular.strip()
+    if dto.tipo_documento is not None: profile.tipo_documento = dto.tipo_documento
+    if dto.documento_identidad is not None: profile.documento_identidad = dto.documento_identidad.strip()
+    if dto.is_active is not None and current_user.role == "admin": profile.is_active = dto.is_active
+    if dto.role is not None and current_user.role == "admin": profile.role = dto.role
+    if dto.password: profile.password_hash = hash_password(dto.password)
+
+    profile.last_modified_by_ip = request.client.host if request.client else None
+    db.commit()
+    db.refresh(profile)
+    return CommercialProfileAdminDTO(**profile.to_admin_dict())
+
+@app.delete("/api/admin/commercial-profiles/{profile_id}")
+def delete_commercial_profile(
+    profile_id: str,
+    current_user: CommercialProfile = Depends(get_current_admin_user),
+    db = Depends(get_db)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden desactivar perfiles.")
+    profile = db.query(CommercialProfile).filter(CommercialProfile.id == profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no encontrado.")
+    profile.is_active = False
+    db.commit()
+    return {"status": "success", "message": f"Perfil {profile.profile_name} desactivado."}
+
 
 @app.get("/api/templates")
 def list_templates():
@@ -468,12 +819,24 @@ def get_mapping(template_id: str):
 
 @app.post("/api/generate")
 def generate_pdf(req: GenerateRequest):
+    # 0. Enforce conscious selection and resolve commercial profile (ADR-0008)
+    resolved_cp = resolve_commercial_profile(req.commercial_profile_id)
+
     # 1. Load company data
     company_data_path = os.path.join(DATA_DIR, "company_data.json")
     if not os.path.exists(company_data_path):
         raise HTTPException(status_code=404, detail="Company data not found")
     with open(company_data_path, "r", encoding="utf-8-sig") as f:
         company_data = json.load(f)
+
+    effective_data = dict(company_data)
+    if resolved_cp:
+        cp_full = f"{resolved_cp.get('nombre', '')} {resolved_cp.get('apellido', '')}".strip() or resolved_cp.get("profile_name", "")
+        effective_data["contacto_nombre"] = cp_full
+        effective_data["contacto_correo"] = resolved_cp.get("email", "")
+        effective_data["contacto_celular"] = resolved_cp.get("celular", "")
+        effective_data["contacto_cargo"] = resolved_cp.get("cargo", "")
+        effective_data["contacto_documento"] = resolved_cp.get("documento_identidad", "")
 
     # 2. Get mappings (from request or from saved JSON)
     mappings = []
@@ -527,7 +890,7 @@ def generate_pdf(req: GenerateRequest):
             if custom_text is not None and custom_text != "":
                 value = custom_text
             else:
-                value = company_data.get(field_key, "")
+                value = effective_data.get(field_key, "")
 
             if value:
                 font_fam = style.get("font_family", "Arial")
@@ -580,6 +943,9 @@ def generate_pdf(req: GenerateRequest):
 
 @app.post("/api/ai-fill")
 def ai_fill_pdf(req: AiFillRequest):
+    # 0. Enforce conscious selection and resolve commercial profile (ADR-0008)
+    resolved_cp = resolve_commercial_profile(req.commercial_profile_id)
+
     # 1. Locate input PDF
     template_id = req.template_id
     pdf_path = os.path.join(INPUT_DIR, f"{template_id}.pdf")
@@ -605,8 +971,8 @@ def ai_fill_pdf(req: AiFillRequest):
 
     try:
         from backend.pdf_filling_agent.agent import PDFAgent
-        # ponytail: instantiates PDFAgent per request.
-        agent = PDFAgent(company_profile_path=company_data_path)
+        # ponytail: instantiates PDFAgent per request with resolved commercial profile
+        agent = PDFAgent(company_profile_path=company_data_path, commercial_profile=resolved_cp)
         output_path = agent.fill_pdf(pdf_path, instructions, output_dir=OUTPUT_DIR, mode="auto")
         out_filename = os.path.basename(output_path)
 
