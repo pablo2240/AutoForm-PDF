@@ -227,8 +227,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onClick={onAddText}
           title="Añadir texto libre o personalizado en el documento"
         >
-          <Type size={16} />
-          <span>{isTextMode ? 'Dibujando Texto...' : 'Añadir Texto'}</span>
+          <Type size={15} />
+          <span className="btn-toolbar-label-full">{isTextMode ? 'Dibujando Texto...' : 'Añadir Texto'}</span>
+          <span className="btn-toolbar-label-short">{isTextMode ? 'Dibujando...' : 'Texto'}</span>
         </button>
       </div>
 
@@ -249,8 +250,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onClick={() => imageInputRef.current?.click()}
           title="Subir imagen para estampar en el PDF"
         >
-          <ImageIcon size={16} />
-          <span>{isImageMode ? 'Estampando Imagen...' : 'Agregar Imagen'}</span>
+          <ImageIcon size={15} />
+          <span className="btn-toolbar-label-full">{isImageMode ? 'Estampando Imagen...' : 'Agregar Imagen'}</span>
+          <span className="btn-toolbar-label-short">{isImageMode ? 'Estampando...' : 'Imagen'}</span>
         </button>
       </div>
     </div>

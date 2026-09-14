@@ -11,7 +11,9 @@ import type {
   GlobalSignature,
   CategorizedCompanyData,
   EmployerProfile,
-  FillResultData
+  FillResultData,
+  CommercialProfilePublic,
+  AdminSessionUser
 } from './types';
 import { 
   fetchTemplates, 
@@ -30,7 +32,10 @@ import {
   fetchCategorizedCompany,
   saveCategorizedCompany,
   fetchEmployerProfiles,
-  saveEmployerProfiles
+  saveEmployerProfiles,
+  fetchPublicCommercialProfiles,
+  adminCheck,
+  adminLogout
 } from './api';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
@@ -39,6 +44,8 @@ import { PDFCanvas } from './components/PDFCanvas';
 import { DataManagerModal } from './components/data-manager/DataManagerModal';
 import { ResultModal } from './components/ResultModal';
 import { ConfirmModal } from './components/ConfirmModal';
+import { CommercialProfileAdminModal } from './components/CommercialProfileAdminModal';
+import { AuthPortal } from './components/auth/AuthPortal';
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -74,8 +81,20 @@ export const App: React.FC = () => {
   // Custom Confirm Dialog State
   const [confirmModalData, setConfirmModalData] = useState<ConfirmModalState | null>(null);
   
+  // User Authentication & Auth Gate State
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<AdminSessionUser | null>(null);
+
   // Global Signature State (Strictly Backend Authoritative, no localStorage)
   const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(null);
+
+  // Commercial Profile State (ADR-0008)
+  const [commercialProfiles, setCommercialProfiles] = useState<CommercialProfilePublic[]>([]);
+  const [isLoadingCommercialProfiles, setIsLoadingCommercialProfiles] = useState<boolean>(false);
+  const [activeCommercialProfileId, setActiveCommercialProfileId] = useState<string>(() => {
+    return sessionStorage.getItem('active_commercial_profile_id') || '';
+  });
+  const [isCommercialAdminModalOpen, setIsCommercialAdminModalOpen] = useState<boolean>(false);
 
   // Style and editing states
   const [currentStyle, setCurrentStyle] = useState<ItemStyle>({
@@ -104,9 +123,67 @@ export const App: React.FC = () => {
     }, 3500);
   };
 
-  // Initial load - Strictly Backend Authoritative
+  const loadCommercialProfiles = async () => {
+    try {
+      setIsLoadingCommercialProfiles(true);
+      const profiles = await fetchPublicCommercialProfiles();
+      setCommercialProfiles(profiles);
+
+      // Validate conscious selection
+      setActiveCommercialProfileId((current) => {
+        if (!current) return '';
+        if (current === 'legal_rep_only') return current;
+        const exists = profiles.some((p) => p.id === current && p.is_active);
+        if (!exists) {
+          sessionStorage.removeItem('active_commercial_profile_id');
+          return '';
+        }
+        return current;
+      });
+    } catch (err: any) {
+      console.error('Error fetching public commercial profiles:', err);
+    } finally {
+      setIsLoadingCommercialProfiles(false);
+    }
+  };
+
+  const handleSelectCommercialProfile = (id: string) => {
+    setActiveCommercialProfileId(id);
+    if (id) {
+      sessionStorage.setItem('active_commercial_profile_id', id);
+    } else {
+      sessionStorage.removeItem('active_commercial_profile_id');
+    }
+  };
+
+  // Check active session on mount
   useEffect(() => {
-    async function init() {
+    async function checkAuth() {
+      try {
+        const user = await adminCheck();
+        if (user.authenticated) {
+          setCurrentUser(user);
+          if (user.id) {
+            setActiveCommercialProfileId(user.id);
+            sessionStorage.setItem('active_commercial_profile_id', user.id);
+          }
+        } else {
+          setCurrentUser(null);
+        }
+      } catch {
+        setCurrentUser(null);
+      } finally {
+        setAuthChecked(true);
+      }
+    }
+    checkAuth();
+  }, []);
+
+  // When user is authenticated, load workspace data
+  useEffect(() => {
+    if (!currentUser) return;
+
+    async function initWorkspace() {
       try {
         setIsLoading(true);
         const [tplList, compData, catCompany, profiles, sig] = await Promise.all([
@@ -126,14 +203,37 @@ export const App: React.FC = () => {
         if (tplList.length > 0) {
           setSelectedTemplate(tplList[0].id);
         }
+
+        await loadCommercialProfiles();
       } catch (err: any) {
-        showToast(`Error al inicializar: ${err.message}`, 'error');
+        showToast(`Error al inicializar espacio de trabajo: ${err.message}`, 'error');
       } finally {
         setIsLoading(false);
       }
     }
-    init();
-  }, []);
+    initWorkspace();
+  }, [currentUser]);
+
+  const handleLogout = async () => {
+    try {
+      await adminLogout();
+    } catch (err) {
+      console.error(err);
+    }
+    setCurrentUser(null);
+    setActiveCommercialProfileId('');
+    sessionStorage.removeItem('active_commercial_profile_id');
+    showToast('Has cerrado sesión correctamente', 'info');
+  };
+
+  const handleAuthenticated = (user: AdminSessionUser) => {
+    setCurrentUser(user);
+    if (user.id) {
+      setActiveCommercialProfileId(user.id);
+      sessionStorage.setItem('active_commercial_profile_id', user.id);
+    }
+    showToast(`¡Bienvenido, ${user.nombre || user.profile_name || 'Comercial'}!`, 'success');
+  };
 
   // When selected template changes
   useEffect(() => {
@@ -405,6 +505,10 @@ export const App: React.FC = () => {
 
   const handleGeneratePdf = async (isTemp: boolean = false) => {
     if (!selectedTemplate) return;
+    if (!activeCommercialProfileId) {
+      showToast('⚠️ Por favor selecciona un responsable comercial o elige "Solo Representante Legal"', 'error');
+      return;
+    }
     try {
       setIsGenerating(true);
       if (pages.length > 0 && !isTemp) {
@@ -418,7 +522,7 @@ export const App: React.FC = () => {
         await saveTemplateMapping(payload).catch(() => {});
       }
 
-      const res = await generateFilledPdf(selectedTemplate, mappings, isTemp);
+      const res = await generateFilledPdf(selectedTemplate, mappings, isTemp, activeCommercialProfileId);
       
       setResultModalData({
         filename: res.filename,
@@ -446,11 +550,15 @@ export const App: React.FC = () => {
       showToast('Por favor selecciona o sube un PDF primero', 'info');
       return;
     }
+    if (!activeCommercialProfileId) {
+      showToast('⚠️ Por favor selecciona un responsable comercial o elige "Solo Representante Legal"', 'error');
+      return;
+    }
     try {
       setIsAiFilling(true);
       showToast('✨ Procesando Autollenado IA con OpenAI / LLM...', 'info');
 
-      const res = await aiFillPdf(selectedTemplate);
+      const res = await aiFillPdf(selectedTemplate, activeCommercialProfileId);
 
       setResultModalData({
         filename: res.filename,
@@ -521,6 +629,32 @@ export const App: React.FC = () => {
     activeImage.filename === globalSignature.filename
   );
 
+  if (!authChecked) {
+    return (
+      <div 
+        style={{ 
+          minHeight: '100vh', 
+          width: '100vw', 
+          backgroundColor: '#0b0f17', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          gap: '16px' 
+        }}
+      >
+        <div className="spinner-large" style={{ borderColor: 'rgba(248, 177, 38, 0.2)', borderTopColor: '#f8b126' }} />
+        <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontFamily: 'Inter, sans-serif' }}>
+          Verificando credenciales de acceso...
+        </span>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthPortal onAuthenticated={handleAuthenticated} />;
+  }
+
   return (
     <div className="app-container">
       {/* Top Navbar */}
@@ -543,6 +677,13 @@ export const App: React.FC = () => {
         isAiFilling={isAiFilling}
         mappingsCount={mappings.length}
         isTemporarySession={isTemporarySession}
+        commercialProfiles={commercialProfiles}
+        activeCommercialProfileId={activeCommercialProfileId}
+        onSelectCommercialProfile={handleSelectCommercialProfile}
+        onOpenCommercialProfileAdmin={() => setIsCommercialAdminModalOpen(true)}
+        isLoadingCommercialProfiles={isLoadingCommercialProfiles}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* Secondary Toolbar (Font, Size, Bold, Color, Text Edit, Add Text, Add Image) */}
@@ -631,6 +772,13 @@ export const App: React.FC = () => {
         initialEmployerProfiles={employerProfiles}
         globalSignature={globalSignature}
         onSaveData={handleSaveCompanyData}
+      />
+
+      {/* Commercial Profile Admin Modal (ADR-0008) */}
+      <CommercialProfileAdminModal
+        isOpen={isCommercialAdminModalOpen}
+        onClose={() => setIsCommercialAdminModalOpen(false)}
+        onProfilesUpdated={loadCommercialProfiles}
       />
 
       {/* Generation Result Modal */}
