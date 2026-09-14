@@ -28,6 +28,49 @@ export interface EmployerProfile {
   customFields: CustomFieldItem[];
 }
 
+export interface CommercialProfilePublic {
+  id: string;
+  profile_name: string;
+  nombre: string;
+  apellido: string;
+  cargo: string;
+  email: string;
+  celular: string;
+  is_active: boolean;
+}
+
+export interface CommercialProfileAdmin extends CommercialProfilePublic {
+  tipo_documento?: string;
+  documento_identidad?: string;
+  role: string;
+  created_at?: string;
+  updated_at?: string;
+  last_modified_by_ip?: string;
+}
+
+export interface AdminSessionUser {
+  authenticated: boolean;
+  id?: string;
+  email?: string;
+  role?: string;
+  profile_name?: string;
+  nombre?: string;
+  apellido?: string;
+  cargo?: string;
+}
+
+export interface CommercialRegisterPayload {
+  profile_name?: string;
+  nombre: string;
+  apellido: string;
+  cargo: string;
+  email: string;
+  celular: string;
+  tipo_documento?: string;
+  documento_identidad?: string;
+  password: string;
+}
+
 export interface CategorizedCompanyData {
   id: CompanyFieldItem[];
   contacto: CompanyFieldItem[];

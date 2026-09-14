@@ -1,4 +1,14 @@
-import type { CompanyData, TemplateInfo, PDFPage, TemplateMapping, MappingItem } from './types';
+import type { 
+  CompanyData, 
+  TemplateInfo, 
+  PDFPage, 
+  TemplateMapping, 
+  MappingItem,
+  CommercialProfilePublic,
+  CommercialProfileAdmin,
+  AdminSessionUser,
+  CommercialRegisterPayload
+} from './types';
 
 //const API_BASE = 'http://localhost:8000';
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
@@ -71,7 +81,8 @@ export async function saveTemplateMapping(mapping: TemplateMapping): Promise<voi
 export async function generateFilledPdf(
   templateId: string,
   mappings?: MappingItem[],
-  isTemporary: boolean = false
+  isTemporary: boolean = false,
+  commercialProfileId?: string
 ): Promise<{ status: string; filename: string; download_url: string; total_placed: number; is_temporary?: boolean }> {
   const res = await fetch(`${API_BASE}/api/generate`, {
     method: 'POST',
@@ -80,6 +91,7 @@ export async function generateFilledPdf(
       template_id: templateId,
       mappings: mappings && mappings.length > 0 ? mappings : undefined,
       is_temporary: isTemporary,
+      commercial_profile_id: commercialProfileId || undefined,
     }),
   });
   if (!res.ok) {
@@ -90,12 +102,16 @@ export async function generateFilledPdf(
 }
 
 export async function aiFillPdf(
-  templateId: string
+  templateId: string,
+  commercialProfileId?: string
 ): Promise<{ status: string; filename: string; download_url: string; message: string; total_placed?: number; audit_report?: any }> {
   const res = await fetch(`${API_BASE}/api/ai-fill`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ template_id: templateId }),
+    body: JSON.stringify({ 
+      template_id: templateId,
+      commercial_profile_id: commercialProfileId || undefined,
+    }),
   });
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
@@ -164,6 +180,122 @@ export async function saveEmployerProfiles(profiles: import('./types').EmployerP
     body: JSON.stringify(profiles),
   });
   if (!res.ok) throw new Error('Error al guardar perfiles de empleados en el servidor');
+}
+
+// ==========================================
+// Commercial Profiles & Admin Auth (ADR-0008)
+// ==========================================
+
+export async function fetchPublicCommercialProfiles(): Promise<CommercialProfilePublic[]> {
+  const res = await fetch(`${API_BASE}/api/commercial-profiles`);
+  if (!res.ok) throw new Error('Error al obtener perfiles comerciales');
+  return res.json();
+}
+
+export async function adminLogin(
+  email: string, 
+  password: string
+): Promise<AdminSessionUser & { status: string; token: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al iniciar sesión');
+  }
+  return res.json();
+}
+
+export async function registerCommercial(
+  payload: CommercialRegisterPayload
+): Promise<AdminSessionUser & { status: string; token: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al registrar el perfil comercial');
+  }
+  return res.json();
+}
+
+export async function adminCheck(): Promise<AdminSessionUser> {
+  const res = await fetch(`${API_BASE}/api/auth/check`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    return { authenticated: false };
+  }
+  return res.json();
+}
+
+export async function adminLogout(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('Error al cerrar sesión');
+}
+
+export async function fetchAdminCommercialProfiles(): Promise<CommercialProfileAdmin[]> {
+  const res = await fetch(`${API_BASE}/api/admin/commercial-profiles`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al obtener perfiles administrativos');
+  }
+  return res.json();
+}
+
+export async function createCommercialProfile(
+  data: Partial<CommercialProfileAdmin> & { password?: string }
+): Promise<CommercialProfileAdmin> {
+  const res = await fetch(`${API_BASE}/api/admin/commercial-profiles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al crear perfil comercial');
+  }
+  return res.json();
+}
+
+export async function updateCommercialProfile(
+  id: string,
+  data: Partial<CommercialProfileAdmin> & { password?: string }
+): Promise<CommercialProfileAdmin> {
+  const res = await fetch(`${API_BASE}/api/admin/commercial-profiles/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al actualizar perfil comercial');
+  }
+  return res.json();
+}
+
+export async function deleteCommercialProfile(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/admin/commercial-profiles/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al eliminar perfil comercial');
+  }
 }
 
 
