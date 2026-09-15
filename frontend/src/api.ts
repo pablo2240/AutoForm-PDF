@@ -225,6 +225,14 @@ export async function registerCommercial(
   return res.json();
 }
 
+export async function checkEmailAvailability(email: string): Promise<{ available: boolean; exists: boolean }> {
+  const res = await fetch(`${API_BASE}/api/auth/check-email?email=${encodeURIComponent(email)}`);
+  if (!res.ok) {
+    return { available: true, exists: false };
+  }
+  return res.json();
+}
+
 export async function adminCheck(): Promise<AdminSessionUser> {
   const res = await fetch(`${API_BASE}/api/auth/check`, {
     credentials: 'include',

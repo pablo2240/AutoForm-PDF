@@ -388,7 +388,7 @@ export const CommercialProfileAdminModal: React.FC<CommercialProfileAdminModalPr
                           <tr>
                             <th>Nombre y Cargo</th>
                             <th>Contacto</th>
-                            <th>Documento (Habeas Data)</th>
+                            <th>Documento de Identidad</th>
                             <th>Estado</th>
                             <th>Acciones</th>
                           </tr>
@@ -556,10 +556,13 @@ export const CommercialProfileAdminModal: React.FC<CommercialProfileAdminModalPr
                       <div className="form-group flex-1">
                         <label>Teléfono / Celular</label>
                         <input
-                          type="text"
-                          placeholder="ej. 310 000 0000"
+                          type="tel"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={15}
+                          placeholder="ej. 3100000000"
                           value={formData.celular}
-                          onChange={(e) => setFormData({ ...formData, celular: e.target.value })}
+                          onChange={(e) => setFormData({ ...formData, celular: e.target.value.replace(/\D/g, '') })}
                         />
                       </div>
                     </div>
@@ -577,12 +580,15 @@ export const CommercialProfileAdminModal: React.FC<CommercialProfileAdminModalPr
                         </select>
                       </div>
                       <div className="form-group flex-1">
-                        <label>Número de Documento (Habeas Data)</label>
+                        <label>Número de Documento (Cédula)</label>
                         <input
                           type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={15}
                           placeholder="Cédula para casillas de contacto"
                           value={formData.documento_identidad}
-                          onChange={(e) => setFormData({ ...formData, documento_identidad: e.target.value })}
+                          onChange={(e) => setFormData({ ...formData, documento_identidad: e.target.value.replace(/\D/g, '') })}
                         />
                       </div>
                     </div>

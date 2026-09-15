@@ -554,22 +554,62 @@ def admin_login(dto: AdminLoginDTO, response: Response, db = Depends(get_db)):
         "token": token
     }
 
+@app.get("/api/auth/check-email")
+def check_email_availability(email: str, db = Depends(get_db)):
+    """Verifica si un correo electrónico ya está registrado en la base de datos."""
+    email_clean = email.strip().lower()
+    if not email_clean or "@" not in email_clean:
+        return {"available": False, "exists": False, "message": "Formato de correo no válido"}
+    existing = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(email_clean)).first()
+    return {"available": existing is None, "exists": existing is not None}
+
 @app.post("/api/auth/register")
 def auth_register(dto: CommercialRegisterDTO, request: Request, response: Response, db = Depends(get_db)):
     """Registra un nuevo responsable comercial individual y abre su sesión de inmediato."""
     email_clean = dto.email.strip().lower()
     if not email_clean or "@" not in email_clean:
         raise HTTPException(status_code=400, detail="El correo electrónico ingresado no es válido.")
-    
-    if len(dto.password.strip()) < 6:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
 
-    if not dto.nombre.strip() or not dto.apellido.strip():
-        raise HTTPException(status_code=400, detail="Nombres y apellidos son obligatorios.")
-
+    # 1. Comprobar que no exista previamente en la base de datos
     existing = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(email_clean)).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"Ya existe un perfil registrado con el correo {email_clean}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"El correo electrónico '{email_clean}' ya se encuentra registrado. Por favor utiliza otro correo o inicia sesión."
+        )
+
+    # 2. Nombres y Apellidos: Validar longitud mínima de más de 3 caracteres en ambos campos
+    nombre_clean = dto.nombre.strip()
+    apellido_clean = dto.apellido.strip()
+    if len(nombre_clean) <= 3:
+        raise HTTPException(status_code=400, detail="El nombre debe tener más de 3 caracteres.")
+    if len(apellido_clean) <= 3:
+        raise HTTPException(status_code=400, detail="El apellido debe tener más de 3 caracteres.")
+
+    # 3. Cargo: Validar longitud mínima de más de 4 caracteres
+    cargo_clean = dto.cargo.strip()
+    if len(cargo_clean) <= 4:
+        raise HTTPException(status_code=400, detail="El cargo debe tener más de 4 caracteres.")
+
+    # 4. Celular: Permitir únicamente números y exigir más de 9 dígitos
+    celular_clean = dto.celular.strip()
+    if not celular_clean.isdigit():
+        raise HTTPException(status_code=400, detail="El número de celular debe contener únicamente números.")
+    if len(celular_clean) <= 9:
+        raise HTTPException(status_code=400, detail="El número de celular debe tener más de 9 dígitos.")
+
+    # 5. Cédula: Permitir únicamente números y exigir más de 7 dígitos
+    documento_clean = dto.documento_identidad.strip() if dto.documento_identidad else ""
+    if not documento_clean:
+        raise HTTPException(status_code=400, detail="El número de cédula es obligatorio.")
+    if not documento_clean.isdigit():
+        raise HTTPException(status_code=400, detail="El número de cédula debe contener únicamente números.")
+    if len(documento_clean) <= 7:
+        raise HTTPException(status_code=400, detail="El número de cédula debe tener más de 7 dígitos.")
+
+    # 6. Contraseña
+    if len(dto.password.strip()) < 6:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
 
     client_ip = request.client.host if request.client else None
     pwd_hash = hash_password(dto.password.strip())

@@ -16,7 +16,7 @@ import {
   Building,
   KeyRound
 } from 'lucide-react';
-import { adminLogin, registerCommercial } from '../../api';
+import { adminLogin, registerCommercial, checkEmailAvailability } from '../../api';
 import type { AdminSessionUser, CommercialRegisterPayload } from '../../types';
 import './AuthPortal.css';
 
@@ -48,6 +48,29 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+
+  const handleEmailBlur = async () => {
+    const email = regEmail.trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      setEmailError(null);
+      return;
+    }
+    try {
+      setIsCheckingEmail(true);
+      const res = await checkEmailAvailability(email);
+      if (res.exists) {
+        setEmailError(`El correo '${email}' ya se encuentra registrado.`);
+      } else {
+        setEmailError(null);
+      }
+    } catch {
+      setEmailError(null);
+    } finally {
+      setIsCheckingEmail(false);
+    }
+  };
 
   // Password strength calculation
   const getPasswordStrength = (pass: string) => {
@@ -90,14 +113,74 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
     e.preventDefault();
     setRegError(null);
 
-    if (!regNombre.trim() || !regApellido.trim()) {
-      setRegError('Nombres y apellidos son campos obligatorios.');
+    const nombreClean = regNombre.trim();
+    const apellidoClean = regApellido.trim();
+    const cargoClean = regCargo.trim();
+    const celularClean = regCelular.trim();
+    const documentoClean = regDocumento.trim();
+    const emailClean = regEmail.trim().toLowerCase();
+
+    // 1. Nombres y Apellidos: Validar longitud mínima de más de 3 caracteres en ambos campos
+    if (nombreClean.length <= 3) {
+      setRegError('El nombre debe tener más de 3 caracteres.');
       return;
     }
-    if (!regEmail.trim() || !regEmail.includes('@')) {
+    if (apellidoClean.length <= 3) {
+      setRegError('El apellido debe tener más de 3 caracteres.');
+      return;
+    }
+
+    // 2. Cargo: Validar longitud mínima de más de 4 caracteres
+    if (cargoClean.length <= 4) {
+      setRegError('El cargo debe tener más de 4 caracteres.');
+      return;
+    }
+
+    // 3. Celular: Permitir únicamente números y exigir más de 9 dígitos
+    if (!celularClean) {
+      setRegError('El número de celular es obligatorio.');
+      return;
+    }
+    if (!/^\d+$/.test(celularClean)) {
+      setRegError('El número de celular debe contener únicamente números.');
+      return;
+    }
+    if (celularClean.length <= 9) {
+      setRegError('El número de celular debe tener más de 9 dígitos.');
+      return;
+    }
+
+    // 4. Cédula: Permitir únicamente números y exigir más de 7 dígitos
+    if (!documentoClean) {
+      setRegError('El número de cédula es obligatorio.');
+      return;
+    }
+    if (!/^\d+$/.test(documentoClean)) {
+      setRegError('El número de cédula debe contener únicamente números.');
+      return;
+    }
+    if (documentoClean.length <= 7) {
+      setRegError('El número de cédula debe tener más de 7 dígitos.');
+      return;
+    }
+
+    // 5. Correo electrónico: Comprobar que no exista previamente en la base de datos
+    if (!emailClean || !emailClean.includes('@')) {
       setRegError('Ingresa un correo electrónico corporativo válido.');
       return;
     }
+
+    try {
+      const emailCheck = await checkEmailAvailability(emailClean);
+      if (emailCheck.exists) {
+        setRegError(`El correo electrónico '${emailClean}' ya se encuentra registrado. Por favor utiliza otro correo o inicia sesión.`);
+        return;
+      }
+    } catch {
+      // Continuar al backend si hay error temporal de red previa
+    }
+
+    // 6. Contraseñas
     if (regPassword.length < 6) {
       setRegError('La contraseña debe tener al menos 6 caracteres.');
       return;
@@ -108,14 +191,14 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
     }
 
     const payload: CommercialRegisterPayload = {
-      profile_name: `${regNombre.trim()} ${regApellido.trim()}`,
-      nombre: regNombre.trim(),
-      apellido: regApellido.trim(),
-      cargo: regCargo.trim() || 'Asesor Comercial',
-      email: regEmail.trim().toLowerCase(),
-      celular: regCelular.trim(),
+      profile_name: `${nombreClean} ${apellidoClean}`,
+      nombre: nombreClean,
+      apellido: apellidoClean,
+      cargo: cargoClean,
+      email: emailClean,
+      celular: celularClean,
       tipo_documento: regTipoDoc,
-      documento_identidad: regDocumento.trim() || undefined,
+      documento_identidad: documentoClean,
       password: regPassword,
     };
 
@@ -373,6 +456,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                             id="regNombre"
                             type="text"
                             required
+                            minLength={4}
                             placeholder="ej. Kelly Yohana"
                             value={regNombre}
                             onChange={(e) => setRegNombre(e.target.value)}
@@ -387,6 +471,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                             id="regApellido"
                             type="text"
                             required
+                            minLength={4}
                             placeholder="ej. Delgado Macea"
                             value={regApellido}
                             onChange={(e) => setRegApellido(e.target.value)}
@@ -397,12 +482,14 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
 
                     <div className="form-grid-2">
                       <div className="auth-field">
-                        <label htmlFor="regCargo">Cargo en la Empresa</label>
+                        <label htmlFor="regCargo">Cargo en la Empresa *</label>
                         <div className="auth-input-wrapper">
                           <Briefcase size={16} className="auth-input-icon" />
                           <input
                             id="regCargo"
                             type="text"
+                            required
+                            minLength={5}
                             placeholder="ej. Asesor Comercial"
                             value={regCargo}
                             onChange={(e) => setRegCargo(e.target.value)}
@@ -411,15 +498,19 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                       </div>
 
                       <div className="auth-field">
-                        <label htmlFor="regCelular">Celular / Teléfono</label>
+                        <label htmlFor="regCelular">Celular / Teléfono *</label>
                         <div className="auth-input-wrapper">
                           <Phone size={16} className="auth-input-icon" />
                           <input
                             id="regCelular"
                             type="tel"
-                            placeholder="ej. 301 475 0760"
+                            required
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={15}
+                            placeholder="ej. 3014750760"
                             value={regCelular}
-                            onChange={(e) => setRegCelular(e.target.value)}
+                            onChange={(e) => setRegCelular(e.target.value.replace(/\D/g, ''))}
                           />
                         </div>
                       </div>
@@ -436,13 +527,27 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                           autoComplete="email"
                           placeholder="nombre.apellido@iaclatam.com"
                           value={regEmail}
-                          onChange={(e) => setRegEmail(e.target.value)}
+                          onChange={(e) => {
+                            setRegEmail(e.target.value);
+                            setEmailError(null);
+                          }}
+                          onBlur={handleEmailBlur}
                         />
                       </div>
+                      {isCheckingEmail && (
+                        <span style={{ color: '#94a3b8', fontSize: '0.74rem', marginTop: '4px', display: 'block' }}>
+                          Verificando disponibilidad de correo...
+                        </span>
+                      )}
+                      {emailError && (
+                        <span style={{ color: '#ef4444', fontSize: '0.74rem', marginTop: '4px', display: 'block', fontWeight: 500 }}>
+                          {emailError}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  {/* SECCIÓN 2: DILIGENCIAMIENTO OFICIAL & HABEAS DATA */}
+                  {/* SECCIÓN 2: DILIGENCIAMIENTO OFICIAL DE FORMULARIOS */}
                   <div className="form-section-block">
                     <div className="form-section-legend">
                       <ShieldCheck size={14} className="legend-icon text-emerald" />
@@ -465,17 +570,18 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                       </div>
 
                       <div className="auth-field">
-                        <label htmlFor="regDocumento">
-                          <span>Número de Documento (Cédula)</span>
-                          <span className="doc-privacy-tag">Habeas Data</span>
-                        </label>
+                        <label htmlFor="regDocumento">Número de Documento (Cédula) *</label>
                         <div className="auth-input-wrapper">
                           <input
                             id="regDocumento"
                             type="text"
+                            required
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={15}
                             placeholder="ej. 1020304050"
                             value={regDocumento}
-                            onChange={(e) => setRegDocumento(e.target.value)}
+                            onChange={(e) => setRegDocumento(e.target.value.replace(/\D/g, ''))}
                           />
                         </div>
                       </div>
