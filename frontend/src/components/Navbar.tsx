@@ -105,6 +105,14 @@ export const Navbar: React.FC<NavbarProps> = ({
     return 'U';
   };
 
+  const getUserDisplayName = (user?: AdminSessionUser | null) => {
+    if (!user) return '';
+    if (user.profile_name && user.profile_name.trim()) return user.profile_name.trim();
+    if (user.nombre && user.apellido) return `${user.nombre} ${user.apellido}`.trim();
+    if (user.nombre) return user.nombre.trim();
+    return user.email || '';
+  };
+
   return (
     <header className="navbar">
       <div className="navbar-brand">
@@ -237,6 +245,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onSelectProfile={onSelectCommercialProfile}
           onOpenAdminModal={onOpenCommercialProfileAdmin}
           isLoading={isLoadingCommercialProfiles}
+          isAdmin={currentUser?.role === 'admin'}
         />
 
         {/* Action Buttons Cluster */}
@@ -299,17 +308,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         {currentUser && onLogout && (
           <div 
             className="navbar-session-user"
-            title={`Conectado como: ${currentUser.nombre || currentUser.profile_name || currentUser.email} (${currentUser.email})`}
+            title={`Conectado como: ${getUserDisplayName(currentUser)} (${currentUser.email})`}
           >
             <div className="navbar-avatar-badge" aria-hidden="true">
               {getUserInitials(currentUser)}
             </div>
             <div className="navbar-user-info">
               <span className="navbar-user-name">
-                {currentUser.nombre || currentUser.profile_name || currentUser.email}
-              </span>
-              <span className={`navbar-user-role role-${currentUser.role || 'commercial'}`}>
-                {currentUser.role === 'admin' ? 'Admin' : (currentUser.cargo || 'Comercial')}
+                {getUserDisplayName(currentUser)}
               </span>
             </div>
             <button

@@ -247,9 +247,6 @@ export const CommercialProfileAdminModal: React.FC<CommercialProfileAdminModalPr
             <ShieldCheck size={20} className="icon-shield-admin" />
             <div>
               <h3>Gestión de Responsables Comerciales</h3>
-              <p className="modal-subtitle">
-                Persistencia en PostgreSQL & Control de Privacidad (Ley 1581 Habeas Data)
-              </p>
             </div>
           </div>
           <button className="btn-close" onClick={onClose} title="Cerrar modal">
@@ -275,10 +272,22 @@ export const CommercialProfileAdminModal: React.FC<CommercialProfileAdminModalPr
                 </div>
                 <h4>Acceso Administrativo Seguro</h4>
                 <p>
-                  Para proteger los datos personales y documentos de identidad conforme a la Ley 1581, 
-                  inicia sesión con tu cuenta corporativa.
+                  Para acceder a la administración de responsables comerciales, inicia sesión con tu cuenta de administrador.
                 </p>
               </div>
+          ) : sessionUser.role !== 'admin' ? (
+            <div className="admin-login-card">
+              <div className="login-header">
+                <div className="login-icon-circle" style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
+                  <AlertCircle size={26} />
+                </div>
+                <h4>Acceso Restringido</h4>
+                <p>
+                  Tu cuenta ({sessionUser.email}) no tiene permisos de Administrador.
+                  Solo los administradores pueden gestionar los responsables comerciales.
+                </p>
+              </div>
+            </div>
 
               {loginError && (
                 <div className="alert-message alert-danger">

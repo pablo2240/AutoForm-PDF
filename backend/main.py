@@ -94,6 +94,7 @@ class CommercialProfilePublicDTO(BaseModel):
     cargo: str
     email: str
     celular: str
+    role: Optional[str] = "commercial"
     is_active: bool
 
 class CommercialProfileAdminDTO(BaseModel):
@@ -495,9 +496,27 @@ def get_current_admin_user(request: Request, db = Depends(get_db)):
     return user
 
 @app.get("/api/commercial-profiles", response_model=List[CommercialProfilePublicDTO])
-def list_commercial_profiles_public(db = Depends(get_db)):
-    """Retorna catálogo público de perfiles comerciales activos (sin documentos de identidad)."""
-    rows = db.query(CommercialProfile).filter(CommercialProfile.is_active == True).all()
+def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
+    """
+    Retorna catálogo público de perfiles comerciales activos.
+    Si el usuario tiene sesión activa no-admin (comercial), retorna ÚNICAMENTE su propio perfil (aislamiento de privacidad).
+    Si el usuario es admin o es una consulta anónima inicial, retorna los perfiles activos.
+    """
+    token = request.cookies.get("admin_session")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    session_payload = verify_session_token(token) if token else None
+
+    query = db.query(CommercialProfile).filter(CommercialProfile.is_active == True)
+    if session_payload and session_payload.get("role") != "admin":
+        user_email = session_payload.get("email", "").lower()
+        rows = query.filter(CommercialProfile.email.ilike(user_email)).all()
+    else:
+        rows = query.all()
+
     return [CommercialProfilePublicDTO(**r.to_public_dict()) for r in rows]
 
 @app.post("/api/admin/login")
@@ -625,6 +644,8 @@ def admin_logout(response: Response):
 
 @app.get("/api/admin/commercial-profiles", response_model=List[CommercialProfileAdminDTO])
 def list_commercial_profiles_admin(current_user: CommercialProfile = Depends(get_current_admin_user), db = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores tienen acceso a la gestión de responsables comerciales.")
     rows = db.query(CommercialProfile).order_by(CommercialProfile.created_at.desc()).all()
     return [CommercialProfileAdminDTO(**r.to_admin_dict()) for r in rows]
 

@@ -4708,18 +4708,18 @@ body {
 .navbar-user-info {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
+  justify-content: center;
 }
 
 .navbar-user-name {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #f8fafc;
-  max-width: 140px;
+  max-width: 150px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.01em;
 }
 
 .navbar-user-role {

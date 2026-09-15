@@ -27,14 +27,18 @@ class CommercialProfile(Base):
 
     def to_public_dict(self):
         """Returns non-sensitive fields for the public selector UI."""
+        clean_cargo = self.cargo
+        if clean_cargo and "lider comercial" in clean_cargo.lower():
+            clean_cargo = "Asesor Comercial"
         return {
             "id": self.id,
             "profile_name": self.profile_name,
             "nombre": self.nombre,
             "apellido": self.apellido,
-            "cargo": self.cargo,
+            "cargo": clean_cargo,
             "email": self.email,
             "celular": self.celular,
+            "role": self.role or "commercial",
             "is_active": self.is_active
         }
 

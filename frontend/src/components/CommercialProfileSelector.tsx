@@ -8,6 +8,7 @@ interface CommercialProfileSelectorProps {
   onSelectProfile: (id: string) => void;
   onOpenAdminModal: () => void;
   isLoading?: boolean;
+  isAdmin?: boolean;
 }
 
 export const CommercialProfileSelector: React.FC<CommercialProfileSelectorProps> = ({
@@ -16,6 +17,7 @@ export const CommercialProfileSelector: React.FC<CommercialProfileSelectorProps>
   onSelectProfile,
   onOpenAdminModal,
   isLoading = false,
+  isAdmin = false,
 }) => {
   const isUnselected = !selectedProfileId;
 
@@ -52,14 +54,16 @@ export const CommercialProfileSelector: React.FC<CommercialProfileSelectorProps>
         )}
       </div>
 
-      <button
-        type="button"
-        className="btn btn-secondary btn-icon-only btn-manage-profiles"
-        onClick={onOpenAdminModal}
-        title="Gestionar perfiles comerciales (Administración)"
-      >
-        <Settings size={15} />
-      </button>
+      {isAdmin && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-icon-only btn-manage-profiles"
+          onClick={onOpenAdminModal}
+          title="Gestionar perfiles comerciales (Administración)"
+        >
+          <Settings size={15} />
+        </button>
+      )}
     </div>
   );
 };

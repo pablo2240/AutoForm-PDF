@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { 
   TemplateInfo, 
   PDFPage, 
@@ -155,6 +155,32 @@ export const App: React.FC = () => {
       sessionStorage.removeItem('active_commercial_profile_id');
     }
   };
+
+  // Filter commercial profiles based on role:
+  // Non-admin (commercial) ONLY sees their own profile ("el perfil de uno y no de los demás")
+  // Admin sees all active commercial profiles
+  const visibleCommercialProfiles: CommercialProfilePublic[] = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.role === 'admin') {
+      return commercialProfiles.filter((p: CommercialProfilePublic) => p.role !== 'admin');
+    }
+    return commercialProfiles.filter(
+      (p: CommercialProfilePublic) => p.id === currentUser.id || (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
+    );
+  }, [commercialProfiles, currentUser]);
+
+  // Auto-select commercial's own profile upon login/loading
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'admin' && visibleCommercialProfiles.length > 0) {
+      const myProfile = visibleCommercialProfiles.find(
+        (p: CommercialProfilePublic) => p.id === currentUser.id || (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
+      );
+      if (myProfile && (!activeCommercialProfileId || activeCommercialProfileId !== myProfile.id)) {
+        setActiveCommercialProfileId(myProfile.id);
+        sessionStorage.setItem('active_commercial_profile_id', myProfile.id);
+      }
+    }
+  }, [currentUser, visibleCommercialProfiles, activeCommercialProfileId]);
 
   // Check active session on mount
   useEffect(() => {
@@ -677,10 +703,14 @@ export const App: React.FC = () => {
         isAiFilling={isAiFilling}
         mappingsCount={mappings.length}
         isTemporarySession={isTemporarySession}
-        commercialProfiles={commercialProfiles}
+        commercialProfiles={visibleCommercialProfiles}
         activeCommercialProfileId={activeCommercialProfileId}
         onSelectCommercialProfile={handleSelectCommercialProfile}
-        onOpenCommercialProfileAdmin={() => setIsCommercialAdminModalOpen(true)}
+        onOpenCommercialProfileAdmin={() => {
+          if (currentUser?.role === 'admin') {
+            setIsCommercialAdminModalOpen(true);
+          }
+        }}
         isLoadingCommercialProfiles={isLoadingCommercialProfiles}
         currentUser={currentUser}
         onLogout={handleLogout}

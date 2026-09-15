@@ -36,6 +36,7 @@ export interface CommercialProfilePublic {
   cargo: string;
   email: string;
   celular: string;
+  role?: string;
   is_active: boolean;
 }
 
