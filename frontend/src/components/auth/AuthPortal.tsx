@@ -6,8 +6,7 @@ import {
   User, 
   Phone, 
   Briefcase, 
-  ShieldCheck, 
-  Database, 
+  ShieldCheck,
   FileText, 
   CheckCircle2, 
   AlertCircle,
@@ -15,7 +14,6 @@ import {
   EyeOff,
   UserCheck,
   Building,
-  Info,
   KeyRound
 } from 'lucide-react';
 import { adminLogin, registerCommercial } from '../../api';
@@ -184,26 +182,8 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                   </span>
                 </div>
                 <div className="sample-field-row">
-                  <span className="sample-field-label">Cédula de Contacto (Habeas Data)</span>
-                  <span className="sample-field-val masked">CC •••••••• (Cifrada)</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Architectural Trust Badges */}
-            <div className="showcase-pillars">
-              <div className="pillar-item">
-                <ShieldCheck size={16} className="pillar-icon text-emerald" />
-                <div>
-                  <strong>Ley 1581 (Habeas Data)</strong>
-                  <span>Documentos de identidad enmascarados y de uso exclusivo en casillas de contacto.</span>
-                </div>
-              </div>
-              <div className="pillar-item">
-                <Database size={16} className="pillar-icon text-amber" />
-                <div>
-                  <strong>Persistencia en PostgreSQL Neon</strong>
-                  <span>Tus perfiles y mapeos no se pierden en reinicios de servidor.</span>
+                  <span className="sample-field-label">Cédula de Contacto</span>
+                  <span className="sample-field-val masked">CC ••••••••</span>
                 </div>
               </div>
             </div>
@@ -499,14 +479,6 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                           />
                         </div>
                       </div>
-                    </div>
-
-                    <div className="habeas-data-card">
-                      <Info size={14} className="habeas-icon" />
-                      <p>
-                        Tu documento se resguarda bajo la <strong>Ley 1581 de 2012</strong>. Se utilizará 
-                        exclusivamente cuando un formulario de licitación exija la cédula de la persona de contacto.
-                      </p>
                     </div>
                   </div>
 
