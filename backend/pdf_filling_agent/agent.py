@@ -576,6 +576,22 @@ class PDFAgent:
 
         mappings = {}
         assigned_section_categories = set()
+
+        # ADR: Coexistence of Contacto Principal & Contacto para notificar pagos/abonos
+        # If both coexist: Contacto Principal -> Representante Legal, Pagos/Abonos -> Comercial.
+        # If only Contacto Principal exists: Contacto Principal -> Comercial.
+        def _is_pagos_abonos(text: str) -> bool:
+            return bool(re.search(r'\b(pagos|abonos|notificar pagos|notificacion de pagos|notificar abonos)\b', text, re.IGNORECASE))
+
+        has_pagos_abonos_contact = False
+        for rw in rich_widgets:
+            rw_sec = self._normalize_label(rw.get("section", ""))
+            if any(phrase in rw_sec for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "datos de contacto solo para clientes"]):
+                continue
+            rw_text = self._normalize_label(f"{rw.get('label', '')} {rw.get('field_name', '')} {rw.get('above_text', '')} {rw.get('left_text', '')}")
+            if ("contacto" in rw_text or "notificar" in rw_text) and _is_pagos_abonos(rw_text):
+                has_pagos_abonos_contact = True
+                break
         
         for item in rich_widgets:
             fn = item["field_name"]
@@ -777,45 +793,58 @@ class PDFAgent:
                 val_to_set = profile.get("pais", "Colombia")
                 assigned_cat = "nacionalidad"
 
-            # 13. Contacto Principal / Persona de Contacto en Sección de Proveedores
-            elif "contacto" in norm and not any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "datos de contacto solo para clientes"]):
+            # 13. Contactos en Sección de Proveedores (Contacto Principal vs Contacto Pagos/Abonos)
+            elif ("contacto" in norm or _is_pagos_abonos(norm)) and not any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "datos de contacto solo para clientes"]):
                 cp = self.commercial_profile
-                if cp:
+                is_pagos = _is_pagos_abonos(norm) or _is_pagos_abonos(eval_target)
+
+                # Regla de contacto:
+                # - Pagos/abonos -> siempre al Comercial (cp)
+                # - Contacto principal:
+                #     - Si coexiste con pagos/abonos -> Representante Legal (profile)
+                #     - Si solo existe contacto principal -> Comercial (cp)
+                target_is_commercial = is_pagos or (not has_pagos_abonos_contact)
+                cat_prefix = "contacto_pagos" if is_pagos else "contacto"
+
+                if target_is_commercial and cp:
                     cp_nombre = f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() or cp.get("profile_name", "")
                     if any(k in eval_target for k in ["correo", "email", "e mail"]):
                         val_to_set = cp.get("email") or profile.get("correo_rep")
-                        assigned_cat = "contacto_correo"
+                        assigned_cat = f"{cat_prefix}_correo"
                     elif any(k in eval_target for k in ["celular", "movil"]):
                         val_to_set = cp.get("celular") or profile.get("celular_rep")
-                        assigned_cat = "contacto_celular"
+                        assigned_cat = f"{cat_prefix}_celular"
                     elif any(k in eval_target for k in ["telefono", "tel"]):
                         val_to_set = cp.get("celular") or profile.get("telefono")
-                        assigned_cat = "contacto_telefono"
+                        assigned_cat = f"{cat_prefix}_telefono"
                     elif "cargo" in eval_target:
                         val_to_set = cp.get("cargo") or "Asesor Comercial"
-                        assigned_cat = "contacto_cargo"
+                        assigned_cat = f"{cat_prefix}_cargo"
                     elif any(k in eval_target or k in norm for k in ["documento", "cedula", "identificacion"]):
                         val_to_set = cp.get("documento_identidad")
-                        assigned_cat = "contacto_cedula"
-                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
+                        assigned_cat = f"{cat_prefix}_cedula"
+                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal", "notificar pagos", "abonos"]):
                         val_to_set = cp_nombre or profile.get("representante_legal", rep_full)
-                        assigned_cat = "contacto_nombre"
+                        assigned_cat = f"{cat_prefix}_nombre"
                 else:
                     if any(k in eval_target for k in ["correo", "email", "e mail"]):
                         val_to_set = profile.get("correo_rep", "guillermo.canon@iaclatam.com")
-                        assigned_cat = "contacto_correo"
+                        assigned_cat = f"{cat_prefix}_correo"
                     elif any(k in eval_target for k in ["celular", "movil"]):
                         val_to_set = profile.get("celular_rep", "3104120217")
-                        assigned_cat = "contacto_celular"
+                        assigned_cat = f"{cat_prefix}_celular"
                     elif any(k in eval_target for k in ["telefono", "tel"]):
                         val_to_set = profile.get("telefono", "2656868")
-                        assigned_cat = "contacto_telefono"
+                        assigned_cat = f"{cat_prefix}_telefono"
                     elif "cargo" in eval_target:
                         val_to_set = "Representante Legal"
-                        assigned_cat = "contacto_cargo"
-                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
+                        assigned_cat = f"{cat_prefix}_cargo"
+                    elif any(k in eval_target or k in norm for k in ["documento", "cedula", "identificacion"]):
+                        val_to_set = profile.get("numero_cedula", "98555384")
+                        assigned_cat = f"{cat_prefix}_cedula"
+                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal", "notificar pagos", "abonos"]):
                         val_to_set = profile.get("representante_legal", rep_full)
-                        assigned_cat = "contacto_nombre"
+                        assigned_cat = f"{cat_prefix}_nombre"
 
             # 14. Dirección Domicilio Principal
             elif (re.search(r'\b(direccion|domicilio|oficina principal direccion|direccion domicilio)\b', eval_target)) and ("p_dir", sec_key) not in assigned_section_categories:
@@ -955,7 +984,7 @@ Given the following interactive PDF form fields on Page {pno + 1}:
 {fields_text}
 
 Company Profile Data:
-{json.dumps(self.company_profile, ensure_ascii=False, indent=2)}
+{json.dumps(dict(self.company_profile, comercial_responsable=self.commercial_profile) if self.commercial_profile else self.company_profile, ensure_ascii=False, indent=2)}
 
 User Instructions:
 {user_instructions}
@@ -990,7 +1019,8 @@ CRITICAL RULES — READ CAREFULLY:
 9. DO NOT fill: Foreigners, Counterparties, Internal entity use ('Uso exclusivo de la entidad'), Fund Origins ('Origen de fondos').
 10. OTRA / OTRO fields → leave completely empty.
 11. CheckBoxes → '1' or 'Yes' when True, 'Off' when False.
-12. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
+12. REGLA DE CONTACTOS: Si coexisten casillas de 'Contacto Principal' y 'Contacto para notificar pagos o abonos': 'Contacto Principal' se completa con los datos del Representante Legal ({self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}), y 'Contacto para notificar pagos o abonos' con el Comercial responsable. Si solo existe 'Contacto Principal', se asigna siempre al Comercial responsable.
+13. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
 """
                 try:
                     raw_text = self._call_llm([

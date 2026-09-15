@@ -29,7 +29,7 @@ Tu objetivo es diligenciar este formulario oficial (vinculación de clientes/pro
    - 1. INFORMACIÓN GENERAL, 1.1 DATOS BÁSICOS, DATOS BÁSICOS DEL SOLICITANTE.
    - 1.2 DATOS REPRESENTANTE LEGAL, 2.1 Representante Legal (Guillermo Humberto Cañón Sarria, C.C. 98555384 de Envigado, Nacionalidad: Colombia).
    - 2. INFORMACIÓN BÁSICA DE LA PERSONA JURÍDICA (Ingeniería Asistida Por Computador S.A.S, NIT 811004721-2).
-   - 3. DATOS DE CONTACTO SÓLO PARA PROVEEDORES (completar datos de contacto comercial de IAC).
+   - 3. DATOS DE CONTACTO SÓLO PARA PROVEEDORES: Si coexisten 'Contacto Principal' y 'Contacto para notificar pagos o abonos', 'Contacto Principal' se completa con el Representante Legal y 'Contacto para notificar pagos o abonos' con el Comercial responsable. Si solo existe 'Contacto Principal', se asigna siempre al Comercial.
    - SOCIOS Y/O ACCIONISTAS PRINCIPALES, 2. ACCIONISTAS CON PARTICIPACIÓN, 2.2 Beneficiarios Finales (completar ÚNICAMENTE Fila 1).
    - Firma del Representante Legal / Persona Natural.
    - Bloques declarativos de autorización ("Yo, Guillermo Humberto Cañón Sarria...").

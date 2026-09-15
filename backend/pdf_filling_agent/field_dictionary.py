@@ -57,6 +57,19 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     "contacto_cargo": [
         "Cargo del Contacto", "Cargo Contacto", "Cargo"
     ],
+    "contacto_pagos_nombre": [
+        "Contacto para notificar pagos o abonos", "Contacto para notificar pagos y abonos",
+        "Contacto para notificar pagos", "Contacto pagos o abonos", "Contacto pagos/abonos",
+        "Contacto Notificación Pagos", "Contacto Pagos"
+    ],
+    "contacto_pagos_correo": [
+        "Correo contacto para notificar pagos o abonos", "Email notificar pagos",
+        "Correo notificación pagos", "Correo electrónico contacto para notificar pagos o abonos"
+    ],
+    "contacto_pagos_celular": [
+        "Teléfono contacto para notificar pagos o abonos", "Celular notificar pagos",
+        "Teléfono celular contacto para notificar pagos o abonos"
+    ],
     "direccion_principal": [
         "direccion", "dirección", "residencia", "sede", "ubicacion principal", "ubicación principal",
         "Dirección Domicilio", "Dirección Principal", "Domicilio Principal", "Dirección de Notificación"
@@ -131,7 +144,7 @@ IGNORE_RULES: List[str] = [
     "7. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla, escribe el nombre completo: 'Guillermo Humberto Cañón Sarria'.",
     "8. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID' o 'CÉDULA', llénalo con '98555384'. Si al lado hay una casilla 'de' (ej. C.C. No. _____ de _____), pon: 'Envigado'.",
     "9. NACIONALIDAD: Cuando un campo pida EXACTAMENTE 'Nacionalidad' o 'Nacionalidad 1', escribe 'Colombia'. No pongas 'Colombiana', ni fecha, ni expedición. Si hay 'Nacionalidad 2' o campo de segunda nacionalidad, déjala completamente vacía.",
-    "10. CONTACTO PRINCIPAL (SOLO SI LA SECCIÓN NO ES EXCLUSIVA PARA CLIENTES): Cuando una sección solicite 'Contacto Principal', llena: Nombre: Guillermo Humberto Cañón Sarria, Celular: 3104120217, Correo: guillermo.canon@iaclatam.com, Cargo: Representante Legal.",
+    "10. REGLA DE CAMPOS DE CONTACTO: Si en el formulario coexisten 'Contacto Principal' y 'Contacto para notificar pagos o abonos': 'Contacto Principal' se completa con los datos del Representante Legal (Nombre: Guillermo Humberto Cañón Sarria, Celular: 3104120217, Correo: guillermo.canon@iaclatam.com, Cargo: Representante Legal) y 'Contacto para notificar pagos o abonos' se completa con los datos del Comercial responsable. Si en el formulario SOLO existe el campo 'Contacto Principal', se asigna siempre al Comercial responsable.",
     "11. TABLAS CON MÚLTIPLES FILAS: Llena ÚNICAMENTE la primera fila (Fila 1). Las filas 2, 3, 4, 5 deben quedar vacías.",
     "12. CAMPOS 'OTRA' / 'OTRO': Dejar completamente vacíos.",
     "13. OPCIONES MÚLTIPLES: Ignorar bloques de opciones múltiples genéricas.",

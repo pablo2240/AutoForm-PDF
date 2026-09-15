@@ -891,6 +891,18 @@ def generate_pdf(req: GenerateRequest):
         company_data = json.load(f)
 
     effective_data = dict(company_data)
+    rep_full = company_data.get("representante_legal", "Guillermo Humberto Cañón Sarria")
+    rep_correo = company_data.get("correo_rep", "guillermo.canon@iaclatam.com")
+    rep_celular = company_data.get("celular_rep", "3104120217")
+    rep_doc = company_data.get("numero_cedula", "98555384")
+
+    # Default Contacto Principal (Representante Legal)
+    effective_data["contacto_principal_nombre"] = rep_full
+    effective_data["contacto_principal_correo"] = rep_correo
+    effective_data["contacto_principal_celular"] = rep_celular
+    effective_data["contacto_principal_cargo"] = "Representante Legal"
+    effective_data["contacto_principal_documento"] = rep_doc
+
     if resolved_cp:
         cp_full = f"{resolved_cp.get('nombre', '')} {resolved_cp.get('apellido', '')}".strip() or resolved_cp.get("profile_name", "")
         effective_data["contacto_nombre"] = cp_full
@@ -898,6 +910,23 @@ def generate_pdf(req: GenerateRequest):
         effective_data["contacto_celular"] = resolved_cp.get("celular", "")
         effective_data["contacto_cargo"] = resolved_cp.get("cargo", "")
         effective_data["contacto_documento"] = resolved_cp.get("documento_identidad", "")
+        # Contacto para notificar pagos o abonos -> Comercial
+        effective_data["contacto_pagos_nombre"] = cp_full
+        effective_data["contacto_pagos_correo"] = resolved_cp.get("email", "")
+        effective_data["contacto_pagos_celular"] = resolved_cp.get("celular", "")
+        effective_data["contacto_pagos_cargo"] = resolved_cp.get("cargo", "")
+        effective_data["contacto_pagos_documento"] = resolved_cp.get("documento_identidad", "")
+    else:
+        effective_data["contacto_nombre"] = rep_full
+        effective_data["contacto_correo"] = rep_correo
+        effective_data["contacto_celular"] = rep_celular
+        effective_data["contacto_cargo"] = "Representante Legal"
+        effective_data["contacto_documento"] = rep_doc
+        effective_data["contacto_pagos_nombre"] = rep_full
+        effective_data["contacto_pagos_correo"] = rep_correo
+        effective_data["contacto_pagos_celular"] = rep_celular
+        effective_data["contacto_pagos_cargo"] = "Representante Legal"
+        effective_data["contacto_pagos_documento"] = rep_doc
 
     # 2. Get mappings (from request or from saved JSON)
     mappings = []
