@@ -13,7 +13,8 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "nit": [
         "nit", "NIT", "Numero Nit", "Número NIT", "Nro nit", "Nro. NIT", 
-        "cc/ce/pas/nit", "rut", "RUT", "Identificación Tributaria", "Número de Identificación Tributaria"
+        "cc/ce/pas/nit", "rut", "RUT", "Identificación Tributaria", "Número de Identificación Tributaria",
+        "N.I.T. o TAX ID", "N.I.T. o TAX ID *", "TAX ID", "N.I.T."
     ],
     "numero_cedula": [
         "cedula", "cédula", "c.c", "C.C.", "c.c", "identificacion", "identificación", 
@@ -105,14 +106,14 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "entidad_bancaria": [
         "Banco", "Entidad Bancaria", "Entidad Bancaria / Financiera", "Nombre del Banco", 
-        "Institución Financiera", "Entidad Financiera", "Banco Principal"
+        "Institución Financiera", "Entidad Financiera", "Banco Principal", "Entidad", "Referencias Bancarias"
     ],
     "numero_cuenta": [
         "Número de Cuenta", "Numero de Cuenta", "No. Cuenta / Cta. No.", "No. Cuenta", 
         "Cuenta Bancaria No.", "Cuenta No.", "No. de Cuenta", "No. Cuenta Bancaria"
     ],
     "tipo_cuenta": [
-        "Tipo de Cuenta", "Tipo Cuenta", "Modalidad de Cuenta", "Tipo de Producto", "Clase de Cuenta"
+        "Tipo de Cuenta", "Tipo Cuenta", "Modalidad de Cuenta", "Tipo de Producto", "Clase de Cuenta", "Producto", "Producto *"
     ],
     "sucursal": [
         "Sucursal / Agencia", "Sucursal", "Sucursal del Banco", "Agencia"
@@ -149,7 +150,9 @@ IGNORE_RULES: List[str] = [
     "12. CAMPOS 'OTRA' / 'OTRO': Dejar completamente vacíos.",
     "13. OPCIONES MÚLTIPLES: Ignorar bloques de opciones múltiples genéricas.",
     "14. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas.",
-    "15. DOBLE NACIONALIDAD / NACIONALIDAD 2: Solo se reporta la nacionalidad principal ('Colombia'). Cualquier campo de segunda nacionalidad debe quedar vacío."
+    "15. DOBLE NACIONALIDAD / NACIONALIDAD 2: Solo se reporta la nacionalidad principal ('Colombia'). Cualquier campo de segunda nacionalidad debe quedar vacío.",
+    "16. NO LLENAR SECCIÓN 9 (VÍNCULO / VÍNCULOS): La sección '9. VÍNCULO' o '9. VÍNCULOS' no aplica y debe permanecer completamente vacía.",
+    "17. DECLARACIÓN DE ORIGEN DE FONDOS: En la sección 11 de Declaración de Origen de Fondos, diligenciar los datos de identificación solicitados del Representante Legal (Yo, número de documento, expedido en)."
 ]
 
 def get_dictionary_context() -> str:

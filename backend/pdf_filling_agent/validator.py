@@ -40,6 +40,8 @@ class FillingValidator:
         "relacion de vehiculos", "plan de mantenimiento vehicular",
         # Consorcios
         "consorcios o uniones temporales", "consorcio", "union temporal",
+        # Section 9: Vínculos (Domain Isolation)
+        "9. vinculo", "9. vinculos", "9 vinculo", "9 vinculos", "vinculo con personas expuestas",
         # Fund origin declarations
         "origen de fondos", "origen de recursos", "declaracion de origen",
         "declaración de origen", "actividad economica secundaria", "actividades secundarias",
@@ -135,6 +137,13 @@ class FillingValidator:
         for phrase in self.NEGATIVE_ZONE_PHRASES:
             phrase_norm = self._normalize(phrase)
             if phrase_norm in norm_section or phrase_norm in norm_context:
+                # Allow legal representative identity declaration in Section 11 (Origen de fondos)
+                if any(p in phrase_norm for p in ["origen de fondos", "declaracion de origen", "origen de recursos"]):
+                    fn_norm = self._normalize(field_name)
+                    lbl_norm = self._normalize(label)
+                    ctx_norm = f"{fn_norm} {lbl_norm}".strip()
+                    if any(k in ctx_norm for k in ["yo", "expedido", "numero", "documento", "fuente", "origen"]):
+                        continue
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 1 Negative Zone: Matched forbidden section/phrase '{phrase}'"
@@ -229,7 +238,10 @@ class FillingValidator:
 
         # 3.7 NIT values strictly to NIT / Identificación Tributaria fields
         if sem_type == "nit":
-            if not any(k in norm_label or k in norm_context for k in ["nit", "rut", "identificacion tributaria", "tributaria"]):
+            nit_signals = ["nit", "rut", "tax id", "tax", "tributaria", "identificacion tributaria"]
+            label_has_nit = any(k in norm_label for k in nit_signals) or bool(re.search(r'\b(n\s*i\s*t)\b', norm_label))
+            context_has_nit = any(k in norm_context for k in nit_signals) or bool(re.search(r'\b(n\s*i\s*t)\b', norm_context))
+            if not (label_has_nit or context_has_nit):
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: NIT '{val_str}' requires NIT/RUT field, found '{norm_label}'"
@@ -237,10 +249,17 @@ class FillingValidator:
 
         # 3.8 Cédula values strictly to Cédula / Documento fields
         if sem_type == "cedula":
-            if any(k in norm_label for k in ["nit", "rut", "pais", "telefono", "celular", "email", "correo", "activo", "pasivo", "patrimonio", "ingreso", "egreso"]):
+            forbidden_cedula = ["pais", "telefono", "celular", "email", "correo", "activo", "pasivo", "patrimonio", "ingreso", "egreso"]
+            if any(k in norm_label for k in forbidden_cedula):
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: Cédula '{val_str}' cannot be assigned to '{norm_label}'"
+                )
+            # If "nit" or "rut" is present, allow if the field explicitly allows Cédula or generic Documento
+            if any(k in norm_label for k in ["nit", "rut"]) and not any(k in norm_label for k in ["cedula", "documento", "c c"]):
+                return ValidationResult(
+                    is_valid=False,
+                    reason=f"Tier 3 Type-Aware Guard: Cédula '{val_str}' cannot be assigned to strict NIT field '{norm_label}'"
                 )
 
         # 3.9 Financial Amount values strictly to Financial / Accounting fields
