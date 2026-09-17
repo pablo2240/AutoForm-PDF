@@ -242,9 +242,9 @@ class FillingValidator:
                     reason=f"Tier 3 Type-Aware Guard: Nationality value cannot be assigned to non-nationality field '{norm_label}'"
                 )
 
-        # 3.4 Person names must not go into nationality, country, nit, phone, persona juridica
+        # 3.4 Person names must not go into nationality, country, nit, phone fields
         if sem_type == "person_name":
-            forbidden_name_targets = ["nacionalidad", "pais", "nit", "tel", "cel", "telefono", "correo", "email", "persona juridica", "personas juridicas"]
+            forbidden_name_targets = ["nacionalidad", "pais", "nit", "tel", "cel", "telefono", "correo", "email"]
             if any(k in norm_label for k in forbidden_name_targets):
                 return ValidationResult(
                     is_valid=False,

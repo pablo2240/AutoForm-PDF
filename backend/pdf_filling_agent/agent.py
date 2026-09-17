@@ -890,19 +890,19 @@ class PDFAgent:
 
             # Accionistas / Composición Accionaria (Fila 1)
             elif sub_block == "accionistas":
-                if any(k in eval_target for k in ["nombres y apellidos pn", "nombres pn", "apellidos pn"]) or (
-                    "nombres" in eval_target and "pn" in eval_target
-                ):
-                    # The sole shareholder (100%) is the rep legal — a natural person
-                    val_to_set = rep_full
-                    assigned_cat = "acc_rep_full"
-                elif any(k in eval_target for k in ["nombre persona juridica", "persona juridica nombre"]) or (
+                if any(k in eval_target for k in ["nombre persona juridica", "persona juridica nombre"]) or (
                     "persona juridica" in eval_target and "nombre" in eval_target
                 ):
-                    # IAC's shareholder is a natural person — mark PJ name field as force-blank
+                    # Nombre del accionista va en campo Persona Jurídica (field 02)
+                    val_to_set = rep_full
+                    assigned_cat = "acc_rep_full"
+                elif any(k in eval_target for k in ["nombres y apellidos pn", "nombres pn", "apellidos pn"]) or (
+                    "nombres" in eval_target and "pn" in eval_target
+                ):
+                    # Campo PN (field 01) debe quedar vacío — el nombre ya va en campo PJ
                     force_blank_fields.add(fn)
                 elif any(k in eval_target for k in ["identificacion", "nit/cc", "nit cc"]):
-                    # Shareholder is PN → use cédula, not NIT
+                    # Accionista identificado con cédula (no NIT)
                     val_to_set = profile.get("numero_cedula", "98555384")
                     assigned_cat = "acc_cedula"
                 elif "nombre o razon social" in norm_fn or ("nombre" in norm_attr and "juridica" not in norm_attr) or ("razon social" in norm_attr and "juridica" not in norm_attr):
@@ -914,6 +914,7 @@ class PDFAgent:
                 elif "documento de identidad" in norm_attr or "documento de identidad" in norm_fn:
                     val_to_set = profile.get("numero_cedula", "98555384")
                     assigned_cat = "acc_cedula"
+
 
 
             # Junta Directiva (Fila 1)
