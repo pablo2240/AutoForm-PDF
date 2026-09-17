@@ -140,6 +140,12 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "ariba_rep_correo": [
         "Correo electrónico persona autorizada", "Correo ARIBA", "Correo electrónico ARIBA"
+    ],
+    "rep_lugar_fecha_exp": [
+        "Lugar y Fecha de Expedición", "Lugar y Fecha de Expedicion",
+        "Lugar y fecha de expedición", "Lugar y fecha de expedicion",
+        "Ciudad y Fecha de Expedición", "Ciudad y fecha de expedición",
+        "Lugar y fecha de expedición del representante"
     ]
 }
 
@@ -161,7 +167,9 @@ IGNORE_RULES: List[str] = [
     "15. DOBLE NACIONALIDAD / NACIONALIDAD 2: Solo se reporta la nacionalidad principal ('Colombia'). Cualquier campo de segunda nacionalidad debe quedar vacío.",
     "16. NO LLENAR SECCIÓN 9 (VÍNCULO / VÍNCULOS): La sección '9. VÍNCULO' o '9. VÍNCULOS' no aplica y debe permanecer completamente vacía.",
     "17. DECLARACIÓN DE ORIGEN DE FONDOS: En la sección 11 de Declaración de Origen de Fondos, diligenciar los datos de identificación solicitados del Representante Legal (Yo, número de documento, expedido en).",
-    "18. CONTACTO PARA ARIBA: Completar ÚNICAMENTE la Fila 1 con el Representante Legal (Nombres y apellidos persona autorizada: Guillermo Humberto Cañón Sarria, Correo electrónico: guillermo.canon@iaclatam.com). Las filas secundarias (2, 3 y 4) deben permanecer completamente vacías."
+    "18. CONTACTO PARA ARIBA: Completar ÚNICAMENTE la Fila 1 con el Representante Legal (Nombres y apellidos persona autorizada: Guillermo Humberto Cañón Sarria, Correo electrónico: guillermo.canon@iaclatam.com). Las filas secundarias (2, 3 y 4) deben permanecer completamente vacías.",
+    "19. SUPRESIÓN DE LUGAR Y FECHA DE EXPEDICIÓN EN PERSONA JURÍDICA: Las empresas con NIT no poseen lugar ni fecha de expedición personal. Si tras el número de identificación de la empresa o en la sección de información general/persona jurídica aparece un campo de 'LUGAR Y FECHA DE EXPEDICIÓN', este debe permanecer estrictamente VACÍO. Únicamente se diligencia lugar y fecha de expedición cuando corresponda expresamente a una persona natural o al Representante Legal ('Envigado 26-06-1989').",
+    "20. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: En encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...', diligenciar siempre los datos del Contacto Comercial responsable en sesión (Kelly Yohana Delgado Macea, kelly.delgado@iaclatam.com, 3014750760, Especialista Comercial / Licitaciones), evitando asignar por defecto los datos del Representante Legal."
 ]
 
 def get_dictionary_context() -> str:

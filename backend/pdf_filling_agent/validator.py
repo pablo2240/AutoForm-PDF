@@ -156,6 +156,24 @@ class FillingValidator:
                     reason=f"Tier 1 Negative Field Keyword: '{pat}'"
                 )
 
+        # Transversal rule: Suppress personal expedition fields in Persona Jurídica / corporate context
+        is_pj_sec = (
+            any(k in norm_section for k in [
+                "informacion general", "datos basicos", "datos generales", "informacion basica",
+                "datos de la empresa", "informacion de la empresa", "persona juridica",
+                "personas juridicas", "contraparte", "proveedor", "asociado de negocio"
+            ]) and not any(k in norm_section for k in [
+                "representante legal", "persona natural", "personas naturales",
+                "oficial de cumplimiento", "accionistas", "junta directiva",
+                "beneficiario final", "beneficiarios finales", "revisor fiscal"
+            ])
+        )
+        if is_pj_sec and any(k in norm_label or k in self._normalize(field_name) for k in ["lugar y fecha de expedicion", "lugar de expedicion", "fecha de expedicion", "expedicion"]):
+            return ValidationResult(
+                is_valid=False,
+                reason="Transversal Rule: Persona Jurídica / NIT does not have personal place or date of expedition"
+            )
+
         # --- TIER 2: Single-Row Enforcement ---
         # Find all occurrences of row indices across segments: e.g. Fila1[1], Row[2], Item[3], .Row2, .Fila2
         for match in re.finditer(r'(?:fila|row|item)\w*\[(\d+)\]', field_name, re.IGNORECASE):
@@ -181,6 +199,7 @@ class FillingValidator:
             # Target must have phone signals, and NOT non-phone keywords
             forbidden_phone_targets = [
                 "pais", "ciudad", "email", "correo", "nit", "nombre", "apellido", "razon social",
+                "identificacion", "cedula", "documento",
                 "activo", "activos", "pasivo", "pasivos", "patrimonio", "ingreso", "ingresos", "egreso", "egresos", "balance", "financier"
             ]
             if any(k in norm_label for k in forbidden_phone_targets):
@@ -241,7 +260,9 @@ class FillingValidator:
             nit_signals = ["nit", "rut", "tax id", "tax", "tributaria", "identificacion tributaria"]
             label_has_nit = any(k in norm_label for k in nit_signals) or bool(re.search(r'\b(n\s*i\s*t)\b', norm_label))
             context_has_nit = any(k in norm_context for k in nit_signals) or bool(re.search(r'\b(n\s*i\s*t)\b', norm_context))
-            if not (label_has_nit or context_has_nit):
+            # Corporate identification: Allow NIT when label asks for identification in a corporate / general context
+            is_corp_id = any(k in norm_label or k in self._normalize(field_name) for k in ["identificacion", "numero id", "no id", "documento"]) and not any(k in norm_context for k in ["representante", "persona natural", "cedula", "c c", "oficial de cumplimiento"])
+            if not (label_has_nit or context_has_nit or is_corp_id):
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: NIT '{val_str}' requires NIT/RUT field, found '{norm_label}'"

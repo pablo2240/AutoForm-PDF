@@ -71,6 +71,13 @@
       "category": "id"
     },
     {
+      "id": "cf-fecha_expedicion_rep",
+      "key": "fecha_expedicion_rep",
+      "label": "Fecha Expedicion Rep",
+      "value": "26-06-1989",
+      "category": "id"
+    },
+    {
       "id": "cf-departamento",
       "key": "departamento",
       "label": "Departamento",

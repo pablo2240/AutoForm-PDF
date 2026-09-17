@@ -498,7 +498,12 @@ class PDFAgent:
                         "referencias bancarias",
                         "datos de contacto del contratante",
                         "composicion de capital",
-                        "tipo de actividad"
+                        "tipo de actividad",
+                        "relacione o indique a continuacion",
+                        "datos de la persona que esta a cargo",
+                        "proceso de relacionamiento",
+                        "relacionamiento o de contratacion",
+                        "persona que esta a cargo"
                     ])
                 ):
                     section_candidates.append((b[1], b[3], txt))
@@ -686,7 +691,14 @@ class PDFAgent:
 
             # Sub-block differentiation (clean hierarchy)
             sub_block = "main"
-            if fn in ["Nombres y Apellidos_2", "Correo electrónico_3", "Teléfono Fijo_2", "Teléfono celular_2"] or \
+            is_relacionamiento_contact = bool(
+                re.search(
+                    r'\b(proceso de relacionamiento|relacionamiento o de contratacion|persona que est[aá] a cargo|informaci[oó]n del contacto o los datos de la persona|relacione o indique a continuaci[oó]n|contacto o los datos de la persona)\b',
+                    norm_section + " " + norm_above + " " + norm_left
+                )
+            )
+            if is_relacionamiento_contact or \
+               fn in ["Nombres y Apellidos_2", "Correo electrónico_3", "Teléfono Fijo_2", "Teléfono celular_2"] or \
                fn in ["Nombre y Apellidos del contacto", "Correo electrónico_5", "Teléfono Fijo_3", "Teléfono Celular"] or \
                any(k in norm_attr or k in norm_fn or k in norm_left for k in ["contacto comercial", "relacion comercia"]):
                 sub_block = "comercial"
@@ -699,7 +711,7 @@ class PDFAgent:
             elif "revisor" in norm_section or "revisor" in norm_fn:
                 sub_block = "revisor_fiscal"
             elif fn in ["Nombres y Apellidos", "Correo electrónico_2", "Teléfono Fijo", "Teléfono celular"] or \
-                 any(k in norm_attr or k in norm_fn or k in norm_left for k in ["representante legal", "datos del representante legal"]):
+                 any(k in norm_attr or k in norm_fn or k in norm_left or k in norm_section for k in ["representante legal", "datos del representante legal", "informacion representante legal"]):
                 sub_block = "rep_legal"
             elif any(k in norm_section or k in norm_fn for k in ["referencias bancarias", "informacion financiera"]):
                 sub_block = "financiera_bancos"
@@ -707,6 +719,26 @@ class PDFAgent:
                 sub_block = "origen_fondos"
 
             sec_key = f"{norm_section[:30]}_{sub_block}"
+
+            is_persona_juridica_context = (
+                any(k in norm_section for k in [
+                    "informacion general", "datos basicos", "datos generales", "informacion basica",
+                    "datos de la empresa", "informacion de la empresa", "persona juridica",
+                    "personas juridicas", "contraparte", "proveedor", "asociado de negocio",
+                    "datos del solicitante", "identificacion de la empresa"
+                ]) or ("p_razon_social" in [c for c, _ in mappings.values()])
+            ) and not any(k in norm_section for k in [
+                "representante legal", "persona natural", "personas naturales",
+                "oficial de cumplimiento", "accionistas", "junta directiva",
+                "beneficiario final", "beneficiarios finales", "revisor fiscal"
+            ]) and sub_block not in ["rep_legal", "comercial", "accionistas", "junta_directiva", "revisor_fiscal"]
+
+            # Transversal Suppression: Persona Jurídica / Company NIT does not have place/date of personal expedition
+            if is_persona_juridica_context and (
+                any(k in eval_target or k in norm_fn for k in ["lugar y fecha de expedicion", "lugar de expedicion", "fecha de expedicion", "expedicion"]) or
+                fn in ["LUGAR Y FECHA DE EXPEDICIÓN", "Fecha7_af_date"]
+            ):
+                continue
 
             # --- EXCLUSION RULES ---
             # Section 9 exclusion (Vínculos / Vínculo): Must be 100% blank (Domain Isolation)
@@ -724,7 +756,11 @@ class PDFAgent:
                 "conocimiento mejorado", "conocimiento ampliado", "vinculados a personas expuestas",
                 "relacion de vehiculos", "plan de mantenimiento vehicular", "consorcio", "union temporal"
             ]) and not ("no en moneda extranjera" in norm_left):
-                continue
+                if (sub_block in ["rep_legal", "comercial"] or "representante" in norm_section) and \
+                   any(k in eval_target for k in ["nombres", "apellidos", "nombre", "cargo", "cedula", "identificacion", "correo", "email", "telefono", "celular", "expedicion"]):
+                    pass
+                else:
+                    continue
             # B. Ignore entire sections labeled "solo para clientes", PEP annexes, Anexo 3, etc.
             if any(phrase in norm_section for phrase in [
                 "solo para clientes", "para clientes", "solo para vendedores", "para uso del banco", 
@@ -735,8 +771,8 @@ class PDFAgent:
                 "anexos obligatorios clientes", "anexo obligatorio clientes"
             ]):
                 continue
-            # C. Ignore OTRA/OTRO fields
-            if re.search(r'\b(otra|otro|otras|otros)\b', norm) and not any(k in norm for k in ["razon social", "representante legal"]):
+            # C. Ignore OTRA/OTRO fields (must target the field itself, not surrounding context)
+            if re.search(r'\b(otra|otro|otras|otros)\b', eval_target) and not any(k in eval_target for k in ["razon social", "representante legal", "identificacion", "nit"]):
                 continue
 
             # D. Skip Revisor fiscal fields (e.g. TeléfonoRow1 in revisor fiscal)
@@ -863,6 +899,9 @@ class PDFAgent:
                 elif any(k in eval_target or k in norm_fn for k in ["telefono", "tel"]):
                     val_to_set = cp_celular or profile.get("telefono")
                     assigned_cat = "com_telefono"
+                elif any(k in eval_target or k in norm_fn for k in ["cargo", "puesto", "rol"]):
+                    val_to_set = (cp.get("cargo") if cp else "") or "Especialista Comercial / Licitaciones"
+                    assigned_cat = "com_cargo"
                 elif any(k in eval_target or k in norm_fn for k in ["nombre", "contacto"]):
                     val_to_set = cp_nombre or rep_full
                     assigned_cat = "com_nombre"
@@ -878,9 +917,51 @@ class PDFAgent:
                 elif any(k in eval_target or k in norm_fn for k in ["telefono", "tel"]):
                     val_to_set = profile.get("telefono")
                     assigned_cat = "rep_telefono"
+                elif (
+                    re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', eval_target) or
+                    re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', norm_fn)
+                ):
+                    val_to_set = f"{profile.get('lugar_expedicion_rep', 'Envigado')} {profile.get('fecha_expedicion_rep', '26-06-1989')}"
+                    assigned_cat = "rep_lugar_fecha_exp"
+                elif fn == "Fecha8_af_date" or (fn.startswith("Fecha") and "expedicion" in eval_target):
+                    val_to_set = profile.get("fecha_expedicion_rep", "26-06-1989")
+                    assigned_cat = "rep_fecha_exp"
+                elif any(k in eval_target or k in norm_fn for k in ["lugar de expedicion", "lugar expedicion", "expedida en"]):
+                    val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
+                    assigned_cat = "rep_lugar_exp"
+                elif (
+                    re.search(r'\b(tipo y numero de identificacion|tipo y nro de identificacion|tipo y no de identificacion)\b', eval_target) or
+                    fn.lower().startswith("tipo y n")
+                ):
+                    val_to_set = f"{profile.get('tipo_documento', 'C.C.')} {profile.get('numero_cedula', '98555384')}"
+                    assigned_cat = "firma_cedula"
+                elif any(k in eval_target or k in norm_fn for k in ["cedula", "numero id", "no id", "documento de identidad"]):
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "numero_cedula"
+                elif "primer apellido" in eval_target:
+                    val_to_set = primer_apellido
+                    assigned_cat = "p_primer_apellido"
+                elif "segundo apellido" in eval_target:
+                    val_to_set = segundo_apellido
+                    assigned_cat = "p_segundo_apellido"
+                elif any(k in eval_target for k in ["apellidos", "primer y segundo apellido"]) and not any(k in eval_target for k in ["nombres", "nombre"]):
+                    val_to_set = rep_apellido
+                    assigned_cat = "p_rep_apellido"
+                elif "nombres" in eval_target and "apellidos" not in eval_target:
+                    val_to_set = rep_nombre
+                    assigned_cat = "p_rep_nombre"
                 elif any(k in eval_target or k in norm_fn for k in ["nombre"]):
                     val_to_set = rep_full
                     assigned_cat = "rep_nombre"
+                elif any(k in eval_target or k in norm_fn for k in ["direccion", "domicilio"]):
+                    val_to_set = profile.get("direccion_principal")
+                    assigned_cat = "rep_dir"
+                elif re.search(r'\b(ciudad\s*pais|ciudad\s*/\s*pais)\b', eval_target):
+                    val_to_set = f"{profile.get('ciudad', 'Medellín')} / {profile.get('pais', 'Colombia')}"
+                    assigned_cat = "rep_ciudad_pais"
+                elif re.search(r'\b(ciudad|municipio)\b', eval_target):
+                    val_to_set = profile.get("ciudad", "Medellin")
+                    assigned_cat = "rep_ciudad"
 
             # ARIBA Sub-Block (Page 0) - ONLY Row 1 (Authorized person: Legal Representative)
             elif sub_block == "ariba":
@@ -908,7 +989,15 @@ class PDFAgent:
             # NIT / RUT / TAX ID
             elif (
                 re.search(r'\b(nit|rut|tax\s*id|identificacion\s*tributaria)\b', eval_target) or
-                re.search(r'\b(nit|rut|tax\s*id)\b', norm_left) or
+                (
+                    re.search(r'\b(nit|rut|tax\s*id)\b', norm_left) and 
+                    not any(k in eval_target for k in ["direccion", "ciudad", "pais", "telefono", "celular", "email", "correo", "nombre", "apellido", "cargo", "cuenta", "banco"])
+                ) or
+                (
+                    is_persona_juridica_context and 
+                    re.search(r'\b(numero\s+de\s+identificacion|numero\s+identificacion|no\s+identificacion|num\s+identificacion|identificacion\s+no|identificacion)\b', eval_target) and
+                    not any(k in eval_target for k in ["tipo", "lugar", "fecha", "expedicion"])
+                ) or
                 fn in ["Text4", "Texto34"]
             ) and "dv" not in eval_target:
                 if "tipo" not in norm and ("p_nit", sec_key) not in assigned_section_categories:
@@ -955,6 +1044,11 @@ class PDFAgent:
             elif "segundo apellido" in eval_target:
                 val_to_set = segundo_apellido
                 assigned_cat = "p_segundo_apellido"
+
+            # Apellidos (Representante Legal when separate from Nombres)
+            elif any(k in eval_target for k in ["apellidos", "primer y segundo apellido"]) and not any(k in eval_target for k in ["nombres", "nombre"]):
+                val_to_set = rep_apellido
+                assigned_cat = "p_rep_apellido"
                 
             # Nombres (Representante Legal)
             elif "nombres" in eval_target and "apellidos" not in eval_target:
@@ -965,6 +1059,14 @@ class PDFAgent:
             elif "representante legal" in eval_target and ("nombre" in eval_target or "apellidos" in eval_target or "representante" in eval_target) and ("p_rep_full", sec_key) not in assigned_section_categories:
                 val_to_set = rep_full
                 assigned_cat = "p_rep_full"
+
+            # Tipo y Número de identificación (Legal Representative)
+            elif (
+                re.search(r'\b(tipo y numero de identificacion|tipo y nro de identificacion|tipo y no de identificacion)\b', eval_target) or
+                (fn.lower().startswith("tipo y n") and (sub_block == "rep_legal" or "representante" in norm_section))
+            ):
+                val_to_set = f"{profile.get('tipo_documento', 'C.C.')} {profile.get('numero_cedula', '98555384')}"
+                assigned_cat = "firma_cedula"
             
             # Cédula / Número ID
             elif (
@@ -979,6 +1081,17 @@ class PDFAgent:
             ):
                 val_to_set = profile.get("numero_cedula")
                 assigned_cat = "numero_cedula"
+
+            # Combined Lugar y Fecha de Expedición (Legal Representative)
+            elif (
+                re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', eval_target) or
+                re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', norm_fn)
+            ) and (sub_block == "rep_legal" or "representante" in norm_section or "representante" in norm):
+                val_to_set = f"{profile.get('lugar_expedicion_rep', 'Envigado')} {profile.get('fecha_expedicion_rep', '26-06-1989')}"
+                assigned_cat = "rep_lugar_fecha_exp"
+            elif fn == "Fecha8_af_date" or (fn.startswith("Fecha") and (sub_block == "rep_legal" or "representante" in norm_section)):
+                val_to_set = profile.get("fecha_expedicion_rep", "26-06-1989")
+                assigned_cat = "rep_fecha_exp"
 
             # Document Type
             elif re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', eval_target) and "no" not in eval_target:
@@ -1002,6 +1115,11 @@ class PDFAgent:
             ):
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
                 assigned_cat = "lugar_expedicion_rep"
+
+            # Ciudad y País combinados
+            elif re.search(r'\b(ciudad\s*pais|ciudad\s*/\s*pais)\b', eval_target) and ("p_ciudad_pais", sec_key) not in assigned_section_categories:
+                val_to_set = f"{profile.get('ciudad', 'Medellín')} / {profile.get('pais', 'Colombia')}"
+                assigned_cat = "p_ciudad_pais"
             
             # Nacionalidad
             elif re.search(r'\bnacionalidad\b', eval_target):
@@ -1170,6 +1288,12 @@ class PDFAgent:
         """Fill an interactive PDF form with AcroForm widgets using rich label extraction + LLM + dictionary hybrid."""
         doc = fitz.open(pdf_path)
         rich_widgets = self._extract_rich_acro_widgets(doc)
+
+        cp = self.commercial_profile
+        com_nombre = (f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() or cp.get("profile_name", "")) if cp else "Kelly Yohana Delgado Macea"
+        com_email = (cp.get("email") if cp else "") or "kelly.delgado@iaclatam.com"
+        com_celular = (str(cp.get("celular", "")).replace(" ", "") if cp else "") or "3014750760"
+        com_cargo = (cp.get("cargo") if cp else "") or "Especialista Comercial / Licitaciones"
         
         # 1. Deterministic high-confidence matches from dictionary
         deterministic_matches = self._deterministic_acroform_match(rich_widgets)
@@ -1239,7 +1363,12 @@ CRITICAL RULES — READ CAREFULLY:
 10. OTRA / OTRO fields → leave completely empty.
 11. CheckBoxes → '1' or 'Yes' when True, 'Off' when False.
 12. REGLA DE CONTACTOS: Si coexisten casillas de 'Contacto Principal' y 'Contacto para notificar pagos o abonos': 'Contacto Principal' se completa con los datos del Representante Legal ({self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}), y 'Contacto para notificar pagos o abonos' con el Comercial responsable. Si solo existe 'Contacto Principal', se asigna siempre al Comercial responsable.
-13. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
+14. REGLA GLOBAL DE IDENTIFICACIÓN Y SUPRESIÓN DE EXPEDICIÓN EN PERSONA JURÍDICA:
+    - Si el formulario solicita 'NÚMERO DE IDENTIFICACIÓN' en contexto corporativo / Persona Jurídica / Información General, registrar el NIT de la empresa ({self.company_profile.get('nit')}), NUNCA la cédula del representante legal.
+    - CONDICIÓN DE SUPRESIÓN TRANSVERSAL: Todo campo de 'LUGAR Y FECHA DE EXPEDICIÓN' o 'EXPEDICIÓN' en la sección corporativa / persona jurídica DEBE PERMANECER ESTRICTAMENTE VACÍO (no aplica expedición personal para el NIT).
+15. LUGAR Y FECHA DE EXPEDICIÓN DEL REPRESENTANTE LEGAL: En campos combinados 'LUGAR Y FECHA DE EXPEDICIÓN' del Representante Legal, asignar: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')} {self.company_profile.get('fecha_expedicion_rep', '26-06-1989')}'.
+16. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: Encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...' asignan SIEMPRE los datos del Contacto Comercial en sesión ({com_nombre}, {com_email}, {com_celular}, {com_cargo}), NUNCA los del Representante Legal.
+17. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
 """
                 try:
                     raw_text = self._call_llm([
