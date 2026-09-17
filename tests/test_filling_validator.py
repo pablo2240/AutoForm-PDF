@@ -294,3 +294,69 @@ def test_audit_reporting_categorizes_filled_unfilled_and_blocked(validator):
     assert "txt_fax_sec" in unfilled_names
     assert audit["unfilled"][0]["reason"] == "NO_DATA_IN_JSON"
     assert "suggestion" in audit["unfilled"][0]
+
+
+def test_pn_field_accepts_rep_legal_in_accionaria(validator):
+    """Field 01 'Nombres y apellidos PN' is the correct target for the rep legal
+    (natural person shareholder at 100%) in the composición accionaria section."""
+    res = validator.validate(
+        label="Nombres y apellidos PN",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="01",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res.is_valid, f"Expected valid but got: {res.reason}"
+
+
+def test_single_row_rejects_is_secondary_row(validator):
+    res = validator.validate(
+        label="Nombre Persona Jurídica",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="03",
+        proposed_value="Ingeniería Asistida Por Computador S.A.S",
+        is_secondary_row=True
+    )
+    assert not res.is_valid
+    assert "Single-Row" in res.reason
+
+
+def test_type_aware_rejects_person_name_in_persona_juridica(validator):
+    res = validator.validate(
+        label="Nombre Persona Jurídica",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="02",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert not res.is_valid
+    assert "Person name" in res.reason
+
+
+def test_type_aware_rejects_percentage_in_identificacion(validator):
+    res = validator.validate(
+        label="Identificación (NIT/CC)",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="39",
+        proposed_value="100%"
+    )
+    assert not res.is_valid
+    assert "Percentage" in res.reason
+
+
+def test_row_1_shareholder_mappings_valid(validator):
+    """Row 1 of composición accionaria: PN field and cédula field should both be valid."""
+    res_pn = validator.validate(
+        label="Nombres y apellidos PN",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="01",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res_pn.is_valid, f"Expected valid but got: {res_pn.reason}"
+
+    res_cedula = validator.validate(
+        label="Identificación (NIT/CC)",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="38",
+        proposed_value="98555384"
+    )
+    assert res_cedula.is_valid, f"Expected valid but got: {res_cedula.reason}"
+

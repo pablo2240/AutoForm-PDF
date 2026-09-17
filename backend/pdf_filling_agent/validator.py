@@ -46,7 +46,7 @@ class FillingValidator:
         "origen de fondos", "origen de recursos", "declaracion de origen",
         "declaración de origen", "actividad economica secundaria", "actividades secundarias",
         # Secondary nationality (do not match simple field_name 'Nacionalidad_2' which is legal rep nationality)
-        "segunda nacionalidad", "doble nacionalidad"
+        "segunda nacionalidad", "doble nacionalidad", "nacionalidad 2"
     ]
 
     NEGATIVE_FIELD_KEYWORDS = [
@@ -112,6 +112,10 @@ class FillingValidator:
         if "ingenieria asistida por computador" in val_norm:
             return "company_name"
 
+        # Percentage
+        if "%" in val_str or val_norm.endswith("por ciento") or val_norm.endswith("porcentaje"):
+            return "percentage"
+
         return "text"
 
     def validate(
@@ -119,7 +123,8 @@ class FillingValidator:
         label: str,
         section: str,
         field_name: str,
-        proposed_value: str
+        proposed_value: str,
+        is_secondary_row: bool = False
     ) -> ValidationResult:
         """
         Runs the 3-tier validation sequence on a proposed field-value pair.
@@ -135,6 +140,7 @@ class FillingValidator:
 
         # --- TIER 1: Negative Zones / Blacklist ---
         for phrase in self.NEGATIVE_ZONE_PHRASES:
+
             phrase_norm = self._normalize(phrase)
             if phrase_norm in norm_section or phrase_norm in norm_context:
                 # Allow legal representative identity declaration in Section 11 (Origen de fondos)
@@ -142,7 +148,7 @@ class FillingValidator:
                     fn_norm = self._normalize(field_name)
                     lbl_norm = self._normalize(label)
                     ctx_norm = f"{fn_norm} {lbl_norm}".strip()
-                    if any(k in ctx_norm for k in ["yo", "expedido", "numero", "documento", "fuente", "origen"]):
+                    if any(k in ctx_norm for k in ["yo", "expedido", "numero", "documento", "fuente"]):
                         continue
                 return ValidationResult(
                     is_valid=False,
@@ -175,6 +181,12 @@ class FillingValidator:
             )
 
         # --- TIER 2: Single-Row Enforcement ---
+        if is_secondary_row:
+            return ValidationResult(
+                is_valid=False,
+                reason=f"Tier 2 Single-Row Enforcement: Table secondary row '{field_name}' is blocked"
+            )
+
         # Find all occurrences of row indices across segments: e.g. Fila1[1], Row[2], Item[3], .Row2, .Fila2
         for match in re.finditer(r'(?:fila|row|item)\w*\[(\d+)\]', field_name, re.IGNORECASE):
             if int(match.group(1)) > 0:
@@ -230,9 +242,9 @@ class FillingValidator:
                     reason=f"Tier 3 Type-Aware Guard: Nationality value cannot be assigned to non-nationality field '{norm_label}'"
                 )
 
-        # 3.4 Person names must not go into nationality, country, nit, phone
+        # 3.4 Person names must not go into nationality, country, nit, phone, persona juridica
         if sem_type == "person_name":
-            forbidden_name_targets = ["nacionalidad", "pais", "nit", "tel", "cel", "telefono", "correo", "email"]
+            forbidden_name_targets = ["nacionalidad", "pais", "nit", "tel", "cel", "telefono", "correo", "email", "persona juridica", "personas juridicas"]
             if any(k in norm_label for k in forbidden_name_targets):
                 return ValidationResult(
                     is_valid=False,
@@ -277,11 +289,12 @@ class FillingValidator:
                     reason=f"Tier 3 Type-Aware Guard: Cédula '{val_str}' cannot be assigned to '{norm_label}'"
                 )
             # If "nit" or "rut" is present, allow if the field explicitly allows Cédula or generic Documento
-            if any(k in norm_label for k in ["nit", "rut"]) and not any(k in norm_label for k in ["cedula", "documento", "c c"]):
+            if any(k in norm_label for k in ["nit", "rut"]) and not any(k in norm_label for k in ["cedula", "documento", "c c", "cc", "c.c", "/cc"]):
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: Cédula '{val_str}' cannot be assigned to strict NIT field '{norm_label}'"
                 )
+
 
         # 3.9 Financial Amount values strictly to Financial / Accounting fields
         if sem_type == "financial_amount":
@@ -296,6 +309,14 @@ class FillingValidator:
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Tier 3 Type-Aware Guard: Financial amount '{val_str}' cannot be assigned to identity/contact field '{norm_label}'"
+                )
+
+        # 3.10 Percentage values strictly to Percentage / Participation fields
+        if sem_type == "percentage":
+            if not any(k in norm_label for k in ["participacion", "porcentaje", "%", "capital"]):
+                return ValidationResult(
+                    is_valid=False,
+                    reason=f"Tier 3 Type-Aware Guard: Percentage value '{val_str}' cannot be assigned to non-percentage field '{norm_label}'"
                 )
 
         return ValidationResult(is_valid=True, reason="Passed all 3 tiers")

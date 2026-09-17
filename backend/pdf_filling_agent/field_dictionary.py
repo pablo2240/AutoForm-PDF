@@ -9,7 +9,7 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     "razon_social": [
         "Nombre empresa", "Nombre / Razon social", "Nombre / Razón Social", 
         "Nombre Entidad", "Razon social", "Razón Social", "Denominación Social",
-        "Empresa", "Organización"
+        "Empresa", "Organización", "Nombre Persona Jurídica", "Nombre Persona Juridica"
     ],
     "nit": [
         "nit", "NIT", "Numero Nit", "Número NIT", "Nro nit", "Nro. NIT", 
@@ -169,7 +169,9 @@ IGNORE_RULES: List[str] = [
     "17. DECLARACIÓN DE ORIGEN DE FONDOS: En la sección 11 de Declaración de Origen de Fondos, diligenciar los datos de identificación solicitados del Representante Legal (Yo, número de documento, expedido en).",
     "18. CONTACTO PARA ARIBA: Completar ÚNICAMENTE la Fila 1 con el Representante Legal (Nombres y apellidos persona autorizada: Guillermo Humberto Cañón Sarria, Correo electrónico: guillermo.canon@iaclatam.com). Las filas secundarias (2, 3 y 4) deben permanecer completamente vacías.",
     "19. SUPRESIÓN DE LUGAR Y FECHA DE EXPEDICIÓN EN PERSONA JURÍDICA: Las empresas con NIT no poseen lugar ni fecha de expedición personal. Si tras el número de identificación de la empresa o en la sección de información general/persona jurídica aparece un campo de 'LUGAR Y FECHA DE EXPEDICIÓN', este debe permanecer estrictamente VACÍO. Únicamente se diligencia lugar y fecha de expedición cuando corresponda expresamente a una persona natural o al Representante Legal ('Envigado 26-06-1989').",
-    "20. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: En encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...', diligenciar siempre los datos del Contacto Comercial responsable en sesión (Kelly Yohana Delgado Macea, kelly.delgado@iaclatam.com, 3014750760, Especialista Comercial / Licitaciones), evitando asignar por defecto los datos del Representante Legal."
+    "20. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: En encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...', diligenciar siempre los datos del Contacto Comercial responsable en sesión (Kelly Yohana Delgado Macea, kelly.delgado@iaclatam.com, 3014750760, Especialista Comercial / Licitaciones), evitando asignar por defecto los datos del Representante Legal.",
+    "21. CAMPOS DE PERSONA NATURAL (PN): Ignorar y dejar completamente vacíos los campos etiquetados con 'Nombres y apellidos PN' o que contengan la sigla 'PN'. No escribir información allí cuando la entidad diligenciada es Persona Jurídica.",
+    "22. REGLA DE CONSISTENCIA CONTEXTUAL DE IDENTIFICACIÓN: En cuadrículas o bloques donde se diligencie el nombre del Representante Legal (Guillermo), el campo subsiguiente de 'Identificación (NIT/CC)' asocia su cédula de ciudadanía ('98555384'). Si el bloque o fila corresponde a Persona Jurídica ('Ingeniería Asistida Por Computador S.A.S'), el campo subsiguiente de 'Identificación (NIT/CC)' asocia estrictamente el NIT ('8110047212'). Las filas secundarias de la tabla deben permanecer 100% vacías."
 ]
 
 def get_dictionary_context() -> str:

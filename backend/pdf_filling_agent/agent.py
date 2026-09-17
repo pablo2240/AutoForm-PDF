@@ -512,18 +512,16 @@ class PDFAgent:
             for w in widgets:
                 wr = w.rect
                 attr_label = getattr(w, 'field_label', '') or ''
-                if re.match(r'^(celda|cell|textfield|datetimefield|field|fila|row|tabla|table|texto|independiente|listabotonesradio)\d*$', attr_label.strip(), re.IGNORECASE):
+                if re.match(r'^(celda|cell|textfield|datetimefield|field|fila|row|tabla|table|texto|independiente|listabotonesradio)\d*$', attr_label.strip(), re.IGNORECASE) or re.match(r'^\d+\.?$', attr_label.strip()):
                     attr_label = ""
                 
-                # Words immediately above the widget strictly overlapping its column width (up to 32pt for table column headers)
+                # Words immediately above the widget strictly overlapping its column width (up to 35pt for table column headers)
                 # Allows up to 4pt vertical overlap for descenders, and excludes words separated by an intervening widget in the same column
-                cands = [wd for wd in words if wd[1] <= wr.y0 + 2 and wr.y0 - wd[3] >= -4 and (wr.y0 - wd[1]) < 32 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)]
+                cands = [wd for wd in words if wd[1] <= wr.y0 + 2 and wr.y0 - wd[3] >= -4 and (wr.y0 - wd[1]) < 35 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)]
                 cands = [wd for wd in cands if not any(other.field_name != w.field_name and (other.rect.x0 <= wr.x1 and other.rect.x1 >= wr.x0) and (wd[1] < other.rect.y0 and other.rect.y0 < wr.y0 - 2) for other in widgets)]
                 if cands:
-                    max_y1 = max(wd[3] for wd in cands)
-                    line_words = [wd for wd in cands if abs(wd[3] - max_y1) < 5]
-                    line_words.sort(key=lambda x: x[0])
-                    above_str = " ".join(wd[4] for wd in line_words)
+                    cands_sorted = sorted(cands, key=lambda x: (round(x[1] / 6), x[0]))
+                    above_str = " ".join(wd[4] for wd in cands_sorted)
                 else:
                     above_str = ""
                 
@@ -556,8 +554,36 @@ class PDFAgent:
                     "section": section_header,
                     "page": pno,
                     "is_prefilled": is_prefilled,
-                    "current_value": val_str
+                    "current_value": val_str,
+                    "is_secondary_row": False
                 })
+
+        # Identify table secondary rows across widgets
+        for rw in rich_widgets:
+            fn = rw["field_name"]
+            wr = rw["rect"]
+            sec_norm = self._normalize_label(rw.get("section", ""))
+            
+            # 1. Explicit row indices in field name: Fila1[1], Row[2], Item[3]
+            m_brk = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', fn, re.IGNORECASE)
+            if m_brk and int(m_brk.group(1)) > 0:
+                rw["is_secondary_row"] = True
+                continue
+            m_num = re.search(r'(?:fila|row|item)(\d+)', fn, re.IGNORECASE)
+            if m_num and int(m_num.group(1)) > 1:
+                rw["is_secondary_row"] = True
+                continue
+            if re.search(r'(?:accionistas|junta|revisor|patente|publicacion|profesionales|vinculo|contrat)[\w\s]*_([2-9]|\d{2,})$', fn, re.IGNORECASE):
+                rw["is_secondary_row"] = True
+                continue
+                
+            # 2. Table grid sections with unindexed cell IDs (e.g. Composición Accionaria in F-UC 01)
+            is_composicion_sec = any(k in sec_norm for k in [
+                "composicion accionaria", "anexo de composicion", "socios con participacion"
+            ])
+            if is_composicion_sec and (wr.y0 > 235 or (fn.isdigit() and int(fn) not in [1, 2, 38, 57])):
+                rw["is_secondary_row"] = True
+                continue
 
         # Cross-widget counterpart detection (e.g. SI/NO pairs or Radio options where one is already answered)
         prefilled_names = {rw["field_name"] for rw in rich_widgets if rw["is_prefilled"]}
@@ -600,6 +626,7 @@ class PDFAgent:
 
         mappings = {}
         assigned_section_categories = set()
+        force_blank_fields: set = set()  # Fields deterministically decided must remain empty
 
         # ADR-0008: Commercial profile resolution
         cp = self.commercial_profile
@@ -665,6 +692,8 @@ class PDFAgent:
                 continue
 
             # 3. SKIP secondary table rows (Row index >= 1) - ONLY fill Row 1 [0]
+            if item.get("is_secondary_row"):
+                continue
             row_match = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', fn, re.IGNORECASE)
             if row_match and int(row_match.group(1)) > 0:
                 continue
@@ -741,6 +770,7 @@ class PDFAgent:
                 continue
 
             # --- EXCLUSION RULES ---
+
             # Section 9 exclusion (Vínculos / Vínculo): Must be 100% blank (Domain Isolation)
             if (
                 any(v in norm_section for v in ["9 vinculo", "9 vinculos", "vinculos", "vinculo"]) or
@@ -858,9 +888,24 @@ class PDFAgent:
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
                 assigned_cat = "firma_lugar_exp"
 
-            # Accionistas (Fila 1)
+            # Accionistas / Composición Accionaria (Fila 1)
             elif sub_block == "accionistas":
-                if "nombre" in norm_attr or "razon social" in norm_attr or "nombre o razon social" in norm_fn:
+                if any(k in eval_target for k in ["nombres y apellidos pn", "nombres pn", "apellidos pn"]) or (
+                    "nombres" in eval_target and "pn" in eval_target
+                ):
+                    # The sole shareholder (100%) is the rep legal — a natural person
+                    val_to_set = rep_full
+                    assigned_cat = "acc_rep_full"
+                elif any(k in eval_target for k in ["nombre persona juridica", "persona juridica nombre"]) or (
+                    "persona juridica" in eval_target and "nombre" in eval_target
+                ):
+                    # IAC's shareholder is a natural person — mark PJ name field as force-blank
+                    force_blank_fields.add(fn)
+                elif any(k in eval_target for k in ["identificacion", "nit/cc", "nit cc"]):
+                    # Shareholder is PN → use cédula, not NIT
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "acc_cedula"
+                elif "nombre o razon social" in norm_fn or ("nombre" in norm_attr and "juridica" not in norm_attr) or ("razon social" in norm_attr and "juridica" not in norm_attr):
                     val_to_set = rep_full
                     assigned_cat = "acc_rep_full"
                 elif "tipo de documento" in norm_attr or "tipo de documento" in norm_fn:
@@ -869,6 +914,7 @@ class PDFAgent:
                 elif "documento de identidad" in norm_attr or "documento de identidad" in norm_fn:
                     val_to_set = profile.get("numero_cedula", "98555384")
                     assigned_cat = "acc_cedula"
+
 
             # Junta Directiva (Fila 1)
             elif sub_block == "junta_directiva":
@@ -1273,7 +1319,8 @@ class PDFAgent:
                     label=item.get("label", ""),
                     section=item.get("section", ""),
                     field_name=fn,
-                    proposed_value=val_str
+                    proposed_value=val_str,
+                    is_secondary_row=item.get("is_secondary_row", False)
                 )
                 if v_res.is_valid:
                     mappings[fn] = (val_str, assigned_cat or "general")
@@ -1282,7 +1329,8 @@ class PDFAgent:
                 else:
                     print(f"[INFO] Deterministic match skipped for '{fn}': {v_res.reason}")
 
-        return mappings
+        return mappings, force_blank_fields
+
 
     def _fill_acroform(self, pdf_path: str, fields: Dict[str, str], user_instructions: str) -> str:
         """Fill an interactive PDF form with AcroForm widgets using rich label extraction + LLM + dictionary hybrid."""
@@ -1296,8 +1344,9 @@ class PDFAgent:
         com_cargo = (cp.get("cargo") if cp else "") or "Especialista Comercial / Licitaciones"
         
         # 1. Deterministic high-confidence matches from dictionary
-        deterministic_matches = self._deterministic_acroform_match(rich_widgets)
-        print(f"[INFO] Deterministic AcroForm matches found: {len(deterministic_matches)}")
+        deterministic_matches, det_force_blank = self._deterministic_acroform_match(rich_widgets)
+        print(f"[INFO] Deterministic AcroForm matches found: {len(deterministic_matches)}, force-blank: {det_force_blank}")
+
 
         # 2. LLM enriched page-by-page mapping
         llm_matches: Dict[str, str] = {}
@@ -1368,6 +1417,9 @@ CRITICAL RULES — READ CAREFULLY:
     - CONDICIÓN DE SUPRESIÓN TRANSVERSAL: Todo campo de 'LUGAR Y FECHA DE EXPEDICIÓN' o 'EXPEDICIÓN' en la sección corporativa / persona jurídica DEBE PERMANECER ESTRICTAMENTE VACÍO (no aplica expedición personal para el NIT).
 15. LUGAR Y FECHA DE EXPEDICIÓN DEL REPRESENTANTE LEGAL: En campos combinados 'LUGAR Y FECHA DE EXPEDICIÓN' del Representante Legal, asignar: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')} {self.company_profile.get('fecha_expedicion_rep', '26-06-1989')}'.
 16. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: Encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...' asignan SIEMPRE los datos del Contacto Comercial en sesión ({com_nombre}, {com_email}, {com_celular}, {com_cargo}), NUNCA los del Representante Legal.
+18. CAMPOS DE PERSONA NATURAL (PN): Dejar COMPLETAMENTE VACÍOS los campos etiquetados con 'Nombres y apellidos PN' o que contengan la sigla 'PN'. No escribir información allí cuando la entidad diligenciada es Persona Jurídica.
+19. FILAS SECUNDARIAS EN TABLAS: En cuadrículas o tablas (como el Anexo de Composición Accionaria), diligenciar ÚNICAMENTE la Fila 1. NUNCA diligenciar filas secundarias (dejar completamente vacías sin repetir la razón social).
+20. REGLA DE CONSISTENCIA CONTEXTUAL DE IDENTIFICACIÓN: Si en una fila o bloque se diligenció Persona Jurídica ('{self.company_profile.get('razon_social')}'), el campo subsiguiente de 'Identificación (NIT/CC)' asocia estrictamente el NIT ({self.company_profile.get('nit')}). Si se diligenció una persona natural ('{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'), asocia su cédula de ciudadanía ({self.company_profile.get('numero_cedula', '98555384')}).
 17. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
 """
                 try:
@@ -1396,7 +1448,8 @@ CRITICAL RULES — READ CAREFULLY:
                 label=meta.get("label", k),
                 section=meta.get("section", ""),
                 field_name=k,
-                proposed_value=v
+                proposed_value=v,
+                is_secondary_row=meta.get("is_secondary_row", False)
             )
             if v_res.is_valid:
                 filtered_llm[k] = v
@@ -1417,7 +1470,7 @@ CRITICAL RULES — READ CAREFULLY:
             proposals.append((k, lbl, cat, v, 1.0, sec))
 
         for k, v in filtered_llm.items():
-            if k not in deterministic_matches:
+            if k not in deterministic_matches and k not in det_force_blank:
                 meta = widget_meta_map.get(k, {})
                 lbl = meta.get("label", k)
                 sec = meta.get("section", "")
