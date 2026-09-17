@@ -1096,8 +1096,12 @@ class PDFAgent:
             # Banco / Cuenta
             elif re.search(r'\b(banco|entidad bancaria|entidad financiera)\b', eval_target):
                 val_to_set = profile.get("entidad_bancaria")
-            elif (re.search(r'\b(numero de cuenta|no cuenta|cuenta no)\b', eval_target)) and "tipo" not in norm:
+            elif (
+                re.search(r'\b(numero de cuenta|no cuenta|cuenta no|numero cuenta|no de cuenta|numerodecuenta)\b', eval_target) or
+                re.search(r'\b(numero de cuenta|no cuenta|cuenta no|numero cuenta|no de cuenta)\b', norm_fn)
+            ) and not re.search(r'\b(tipo de cuenta|tipo cuenta)\b', eval_target):
                 val_to_set = profile.get("numero_cuenta")
+                assigned_cat = "p_numero_cuenta"
             elif re.search(r'\b(tipo de cuenta|tipo cuenta)\b', eval_target):
                 val_to_set = profile.get("tipo_cuenta")
             
@@ -1116,7 +1120,7 @@ class PDFAgent:
                 assigned_cat = "p_beneficiario_final"
 
             # Total Activos
-            elif re.search(r'\b(total activos|activos)\b', eval_target) and "pasivo" not in eval_target and "ingreso" not in eval_target:
+            elif re.search(r'\b(total activos|activos|activo totales|activo total|activos totales|total de activos|activo)\b', eval_target) and "pasivo" not in eval_target and "ingreso" not in eval_target and "actividad" not in eval_target:
                 val_to_set = profile.get("total_activos")
                 assigned_cat = "p_activos"
 

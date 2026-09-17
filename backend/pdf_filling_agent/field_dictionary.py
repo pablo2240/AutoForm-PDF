@@ -110,7 +110,8 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "numero_cuenta": [
         "Número de Cuenta", "Numero de Cuenta", "No. Cuenta / Cta. No.", "No. Cuenta", 
-        "Cuenta Bancaria No.", "Cuenta No.", "No. de Cuenta", "No. Cuenta Bancaria"
+        "Cuenta Bancaria No.", "Cuenta No.", "No. de Cuenta", "No. Cuenta Bancaria",
+        "Número de cuenta", "Numero de cuenta", "N° Cuenta", "Cuenta"
     ],
     "tipo_cuenta": [
         "Tipo de Cuenta", "Tipo Cuenta", "Modalidad de Cuenta", "Tipo de Producto", "Clase de Cuenta", "Producto", "Producto *"
@@ -119,7 +120,8 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
         "Sucursal / Agencia", "Sucursal", "Sucursal del Banco", "Agencia"
     ],
     "total_activos": [
-        "Total Activos", "Activos", "Activos (Pesos)", "Valor Activos", "Total de Activos"
+        "Total Activos", "Activos", "Activos (Pesos)", "Valor Activos", "Total de Activos",
+        "Activo Totales", "Activo Totales (Último balance)", "Activo Total", "Activos Totales"
     ],
     "total_pasivos": [
         "Total Pasivos", "Pasivos", "Pasivos (Pesos)", "Valor Pasivos", "Total de Pasivos"
