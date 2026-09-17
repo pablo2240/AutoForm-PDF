@@ -351,3 +351,35 @@ def test_row_1_shareholder_mappings_valid(validator):
     )
     assert res_cedula.is_valid, f"Expected valid but got: {res_cedula.reason}"
 
+
+def test_beneficiarios_finales_row_1_valid(validator):
+    """Row 1 of Beneficiarios Finales: person name and cédula must both be valid."""
+    res_name = validator.validate(
+        label="Clic para escribir el nombre del beneficiario final",
+        section="ANEXO – Información de Beneficiarios Finales",
+        field_name="Indique el nombre del beneficiario final 1",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res_name.is_valid, f"Expected valid but got: {res_name.reason}"
+
+    res_cedula = validator.validate(
+        label="Clic para escribir el No. De Identificación",
+        section="ANEXO – Información de Beneficiarios Finales",
+        field_name="Indique el número de identificación 1",
+        proposed_value="98555384"
+    )
+    assert res_cedula.is_valid, f"Expected valid but got: {res_cedula.reason}"
+
+
+def test_beneficiarios_finales_secondary_rows_blocked(validator):
+    """Rows 2+ of Beneficiarios Finales must be blocked under single-row table policy."""
+    res_sec_name = validator.validate(
+        label="Clic para escribir el nombre del beneficiario final",
+        section="ANEXO – Información de Beneficiarios Finales",
+        field_name="Indique el nombre del beneficiario final 2",
+        proposed_value="Guillermo Humberto Cañón Sarria",
+        is_secondary_row=True
+    )
+    assert not res_sec_name.is_valid
+    assert "Single-Row" in res_sec_name.reason
+

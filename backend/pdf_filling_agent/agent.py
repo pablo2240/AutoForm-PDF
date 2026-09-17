@@ -576,6 +576,10 @@ class PDFAgent:
             if re.search(r'(?:accionistas|junta|revisor|patente|publicacion|profesionales|vinculo|contrat)[\w\s]*_([2-9]|\d{2,})$', fn, re.IGNORECASE):
                 rw["is_secondary_row"] = True
                 continue
+            # Table/list secondary rows with explicit numerical suffixes (e.g. 'beneficiario final 2', 'Tipo Ident. 2', 'número de identificación 2')
+            if re.search(r'(?:beneficiario|accionista|socio|miembro|directivo|tipo\s+ident\.?|identificaci[oó]n)[\w\s\.]*?\s+([2-9]|\d{2,})$', fn, re.IGNORECASE):
+                rw["is_secondary_row"] = True
+                continue
                 
             # 2. Table grid sections with unindexed cell IDs (e.g. Composición Accionaria in F-UC 01)
             is_composicion_sec = any(k in sec_norm for k in [
@@ -693,6 +697,7 @@ class PDFAgent:
 
             # 3. SKIP secondary table rows (Row index >= 1) - ONLY fill Row 1 [0]
             if item.get("is_secondary_row"):
+                force_blank_fields.add(fn)
                 continue
             row_match = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', fn, re.IGNORECASE)
             if row_match and int(row_match.group(1)) > 0:
@@ -740,6 +745,7 @@ class PDFAgent:
             elif "revisor" in norm_section or "revisor" in norm_fn:
                 sub_block = "revisor_fiscal"
             elif fn in ["Nombres y Apellidos", "Correo electrónico_2", "Teléfono Fijo", "Teléfono celular"] or \
+                 re.search(r'\b(?:rl)\b', norm_fn) or \
                  any(k in norm_attr or k in norm_fn or k in norm_left or k in norm_section for k in ["representante legal", "datos del representante legal", "informacion representante legal"]):
                 sub_block = "rep_legal"
             elif any(k in norm_section or k in norm_fn for k in ["referencias bancarias", "informacion financiera"]):
@@ -935,6 +941,26 @@ class PDFAgent:
                     val_to_set = profile.get("ciudad", "Medellin")
                     assigned_cat = "jd_ciudad"
 
+            # Beneficiarios Finales (Fila 1)
+            elif (
+                "beneficiario" in norm_section or 
+                any(k in norm_fn for k in ["beneficiario final 1", "beneficiario final", "beneficiarios finales"]) or 
+                "beneficiario" in norm_fn
+            ) and not item.get("is_secondary_row") and not any(k in norm_fn for k in ["empresa", "representante", "invitacion", "oferta", "objeto", "contratacion"]):
+                if any(k in eval_target or k in norm_fn for k in ["nombre"]):
+                    val_to_set = rep_full
+                    assigned_cat = "bf_nombre"
+                elif any(k in eval_target or k in norm_fn for k in ["tipo de identificacion", "tipo ident", "tipo id"]):
+                    val_to_set = "C.C."
+                    assigned_cat = "bf_tipo_doc"
+                elif any(k in eval_target or k in norm_fn for k in ["numero de identificacion", "numero documento", "identificacion", "documento", "cedula", "numero"]):
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "bf_cedula"
+                elif re.search(r'\b(es beneficiario final)\b', eval_target) and not any(k in eval_target or k in norm_fn for k in ["nombre", "identificacion", "documento", "tipo", "numero"]):
+                    val_to_set = "SI"
+                    assigned_cat = "bf_es_beneficiario"
+
+
             # Commercial Sub-Block (Page 0 & Page 2)
             elif sub_block == "comercial":
                 if any(k in eval_target or k in norm_fn for k in ["correo", "email"]):
@@ -955,7 +981,10 @@ class PDFAgent:
 
             # Legal Representative Sub-Block (Page 0)
             elif sub_block == "rep_legal":
-                if any(k in eval_target or k in norm_fn for k in ["correo", "email"]):
+                if any(k in eval_target or k in norm_fn for k in ["nombre de la empresa", "nombre empresa", "razon social"]) or ("empresa" in norm_fn and "representante" not in norm_fn):
+                    val_to_set = profile.get("razon_social")
+                    assigned_cat = "p_razon_social"
+                elif any(k in eval_target or k in norm_fn for k in ["correo", "email"]):
                     val_to_set = profile.get("correo_rep")
                     assigned_cat = "rep_correo"
                 elif any(k in eval_target or k in norm_fn for k in ["celular", "movil"]):
@@ -982,7 +1011,10 @@ class PDFAgent:
                 ):
                     val_to_set = f"{profile.get('tipo_documento', 'C.C.')} {profile.get('numero_cedula', '98555384')}"
                     assigned_cat = "firma_cedula"
-                elif any(k in eval_target or k in norm_fn for k in ["cedula", "numero id", "no id", "documento de identidad"]):
+                elif any(k in eval_target or k in norm_fn for k in ["tipo id", "tipo documento", "tipo de documento", "tipo de identificacion"]):
+                    val_to_set = "C.C."
+                    assigned_cat = "rep_tipo_doc"
+                elif any(k in eval_target or k in norm_fn for k in ["cedula", "numero id", "no id", "identificacion", "documento de identidad", "numero documento"]):
                     val_to_set = profile.get("numero_cedula", "98555384")
                     assigned_cat = "numero_cedula"
                 elif "primer apellido" in eval_target:
@@ -1279,8 +1311,8 @@ class PDFAgent:
                 val_to_set = "100"
                 assigned_cat = "p_participacion"
 
-            # Beneficiario final
-            elif re.search(r'\b(es beneficiario final|beneficiario final)\b', eval_target):
+            # Beneficiario final (Only for boolean/confirmation fields, never when asking for name/id/doc)
+            elif re.search(r'\b(es beneficiario final)\b', eval_target) and not any(k in eval_target or k in norm_fn for k in ["nombre", "identificacion", "documento", "tipo", "numero"]):
                 val_to_set = "SI"
                 assigned_cat = "p_beneficiario_final"
 
