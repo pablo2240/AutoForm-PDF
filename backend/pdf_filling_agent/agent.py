@@ -476,7 +476,7 @@ class PDFAgent:
                 norm_b = self._normalize_label(txt)
                 if len(txt) > 3 and (
                     re.match(r'^\d+(\.\d+)*\.?\s*[A-ZÁÉÍÓÚÑ]', txt) or
-                    any(norm_b.startswith(h) for h in [
+                    any(norm_b.startswith(h) or h in norm_b for h in [
                         "anexo",
                         "anexos",
                         "apendice",
@@ -484,8 +484,12 @@ class PDFAgent:
                         "habeas data",
                         "manifiesto de cumplimiento",
                         "datos de contacto",
+                        "datos contacto",
+                        "ariba",
                         "informacion general",
                         "datos representante legal",
+                        "datos del representante legal",
+                        "datos contacto comercial",
                         "declaracion de prevencion",
                         "anexos obligatorios",
                         "informacion referente a los accionistas",
@@ -507,12 +511,20 @@ class PDFAgent:
                     attr_label = ""
                 
                 # Words immediately above the widget strictly overlapping its column width (up to 32pt for table column headers)
-                above_words = [nw[4] for nw in sorted([wd for wd in words if 0 <= wr.y0 - wd[3] < 32 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)], key=lambda x: (x[1], x[0]))]
+                # Allows up to 4pt vertical overlap for descenders, and excludes words separated by an intervening widget in the same column
+                cands = [wd for wd in words if wd[1] <= wr.y0 + 2 and wr.y0 - wd[3] >= -4 and (wr.y0 - wd[1]) < 32 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)]
+                cands = [wd for wd in cands if not any(other.field_name != w.field_name and (other.rect.x0 <= wr.x1 and other.rect.x1 >= wr.x0) and (wd[1] < other.rect.y0 and other.rect.y0 < wr.y0 - 2) for other in widgets)]
+                if cands:
+                    max_y1 = max(wd[3] for wd in cands)
+                    line_words = [wd for wd in cands if abs(wd[3] - max_y1) < 5]
+                    line_words.sort(key=lambda x: x[0])
+                    above_str = " ".join(wd[4] for wd in line_words)
+                else:
+                    above_str = ""
+                
                 # Words to the left on the same horizontal baseline band
                 left_words = [nw[4] for nw in sorted([wd for wd in words if abs(wd[1] - wr.y0) < 10 and wd[2] <= wr.x0 + 2 and (wr.x0 - wd[2]) < 130], key=lambda x: (x[1], x[0]))]
-                
                 left_str = " ".join(left_words)
-                above_str = " ".join(above_words)
                 
                 # Closest preceding section header
                 section_header = ""
@@ -678,6 +690,8 @@ class PDFAgent:
                fn in ["Nombre y Apellidos del contacto", "Correo electrónico_5", "Teléfono Fijo_3", "Teléfono Celular"] or \
                any(k in norm_attr or k in norm_fn or k in norm_left for k in ["contacto comercial", "relacion comercia"]):
                 sub_block = "comercial"
+            elif "ariba" in norm_section or "ariba" in norm_fn or "ariba" in norm or "ariba" in norm_left or fn in ["Text1", "Text5", "Text2", "Text7", "Text3", "Text8", "Text9", "Text10"]:
+                sub_block = "ariba"
             elif "accionistas" in norm_section or "accionistas" in norm_fn:
                 sub_block = "accionistas"
             elif "junta" in norm_section or "junta" in norm_fn:
@@ -867,6 +881,17 @@ class PDFAgent:
                 elif any(k in eval_target or k in norm_fn for k in ["nombre"]):
                     val_to_set = rep_full
                     assigned_cat = "rep_nombre"
+
+            # ARIBA Sub-Block (Page 0) - ONLY Row 1 (Authorized person: Legal Representative)
+            elif sub_block == "ariba":
+                if any(k in eval_target or k in norm_fn for k in ["nombre", "nombres", "apellidos", "autorizada"]) or fn == "Text1":
+                    val_to_set = rep_full
+                    assigned_cat = "ariba_rep_nombre"
+                elif any(k in eval_target or k in norm_fn for k in ["correo", "email"]) or fn == "Text5":
+                    val_to_set = profile.get("correo_rep")
+                    assigned_cat = "ariba_rep_correo"
+                else:
+                    continue  # Secondary rows must remain completely empty per user instruction and ADR-0001
 
             elif (
                 (re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_left) or re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_above))

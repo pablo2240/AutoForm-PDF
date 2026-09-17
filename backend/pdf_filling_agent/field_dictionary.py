@@ -132,6 +132,12 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "total_egresos_mensuales": [
         "Total Egresos Mensuales", "Egresos Mensuales", "Gastos Mensuales", "Egresos Mensuales (Pesos)", "Total Egresos", "Egresos"
+    ],
+    "ariba_rep_nombre": [
+        "Nombres y apellidos persona autorizada", "Persona autorizada ARIBA", "Nombres y apellidos autorizada"
+    ],
+    "ariba_rep_correo": [
+        "Correo electrónico persona autorizada", "Correo ARIBA", "Correo electrónico ARIBA"
     ]
 }
 
@@ -152,7 +158,8 @@ IGNORE_RULES: List[str] = [
     "14. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas.",
     "15. DOBLE NACIONALIDAD / NACIONALIDAD 2: Solo se reporta la nacionalidad principal ('Colombia'). Cualquier campo de segunda nacionalidad debe quedar vacío.",
     "16. NO LLENAR SECCIÓN 9 (VÍNCULO / VÍNCULOS): La sección '9. VÍNCULO' o '9. VÍNCULOS' no aplica y debe permanecer completamente vacía.",
-    "17. DECLARACIÓN DE ORIGEN DE FONDOS: En la sección 11 de Declaración de Origen de Fondos, diligenciar los datos de identificación solicitados del Representante Legal (Yo, número de documento, expedido en)."
+    "17. DECLARACIÓN DE ORIGEN DE FONDOS: En la sección 11 de Declaración de Origen de Fondos, diligenciar los datos de identificación solicitados del Representante Legal (Yo, número de documento, expedido en).",
+    "18. CONTACTO PARA ARIBA: Completar ÚNICAMENTE la Fila 1 con el Representante Legal (Nombres y apellidos persona autorizada: Guillermo Humberto Cañón Sarria, Correo electrónico: guillermo.canon@iaclatam.com). Las filas secundarias (2, 3 y 4) deben permanecer completamente vacías."
 ]
 
 def get_dictionary_context() -> str:

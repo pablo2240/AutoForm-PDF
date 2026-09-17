@@ -34,6 +34,7 @@ Tu objetivo es diligenciar este formulario oficial (vinculación de clientes/pro
    - MIEMBROS DE LA JUNTA DIRECTIVA U ORGANISMO SOCIETARIO SEMEJANTE (completar ÚNICAMENTE Fila 1 con los datos del Representante Legal: Guillermo Humberto Cañón Sarria, C.C. 98555384).
    - Firma del Representante Legal / Persona Natural.
    - Bloques declarativos de autorización y 11. DECLARACIÓN DE ORIGEN DE FONDOS ("Yo, Guillermo Humberto Cañón Sarria...").
+   - DATOS CONTACTO PARA ARIBA: Completar ÚNICAMENTE la Fila 1 con el Representante Legal (Nombres y apellidos persona autorizada: Guillermo Humberto Cañón Sarria, Correo electrónico: guillermo.canon@iaclatam.com). Filas 2 a 4 vacías.
 
 2. **ZONAS ROJAS (IGNORAR TOTALMENTE / DEJAR EN BLANCO):**
    - Espacio Reservado para la Entidad / Uso Exclusivo del Banco / Aprobación Interna de Riesgos.
