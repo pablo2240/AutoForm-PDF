@@ -24,7 +24,11 @@ def test_templates():
     assert len(templates) > 0
 
 def test_get_pdf_pages():
-    response = client.get("/api/pdf/formulario_datos_empresa/pages")
+    templates_res = client.get("/api/templates")
+    templates = templates_res.json().get("templates", [])
+    assert len(templates) > 0
+    tpl_id = templates[0]["id"]
+    response = client.get(f"/api/pdf/{tpl_id}/pages")
     assert response.status_code == 200
     res_data = response.json()
     assert res_data["total_pages"] > 0
@@ -32,8 +36,13 @@ def test_get_pdf_pages():
     assert "image_base64" in res_data["pages"][0]
 
 def test_save_mapping_and_generate_with_styles():
+    templates_res = client.get("/api/templates")
+    templates = templates_res.json().get("templates", [])
+    assert len(templates) > 0
+    tpl_id = templates[0]["id"]
+
     mapping_payload = {
-        "template_id": "formulario_datos_empresa",
+        "template_id": tpl_id,
         "page_width": 612.0,
         "page_height": 792.0,
         "mappings": [
@@ -58,12 +67,15 @@ def test_save_mapping_and_generate_with_styles():
     save_res = client.post("/api/mapping", json=mapping_payload)
     assert save_res.status_code == 200
     
-    gen_res = client.post("/api/generate", json={"template_id": "formulario_datos_empresa"})
+    gen_res = client.post("/api/generate", json={
+        "template_id": tpl_id,
+        "commercial_profile_id": "legal_rep_only"
+    })
     assert gen_res.status_code == 200
     gen_data = gen_res.json()
     assert gen_data["status"] == "success"
     assert gen_data["total_placed"] >= 1
-    assert "filled_formulario_datos_empresa.pdf" in gen_data["filename"]
+    assert "filled_" in gen_data["filename"]
 
 def test_delete_template():
     # 1. Create a dummy test pdf in input/
@@ -91,14 +103,26 @@ def test_delete_template():
 
 def test_ai_fill_endpoint_validation():
     # 1. Non-existent template should return 404
-    res = client.post("/api/ai-fill", json={"template_id": "non_existent_template_999"})
+    res = client.post("/api/ai-fill", json={
+        "template_id": "non_existent_template_999",
+        "commercial_profile_id": "legal_rep_only"
+    })
     assert res.status_code == 404
 
     # 2. Existing template route check
-    res2 = client.post("/api/ai-fill", json={"template_id": "formulario_datos_empresa"})
+    templates_res = client.get("/api/templates")
+    templates = templates_res.json().get("templates", [])
+    assert len(templates) > 0
+    tpl_id = templates[0]["id"]
+
+    res2 = client.post("/api/ai-fill", json={
+        "template_id": tpl_id,
+        "commercial_profile_id": "legal_rep_only"
+    })
     # If API key is present, returns 200; if missing/invalid credit, returns 500 with error detail
     assert res2.status_code in [200, 500]
     print("[SUCCESS] AI Fill endpoint validation test passed!")
+
 
 if __name__ == "__main__":
     test_root()

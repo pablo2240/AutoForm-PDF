@@ -432,6 +432,78 @@
   color: #fca5a5;
 }
 
+.auth-alert.alert-success {
+  background-color: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.field-label-row label {
+  margin-bottom: 0 !important;
+}
+
+.auth-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 16px;
+  transition: color 0.15s ease;
+}
+
+.auth-back-link:hover {
+  color: #f8fafc;
+}
+
+.auth-corporate-policy-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background-color: rgba(248, 177, 38, 0.06);
+  border: 1px solid rgba(248, 177, 38, 0.22);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-top: 24px;
+}
+
+.policy-banner-icon {
+  color: #f8b126;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.policy-banner-text {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #cbd5e1;
+}
+
+.policy-banner-text strong {
+  display: block;
+  color: #f8b126;
+  font-weight: 600;
+  margin-bottom: 3px;
+  font-size: 0.8rem;
+}
+
+.policy-banner-text p {
+  margin: 0;
+  color: #94a3b8;
+}
+
 /* Form Elements */
 .auth-form {
   display: flex;

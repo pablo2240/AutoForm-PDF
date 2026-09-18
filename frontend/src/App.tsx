@@ -34,9 +34,11 @@ import {
   fetchEmployerProfiles,
   saveEmployerProfiles,
   fetchPublicCommercialProfiles,
+  fetchCurrentAuthUser,
   adminCheck,
   adminLogout
 } from './api';
+import { supabase } from './supabaseClient';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
 import { Sidebar } from './components/Sidebar';
@@ -182,28 +184,83 @@ export const App: React.FC = () => {
     }
   }, [currentUser, visibleCommercialProfiles, activeCommercialProfileId]);
 
-  // Check active session on mount
+  // Check active session and synchronize Supabase Auth state changes
   useEffect(() => {
-    async function checkAuth() {
+    let isMounted = true;
+
+    async function checkInitialAuth() {
       try {
-        const user = await adminCheck();
-        if (user.authenticated) {
-          setCurrentUser(user);
-          if (user.id) {
-            setActiveCommercialProfileId(user.id);
-            sessionStorage.setItem('active_commercial_profile_id', user.id);
+        const { data } = await supabase.auth.getSession();
+        if (data.session && isMounted) {
+          try {
+            const user = await fetchCurrentAuthUser();
+            if (user.authenticated && isMounted) {
+              setCurrentUser(user);
+              if (user.id) {
+                setActiveCommercialProfileId(user.id);
+                sessionStorage.setItem('active_commercial_profile_id', user.id);
+              }
+              setAuthChecked(true);
+              return;
+            }
+          } catch (e) {
+            console.warn('[App] Supabase session present but fetchCurrentAuthUser failed:', e);
           }
-        } else {
-          setCurrentUser(null);
+        }
+
+        const legacyUser = await adminCheck();
+        if (isMounted) {
+          if (legacyUser.authenticated) {
+            setCurrentUser(legacyUser);
+            if (legacyUser.id) {
+              setActiveCommercialProfileId(legacyUser.id);
+              sessionStorage.setItem('active_commercial_profile_id', legacyUser.id);
+            }
+          } else {
+            setCurrentUser(null);
+          }
         }
       } catch {
-        setCurrentUser(null);
+        if (isMounted) setCurrentUser(null);
       } finally {
-        setAuthChecked(true);
+        if (isMounted) setAuthChecked(true);
       }
     }
-    checkAuth();
+
+    checkInitialAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        if (session) {
+          try {
+            const user = await fetchCurrentAuthUser();
+            if (isMounted) {
+              setCurrentUser(user);
+              if (user.id) {
+                setActiveCommercialProfileId(user.id);
+                sessionStorage.setItem('active_commercial_profile_id', user.id);
+              }
+            }
+          } catch (err) {
+            console.error('[App] Error refreshing auth user on auth change:', err);
+          }
+        }
+      } else if (event === 'SIGNED_OUT') {
+        if (isMounted) {
+          setCurrentUser(null);
+          setActiveCommercialProfileId('');
+          sessionStorage.removeItem('active_commercial_profile_id');
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
+
 
   // When user is authenticated, load workspace data
   useEffect(() => {

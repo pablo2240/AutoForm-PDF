@@ -24,6 +24,13 @@ from backend.pdf_filling_agent.visual_processor import VisualPDFProcessor, Visua
 from backend.db.session import get_db, SessionLocal
 from backend.db.models import CommercialProfile
 from backend.db.auth import hash_password, verify_password, create_session_token, verify_session_token, SESSION_MAX_AGE_SECONDS
+from backend.auth_supabase import (
+    get_current_user,
+    require_admin,
+    get_supabase_admin_client,
+    get_supabase_user_client,
+    decode_supabase_jwt
+)
 
 app = FastAPI(title="AutoForm PDF API")
 
@@ -161,13 +168,40 @@ class TemplateMapping(BaseModel):
 
 class GenerateRequest(BaseModel):
     template_id: str
+    template_version_id: Optional[str] = None
     mappings: Optional[List[MappingItem]] = None
     is_temporary: Optional[bool] = False
     commercial_profile_id: Optional[str] = None
 
 class AiFillRequest(BaseModel):
     template_id: str
+    template_version_id: Optional[str] = None
     commercial_profile_id: Optional[str] = None
+
+class InviteUserDTO(BaseModel):
+    email: str
+    nombre: str
+    apellido: str
+    cargo: str
+    celular: str
+    tipo_documento: str = "C.C"
+    documento_identidad: Optional[str] = None
+    role: str = "commercial"
+
+class StartFormFillDTO(BaseModel):
+    template_version_id: str
+    commercial_profile_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+class CompleteFormFillDTO(BaseModel):
+    history_id: str
+    output_storage_path: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class FailFormFillDTO(BaseModel):
+    history_id: str
+    error_message: str
+    metadata: Optional[Dict[str, Any]] = None
 
 
 def hex_to_rgb_tuple(hex_color: Optional[str]) -> Tuple[float, float, float]:
@@ -441,7 +475,7 @@ def update_employer_profiles(payload: List[Dict[str, Any]]):
 # ADR-0008: Commercial Profiles & Administrative Security Endpoints
 # ---------------------------------------------------------------------------
 
-def resolve_commercial_profile(commercial_profile_id: Optional[str]) -> Optional[Dict[str, Any]]:
+def resolve_commercial_profile(commercial_profile_id: Optional[str], token: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Validates and resolves the commercial profile for PDF generation.
     Enforces conscious selection: requires either a valid active commercial profile ID or 'legal_rep_only'.
@@ -453,8 +487,31 @@ def resolve_commercial_profile(commercial_profile_id: Optional[str]) -> Optional
             detail="Se requiere seleccionar un responsable comercial o elegir 'legal_rep_only' antes de generar el PDF."
         )
     clean_id = str(commercial_profile_id).strip()
-    if clean_id == "legal_rep_only":
+    if clean_id in ("legal_rep_only", "null", "None"):
         return None
+
+    # Try resolving via Supabase if token provided
+    if token:
+        try:
+            user_client = get_supabase_user_client(token)
+            res = user_client.table("profiles").select("*").eq("id", clean_id).eq("is_active", True).single().execute()
+            if res.data:
+                profile = res.data
+                return {
+                    "id": str(profile.get("id")),
+                    "profile_name": profile.get("display_name") or f"{profile.get('nombre', '')} {profile.get('apellido', '')}".strip(),
+                    "nombre": profile.get("nombre", ""),
+                    "apellido": profile.get("apellido", ""),
+                    "cargo": profile.get("cargo", ""),
+                    "email": profile.get("email", ""),
+                    "celular": profile.get("celular", ""),
+                    "tipo_documento": profile.get("tipo_documento", "C.C"),
+                    "documento_identidad": profile.get("documento_identidad", ""),
+                    "role": profile.get("role", "commercial"),
+                    "is_active": profile.get("is_active", True)
+                }
+        except Exception:
+            pass
 
     db = SessionLocal()
     try:
@@ -495,18 +552,35 @@ def get_current_admin_user(request: Request, db = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo.")
     return user
 
-@app.get("/api/commercial-profiles", response_model=List[CommercialProfilePublicDTO])
+@app.get("/api/commercial-profiles")
 def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
     """
     Retorna catálogo público de perfiles comerciales activos.
-    Si el usuario tiene sesión activa no-admin (comercial), retorna ÚNICAMENTE su propio perfil (aislamiento de privacidad).
-    Si el usuario es admin o es una consulta anónima inicial, retorna los perfiles activos.
+    Si se presenta un token de Supabase, consulta la RPC get_company_commercial_profiles() respetando RLS.
+    Si no, usa la lógica legacy SQLite.
     """
     token = request.cookies.get("admin_session")
-    if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1]
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+
+    if token:
+        try:
+            user_client = get_supabase_user_client(token)
+            res = user_client.rpc("get_company_commercial_profiles").execute()
+            if res.data is not None:
+                return [
+                    {
+                        "id": str(r["id"]),
+                        "profile_name": r.get("display_name") or f"{r.get('cargo', '')}",
+                        "cargo": r.get("cargo", ""),
+                        "email": r.get("email", ""),
+                        "celular": r.get("celular", "")
+                    }
+                    for r in res.data
+                ]
+        except Exception:
+            pass
 
     session_payload = verify_session_token(token) if token else None
 
@@ -518,6 +592,155 @@ def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
         rows = query.all()
 
     return [CommercialProfilePublicDTO(**r.to_public_dict()) for r in rows]
+
+# ==============================================================================
+# Supabase Integration Endpoints (FastAPI)
+# ==============================================================================
+
+@app.get("/api/auth/me")
+async def auth_me(user: Dict[str, Any] = Depends(get_current_user)):
+    """Retorna los datos del perfil activo del usuario autenticado en Supabase."""
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "company_id": user["company_id"],
+        "role": user["role"],
+        "nombre": user["nombre"],
+        "apellido": user["apellido"],
+        "display_name": user["display_name"],
+        "cargo": user["cargo"],
+        "celular": user["celular"],
+        "tipo_documento": user["tipo_documento"],
+        "is_active": user["is_active"]
+    }
+
+@app.get("/api/company")
+async def get_company_data(user: Dict[str, Any] = Depends(get_current_user)):
+    """Retorna la información de la empresa correspondiente al usuario (vía RLS)."""
+    try:
+        res = user["user_client"].table("companies").select("*").eq("id", user["company_id"]).single().execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Empresa no encontrada")
+        return res.data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al obtener empresa: {str(e)}")
+
+@app.post("/api/admin/invite-user")
+async def invite_user(dto: InviteUserDTO, admin: Dict[str, Any] = Depends(require_admin)):
+    """
+    Invita a un nuevo usuario corporativo utilizando Supabase Auth Admin.
+    Asigna de forma infalsificable company_id y role en app_metadata.
+    Genera un enlace seguro de activación/recuperación para que el usuario establezca su contraseña.
+    """
+    import re
+    email_clean = dto.email.strip().lower()
+    if not re.match(r"^[^@\s]+@(iaclatam\.com|iac\.com\.co)$", email_clean):
+        raise HTTPException(
+            status_code=400,
+            detail="Dominio de correo no autorizado. Solo se permiten cuentas @iaclatam.com o @iac.com.co"
+        )
+    if dto.role not in ("admin", "commercial"):
+        raise HTTPException(status_code=400, detail="Rol inválido. Se permite 'admin' o 'commercial'.")
+
+    admin_client = get_supabase_admin_client()
+    try:
+        new_user_res = admin_client.auth.admin.create_user({
+            "email": email_clean,
+            "app_metadata": {
+                "company_id": admin["company_id"],
+                "role": dto.role
+            },
+            "user_metadata": {
+                "nombre": dto.nombre.strip(),
+                "apellido": dto.apellido.strip(),
+                "cargo": dto.cargo.strip(),
+                "celular": dto.celular.strip(),
+                "tipo_documento": dto.tipo_documento,
+                "documento_identidad": dto.documento_identidad.strip() if dto.documento_identidad else None
+            },
+            "email_confirm": True
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al crear usuario en Supabase Auth: {str(e)}")
+
+    action_link = None
+    try:
+        link_res = admin_client.auth.admin.generate_link({
+            "type": "recovery",
+            "email": email_clean
+        })
+        if hasattr(link_res, "properties") and link_res.properties:
+            action_link = getattr(link_res.properties, "action_link", None) or link_res.properties.get("action_link")
+    except Exception as e:
+        print(f"[WARNING] Could not generate activation recovery link: {e}")
+
+    return {
+        "status": "success",
+        "user_id": new_user_res.user.id,
+        "email": email_clean,
+        "role": dto.role,
+        "activation_link": action_link,
+        "message": f"Usuario {email_clean} registrado con éxito."
+    }
+
+@app.post("/api/form-fill/start")
+async def api_start_form_fill(dto: StartFormFillDTO, user: Dict[str, Any] = Depends(get_current_user)):
+    """Inicia el autollenado de un formulario mediante la RPC start_form_fill en estado 'processing'."""
+    try:
+        res = user["user_client"].rpc("start_form_fill", {
+            "p_template_version_id": dto.template_version_id,
+            "p_commercial_profile_id": dto.commercial_profile_id,
+            "p_metadata": dto.metadata
+        }).execute()
+        return {"history_id": res.data, "status": "processing"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al iniciar autollenado: {str(e)}")
+
+@app.post("/api/form-fill/complete")
+async def api_complete_form_fill(dto: CompleteFormFillDTO, user: Dict[str, Any] = Depends(get_current_user)):
+    """Completa el ciclo de autollenado mediante la RPC complete_form_fill validando la ruta en Storage."""
+    try:
+        user["user_client"].rpc("complete_form_fill", {
+            "p_history_id": dto.history_id,
+            "p_output_storage_path": dto.output_storage_path,
+            "p_metadata": dto.metadata
+        }).execute()
+        return {"status": "completed"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al completar autollenado: {str(e)}")
+
+@app.post("/api/form-fill/fail")
+async def api_fail_form_fill(dto: FailFormFillDTO, user: Dict[str, Any] = Depends(get_current_user)):
+    """Registra el fallo de un proceso de autollenado mediante la RPC fail_form_fill."""
+    try:
+        user["user_client"].rpc("fail_form_fill", {
+            "p_history_id": dto.history_id,
+            "p_error_message": dto.error_message,
+            "p_metadata": dto.metadata
+        }).execute()
+        return {"status": "failed"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al reportar fallo: {str(e)}")
+
+@app.get("/api/form-fill/{history_id}/signed-url")
+async def api_get_signed_url(history_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+    """Genera una URL firmada de descarga temporal en Storage para el PDF generado."""
+    try:
+        hist_res = user["user_client"].table("form_fill_history").select("output_storage_path").eq("id", history_id).single().execute()
+        if not hist_res.data or not hist_res.data.get("output_storage_path"):
+            raise HTTPException(status_code=404, detail="Registro de llenado no encontrado o sin PDF generado.")
+        path = hist_res.data["output_storage_path"]
+        signed = user["user_client"].storage.from_("generated-pdfs").create_signed_url(path, expires_in=3600)
+        url = signed.get("signedURL") or signed.get("signedUrl")
+        return {"signed_url": url, "storage_path": path}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "PGRST116" in str(e) or "0 rows" in str(e):
+            raise HTTPException(status_code=404, detail="Registro de llenado no encontrado o acceso denegado por RLS.")
+        raise HTTPException(status_code=400, detail=f"Error al generar enlace firmado: {str(e)}")
 
 @app.post("/api/admin/login")
 @app.post("/api/auth/login")
@@ -879,9 +1102,39 @@ def get_mapping(template_id: str):
         return json.load(f)
 
 @app.post("/api/generate")
-def generate_pdf(req: GenerateRequest):
+def generate_pdf(req: GenerateRequest, request: Request):
+    # Check for Supabase Auth token
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+    elif "admin_session" in request.cookies:
+        token = request.cookies.get("admin_session")
+
+    supabase_user = None
+    if token:
+        try:
+            supabase_user = decode_supabase_jwt(token)
+        except Exception:
+            supabase_user = None
+
     # 0. Enforce conscious selection and resolve commercial profile (ADR-0008)
-    resolved_cp = resolve_commercial_profile(req.commercial_profile_id)
+    resolved_cp = resolve_commercial_profile(req.commercial_profile_id, token=token)
+
+    history_id = None
+    user_client = None
+    if supabase_user and req.template_version_id:
+        try:
+            user_client = get_supabase_user_client(token)
+            comm_prof_id = None if req.commercial_profile_id in ("legal_rep_only", None, "null", "None") else req.commercial_profile_id
+            start_res = user_client.rpc("start_form_fill", {
+                "p_template_version_id": req.template_version_id,
+                "p_commercial_profile_id": comm_prof_id,
+                "p_metadata": {"is_temporary": req.is_temporary, "template_id": req.template_id}
+            }).execute()
+            history_id = start_res.data
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
 
     # 1. Load company data
     company_data_path = os.path.join(DATA_DIR, "company_data.json")
@@ -910,7 +1163,6 @@ def generate_pdf(req: GenerateRequest):
         effective_data["contacto_celular"] = resolved_cp.get("celular", "")
         effective_data["contacto_cargo"] = resolved_cp.get("cargo", "")
         effective_data["contacto_documento"] = resolved_cp.get("documento_identidad", "")
-        # Contacto para notificar pagos o abonos -> Comercial
         effective_data["contacto_pagos_nombre"] = cp_full
         effective_data["contacto_pagos_correo"] = resolved_cp.get("email", "")
         effective_data["contacto_pagos_celular"] = resolved_cp.get("celular", "")
@@ -1012,6 +1264,39 @@ def generate_pdf(req: GenerateRequest):
     out_path = os.path.join(OUTPUT_DIR, out_filename)
     processor.apply_visual_placements(pdf_path, placements, output_path=out_path)
 
+    download_url = f"/api/download/{out_filename}"
+
+    # Supabase Lifecycle & Storage Upload
+    if history_id and user_client and supabase_user:
+        company_id = supabase_user.get("app_metadata", {}).get("company_id")
+        user_id = supabase_user.get("sub")
+        storage_path = f"{company_id}/{user_id}/{history_id}.pdf"
+        try:
+            with open(out_path, "rb") as f:
+                pdf_bytes = f.read()
+            user_client.storage.from_("generated-pdfs").upload(
+                storage_path,
+                pdf_bytes,
+                file_options={"content-type": "application/pdf"}
+            )
+            user_client.rpc("complete_form_fill", {
+                "p_history_id": history_id,
+                "p_output_storage_path": storage_path,
+                "p_metadata": {"total_placed": len(placements)}
+            }).execute()
+
+            signed = user_client.storage.from_("generated-pdfs").create_signed_url(storage_path, expires_in=3600)
+            download_url = signed.get("signedURL") or signed.get("signedUrl") or download_url
+        except Exception as e:
+            try:
+                user_client.rpc("fail_form_fill", {
+                    "p_history_id": history_id,
+                    "p_error_message": str(e)
+                }).execute()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail=f"Error en almacenamiento de Supabase: {str(e)}")
+
     # 5. If temporary session requested, cleanup base template and mapping
     if req.is_temporary:
         try:
@@ -1026,15 +1311,45 @@ def generate_pdf(req: GenerateRequest):
     return {
         "status": "success",
         "filename": out_filename,
-        "download_url": f"/api/download/{out_filename}",
+        "download_url": download_url,
         "total_placed": len(placements),
-        "is_temporary": req.is_temporary
+        "is_temporary": req.is_temporary,
+        "history_id": history_id
     }
 
 @app.post("/api/ai-fill")
-def ai_fill_pdf(req: AiFillRequest):
+def ai_fill_pdf(req: AiFillRequest, request: Request):
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+    elif "admin_session" in request.cookies:
+        token = request.cookies.get("admin_session")
+
+    supabase_user = None
+    if token:
+        try:
+            supabase_user = decode_supabase_jwt(token)
+        except Exception:
+            supabase_user = None
+
     # 0. Enforce conscious selection and resolve commercial profile (ADR-0008)
-    resolved_cp = resolve_commercial_profile(req.commercial_profile_id)
+    resolved_cp = resolve_commercial_profile(req.commercial_profile_id, token=token)
+
+    history_id = None
+    user_client = None
+    if supabase_user and req.template_version_id:
+        try:
+            user_client = get_supabase_user_client(token)
+            comm_prof_id = None if req.commercial_profile_id in ("legal_rep_only", None, "null", "None") else req.commercial_profile_id
+            start_res = user_client.rpc("start_form_fill", {
+                "p_template_version_id": req.template_version_id,
+                "p_commercial_profile_id": comm_prof_id,
+                "p_metadata": {"mode": "ai-fill", "template_id": req.template_id}
+            }).execute()
+            history_id = start_res.data
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
 
     # 1. Locate input PDF
     template_id = req.template_id
@@ -1061,20 +1376,48 @@ def ai_fill_pdf(req: AiFillRequest):
 
     try:
         from backend.pdf_filling_agent.agent import PDFAgent
-        # ponytail: instantiates PDFAgent per request with resolved commercial profile
         agent = PDFAgent(company_profile_path=company_data_path, commercial_profile=resolved_cp)
         output_path = agent.fill_pdf(pdf_path, instructions, output_dir=OUTPUT_DIR, mode="auto")
         out_filename = os.path.basename(output_path)
+        download_url = f"/api/download/{out_filename}"
+
+        if history_id and user_client and supabase_user:
+            company_id = supabase_user.get("app_metadata", {}).get("company_id")
+            user_id = supabase_user.get("sub")
+            storage_path = f"{company_id}/{user_id}/{history_id}.pdf"
+            with open(output_path, "rb") as f:
+                pdf_bytes = f.read()
+            user_client.storage.from_("generated-pdfs").upload(
+                storage_path,
+                pdf_bytes,
+                file_options={"content-type": "application/pdf"}
+            )
+            user_client.rpc("complete_form_fill", {
+                "p_history_id": history_id,
+                "p_output_storage_path": storage_path,
+                "p_metadata": {"total_placed": agent.last_audit_report.get("filled", -1) if agent.last_audit_report else -1}
+            }).execute()
+            signed = user_client.storage.from_("generated-pdfs").create_signed_url(storage_path, expires_in=3600)
+            download_url = signed.get("signedURL") or signed.get("signedUrl") or download_url
 
         return {
             "status": "success",
             "filename": out_filename,
-            "download_url": f"/api/download/{out_filename}",
+            "download_url": download_url,
             "message": "PDF autollenado con IA exitosamente",
             "total_placed": agent.last_audit_report.get("filled", -1) if agent.last_audit_report else -1,
-            "audit_report": agent.last_audit_report
+            "audit_report": agent.last_audit_report,
+            "history_id": history_id
         }
     except Exception as e:
+        if history_id and user_client:
+            try:
+                user_client.rpc("fail_form_fill", {
+                    "p_history_id": history_id,
+                    "p_error_message": str(e)
+                }).execute()
+            except Exception:
+                pass
         print(f"[ERROR] ai_fill_pdf error: {e}")
         raise HTTPException(status_code=500, detail=f"Error en Autollenado IA: {str(e)}")
 
