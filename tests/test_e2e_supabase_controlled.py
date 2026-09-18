@@ -12,13 +12,23 @@ if str(PROJECT_ROOT) not in sys.path:
 ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
+# Select staging credentials by default for destructive E2E tests
+SUPABASE_URL = os.environ.get("SUPABASE_STAGING_URL") or os.environ.get("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_STAGING_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_STAGING_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+# Sync backend auth module to use the same target environment
+import backend.auth_supabase as auth_mod
+auth_mod.SUPABASE_URL = SUPABASE_URL
+auth_mod.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY
+auth_mod.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY
+auth_mod.EXPECTED_ISSUER = f"{SUPABASE_URL.rstrip('/')}/auth/v1"
+auth_mod.JWKS_URL = f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+auth_mod.jwks_client = auth_mod.jwt.PyJWKClient(auth_mod.JWKS_URL, cache_jwk_set=True, lifespan=3600)
+
 from fastapi.testclient import TestClient
 from supabase import create_client
 from backend.main import app
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
-SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 TEST_COMPANY_ID = "00000000-0000-0000-0000-000000000001"
 TEST_ADMIN_EMAIL = "temp_admin_test@iaclatam.com"
@@ -38,16 +48,16 @@ client = TestClient(app)
 def run_controlled_e2e_test():
     print("\n=======================================================")
     print("STARTING CONTROLLED E2E TEST: Supabase Integration")
+    print(f"Target Environment URL: {SUPABASE_URL}")
     print("=======================================================")
 
-    # Production safety guard: Block execution against production project unless explicitly authorized
+    # Production safety guard: Unconditional block against the production project
     prod_ref = os.getenv("SUPABASE_PRODUCTION_REF", "tnhedxwbpqihlqbtzudt")
-    allow_prod = os.getenv("ALLOW_DESTRUCTIVE_PRODUCTION_TESTS", "0") == "1"
-    if (prod_ref in SUPABASE_URL) and not allow_prod:
+    if prod_ref in SUPABASE_URL:
         raise RuntimeError(
-            f"SECURITY GUARD: Execution against production Supabase project '{prod_ref}' is BLOCKED.\n"
-            "E2E destructive tests must run against a separate staging environment.\n"
-            "To override with explicit extraordinary authorization, set ALLOW_DESTRUCTIVE_PRODUCTION_TESTS=1."
+            f"CRITICAL SECURITY GUARD: Execution against production Supabase project '{prod_ref}' is UNCONDITIONALLY BLOCKED.\n"
+            "Destructive E2E tests must run exclusively against the separate staging environment.\n"
+            "There is no bypass or override for this safety block."
         )
     
     admin_supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -58,8 +68,24 @@ def run_controlled_e2e_test():
     
     try:
         # Pre-cleanup in case of dirty state
-        print("[0/7] Pre-test reset of test companies...")
-        admin_supabase.table("companies").delete().in_("id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+        print("[0/7] Pre-test reset of test companies and auth users...")
+        try:
+            admin_supabase.table("form_fill_history").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("pdf_mappings").delete().eq("template_version_id", TEST_VER_ID).execute()
+            admin_supabase.table("pdf_template_versions").delete().eq("id", TEST_VER_ID).execute()
+            admin_supabase.table("pdf_templates").delete().eq("id", TEST_TPL_ID).execute()
+            admin_supabase.table("legal_representatives").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("company_bank_accounts").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("profiles").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("companies").delete().in_("id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+
+            # Clean lingering test auth users
+            all_users = admin_supabase.auth.admin.list_users()
+            for u in all_users:
+                if u.email in [TEST_ADMIN_EMAIL, TEST_COMM_EMAIL, OTHER_USER_EMAIL]:
+                    admin_supabase.auth.admin.delete_user(u.id)
+        except Exception:
+            pass
         
         # 1. Provision Test Company and Legal Representative
         print("[1/7] Provisioning test company and legal representative...")
@@ -197,6 +223,49 @@ def run_controlled_e2e_test():
         )
         assert unauth_invite_res.status_code == 403, f"Expected 403 Forbidden for non-admin invite, got {unauth_invite_res.status_code}"
         print("  [OK] RBAC verified: Commercial user cannot invite users (403 Forbidden).")
+
+        # 5b. Commercial User Privilege / Attribute Forgery Resistance (Requirement 7)
+        print("[5b/7] Testing Commercial User Anti-Forgery Protection (Requirement 7)...")
+        orig_comm = admin_supabase.table("profiles").select("*").eq("id", comm_uid).single().execute().data
+        
+        # User client attempts to forge attributes via GoTrue updateUser({ data: { ... } })
+        # Using the commercial user's own token session:
+        user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        user_client.auth.set_session(access_token=comm_token, refresh_token=comm_login_res.session.refresh_token)
+        user_client.auth.update_user({
+            "data": {
+                "cargo": "Director General Presidente",
+                "documento_identidad": "9999999999",
+                "role": "admin",
+                "company_id": OTHER_COMPANY_ID,
+                # Allowed fields to update:
+                "nombre": "Carlos",
+                "apellido": "Actualizado",
+                "celular": "3119999999"
+            }
+        })
+
+        # Verify public.profiles after updateUser()
+        comm_after_update = admin_supabase.table("profiles").select("*").eq("id", comm_uid).single().execute().data
+        # 4 Critical protected fields MUST BE 100% UNCHANGED
+        assert comm_after_update["cargo"] == orig_comm["cargo"], f"Forgery leak! Cargo was changed from '{orig_comm['cargo']}' to '{comm_after_update['cargo']}'"
+        assert comm_after_update["documento_identidad"] == orig_comm["documento_identidad"], f"Forgery leak! Doc ID was changed from '{orig_comm['documento_identidad']}' to '{comm_after_update['documento_identidad']}'"
+        assert comm_after_update["role"] == orig_comm["role"], f"Privilege escalation! Role was changed from '{orig_comm['role']}' to '{comm_after_update['role']}'"
+        assert comm_after_update["company_id"] == orig_comm["company_id"], f"Tenant escape! Company ID was changed from '{orig_comm['company_id']}' to '{comm_after_update['company_id']}'"
+        
+        # Allowed fields SHOULD have updated safely
+        assert comm_after_update["apellido"] == "Actualizado"
+        assert comm_after_update["celular"] == "3119999999"
+        print("  [OK] Auth trigger immunity verified: updateUser({ cargo, documento_identidad, role, company_id }) resulted in ZERO changes to protected attributes, while allowed fields updated safely.")
+
+        # Step B: Direct SQL / PostgREST modification attempt by commercial user
+        direct_update_blocked = False
+        try:
+            user_client.table("profiles").update({"cargo": "Director General Presidente"}).eq("id", comm_uid).execute()
+        except Exception as e:
+            direct_update_blocked = True
+            print(f"  [OK] Direct SQL UPDATE of cargo blocked by trigger/RLS: {type(e).__name__}")
+        assert direct_update_blocked, "Security Failure: Commercial user was able to directly UPDATE their cargo via PostgREST!"
 
         # 6. Template Version & Form Fill Lifecycle with Storage Upload
         print("[6/7] Testing Template Lifecycle & Form Fill Storage Isolation...")
@@ -339,6 +408,20 @@ def run_controlled_e2e_test():
         except Exception as e:
             print(f"  ! Error removing storage files: {e}")
 
+        # Targeted deletion of test database records (must occur before deleting auth users to satisfy FK constraints)
+        try:
+            admin_supabase.table("form_fill_history").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("pdf_mappings").delete().eq("template_version_id", TEST_VER_ID).execute()
+            admin_supabase.table("pdf_template_versions").delete().eq("id", TEST_VER_ID).execute()
+            admin_supabase.table("pdf_templates").delete().eq("id", TEST_TPL_ID).execute()
+            admin_supabase.table("legal_representatives").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("company_bank_accounts").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("profiles").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("companies").delete().in_("id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            print("  [OK] Targeted database cleanup completed successfully.")
+        except Exception as e:
+            print(f"  ! Error during targeted cleanup: {e}")
+
         # Targeted deletion of test users in auth.users
         for uid in created_user_ids:
             try:
@@ -346,19 +429,6 @@ def run_controlled_e2e_test():
                 print(f"  [OK] Deleted test user {uid}.")
             except Exception as e:
                 print(f"  ! Error deleting test user {uid}: {e}")
-
-        # Targeted deletion of test database records
-        try:
-            admin_supabase.table("form_fill_history").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
-            admin_supabase.table("pdf_mappings").delete().eq("template_version_id", TEST_VER_ID).execute()
-            admin_supabase.table("pdf_template_versions").delete().eq("id", TEST_VER_ID).execute()
-            admin_supabase.table("pdf_templates").delete().eq("id", TEST_TPL_ID).execute()
-            admin_supabase.table("legal_representatives").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
-            admin_supabase.table("profiles").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
-            admin_supabase.table("companies").delete().in_("id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
-            print("  [OK] Targeted database cleanup completed successfully.")
-        except Exception as e:
-            print(f"  ! Error during targeted cleanup: {e}")
 
         # Verification: Assert all table row counts are strictly 0
         tables_to_check = [
