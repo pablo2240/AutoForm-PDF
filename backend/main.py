@@ -34,11 +34,27 @@ from backend.auth_supabase import (
 
 app = FastAPI(title="AutoForm PDF API")
 
+APP_ENVIRONMENT = os.getenv("APP_ENVIRONMENT", "local").lower()
 cors_origins_env = os.getenv("CORS_ORIGINS", "")
-if cors_origins_env:
-    allow_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+
+if APP_ENVIRONMENT == "production":
+    if cors_origins_env:
+        allow_origins = [
+            o.strip() for o in cors_origins_env.split(",") 
+            if o.strip() and not ("localhost" in o or "127.0.0.1" in o)
+        ]
+    else:
+        allow_origins = ["https://autoform.iaclatam.com"]
 else:
-    allow_origins = ["*"]
+    if cors_origins_env:
+        allow_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+    else:
+        allow_origins = [
+            "http://localhost:5173", 
+            "http://localhost:3000", 
+            "http://127.0.0.1:5173", 
+            "http://127.0.0.1:3000"
+        ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -490,7 +506,44 @@ def resolve_commercial_profile(commercial_profile_id: Optional[str], token: Opti
     if clean_id in ("legal_rep_only", "null", "None"):
         return None
 
-    # Try resolving via Supabase if token provided
+    # Enforce resolution via Supabase in production
+    if APP_ENVIRONMENT == "production":
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Se requiere autenticación para resolver perfil comercial en entorno productivo."
+            )
+        try:
+            user_client = get_supabase_user_client(token)
+            res = user_client.table("profiles").select("*").eq("id", clean_id).eq("is_active", True).single().execute()
+            if not res.data:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"El responsable comercial '{clean_id}' no existe o está inactivo en Supabase."
+                )
+            profile = res.data
+            return {
+                "id": str(profile.get("id")),
+                "profile_name": profile.get("display_name") or f"{profile.get('nombre', '')} {profile.get('apellido', '')}".strip(),
+                "nombre": profile.get("nombre", ""),
+                "apellido": profile.get("apellido", ""),
+                "cargo": profile.get("cargo", ""),
+                "email": profile.get("email", ""),
+                "celular": profile.get("celular", ""),
+                "tipo_documento": profile.get("tipo_documento", "C.C"),
+                "documento_identidad": profile.get("documento_identidad", ""),
+                "role": profile.get("role", "commercial"),
+                "is_active": profile.get("is_active", True)
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Error consultando perfiles comerciales en Supabase: {str(e)}"
+            )
+
+    # In non-production (local/staging), try Supabase first, fallback to SQLite
     if token:
         try:
             user_client = get_supabase_user_client(token)
@@ -666,15 +719,29 @@ async def invite_user(dto: InviteUserDTO, admin: Dict[str, Any] = Depends(requir
         raise HTTPException(status_code=400, detail=f"Error al crear usuario en Supabase Auth: {str(e)}")
 
     action_link = None
+    site_url = os.getenv("SITE_URL", "https://autoform.iaclatam.com").rstrip("/")
     try:
         link_res = admin_client.auth.admin.generate_link({
             "type": "recovery",
-            "email": email_clean
+            "email": email_clean,
+            "options": {
+                "redirect_to": f"{site_url}/auth/reset-password"
+            }
         })
         if hasattr(link_res, "properties") and link_res.properties:
             action_link = getattr(link_res.properties, "action_link", None) or link_res.properties.get("action_link")
     except Exception as e:
         print(f"[WARNING] Could not generate activation recovery link: {e}")
+
+    # In production: invitation is sent directly via corporate SMTP; action_link is NOT exposed
+    if APP_ENVIRONMENT == "production":
+        return {
+            "status": "success",
+            "user_id": new_user_res.user.id,
+            "email": email_clean,
+            "role": dto.role,
+            "message": f"Invitación enviada exitosamente por correo corporativo a {email_clean}."
+        }
 
     return {
         "status": "success",
@@ -1101,6 +1168,59 @@ def get_mapping(template_id: str):
     with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
+def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], user_client: Optional[Any]) -> Dict[str, Any]:
+    """
+    Carga la información corporativa para la generación del formulario.
+    En producción: EXIGE consulta autoritativa a Supabase bajo RLS y prohíbe el uso de company_data.json.
+    En local/staging: Permite uso de company_data.json si no hay sesión activa.
+    """
+    if APP_ENVIRONMENT == "production":
+        if not supabase_user or not user_client:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Se requiere sesión activa y válida en entorno productivo."
+            )
+        company_id = supabase_user.get("app_metadata", {}).get("company_id")
+        if not company_id:
+            raise HTTPException(status_code=403, detail="Usuario carece de company_id en app_metadata.")
+        try:
+            comp_res = user_client.table("companies").select("*").eq("id", company_id).single().execute()
+            if not comp_res.data:
+                raise HTTPException(status_code=404, detail="Empresa no encontrada en Supabase.")
+            c_row = comp_res.data
+            leg_res = user_client.table("legal_representatives").select("*").eq("company_id", company_id).eq("is_principal", True).execute()
+            l_row = leg_res.data[0] if (leg_res.data and len(leg_res.data) > 0) else {}
+            return {
+                "razon_social": c_row.get("razon_social", ""),
+                "nit": f"{c_row.get('nit', '')}-{c_row.get('dv', '')}" if c_row.get("dv") else c_row.get("nit", ""),
+                "ciudad": c_row.get("ciudad", ""),
+                "departamento": c_row.get("departamento", ""),
+                "pais": c_row.get("pais", "Colombia"),
+                "direccion_principal": c_row.get("direccion_principal", ""),
+                "telefono": c_row.get("telefono_fijo", ""),
+                "correo_institucional": c_row.get("email_contacto", ""),
+                "representante_legal": l_row.get("nombre_completo", ""),
+                "correo_rep": l_row.get("email", ""),
+                "celular_rep": l_row.get("celular", ""),
+                "numero_cedula": l_row.get("numero_documento", ""),
+                "tipo_documento": l_row.get("tipo_documento", "C.C"),
+                "lugar_expedicion_rep": l_row.get("lugar_expedicion", ""),
+                "fecha_expedicion": l_row.get("fecha_expedicion", "")
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Servicio institucional de datos en Supabase no disponible: {str(e)}"
+            )
+
+    company_data_path = os.path.join(DATA_DIR, "company_data.json")
+    if not os.path.exists(company_data_path):
+        raise HTTPException(status_code=404, detail="Company data not found")
+    with open(company_data_path, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
+
 @app.post("/api/generate")
 def generate_pdf(req: GenerateRequest, request: Request):
     # Check for Supabase Auth token
@@ -1117,6 +1237,18 @@ def generate_pdf(req: GenerateRequest, request: Request):
             supabase_user = decode_supabase_jwt(token)
         except Exception:
             supabase_user = None
+
+    if APP_ENVIRONMENT == "production":
+        if not token or not supabase_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="En entorno de producción se requiere autenticación obligatoria para generar formularios."
+            )
+        if not req.template_version_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="En entorno de producción se exige template_version_id para registrar el ciclo de llenado."
+            )
 
     # 0. Enforce conscious selection and resolve commercial profile (ADR-0008)
     resolved_cp = resolve_commercial_profile(req.commercial_profile_id, token=token)
@@ -1136,12 +1268,11 @@ def generate_pdf(req: GenerateRequest, request: Request):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
 
-    # 1. Load company data
-    company_data_path = os.path.join(DATA_DIR, "company_data.json")
-    if not os.path.exists(company_data_path):
-        raise HTTPException(status_code=404, detail="Company data not found")
-    with open(company_data_path, "r", encoding="utf-8-sig") as f:
-        company_data = json.load(f)
+    if APP_ENVIRONMENT == "production" and not history_id:
+        raise HTTPException(status_code=500, detail="Fallo al registrar historial de llenado en Supabase.")
+
+    # 1. Load company data (enforcing Supabase in production)
+    company_data = load_company_data_for_generation(supabase_user, user_client)
 
     effective_data = dict(company_data)
     rep_full = company_data.get("representante_legal", "Guillermo Humberto Cañón Sarria")
@@ -1333,6 +1464,18 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
         except Exception:
             supabase_user = None
 
+    if APP_ENVIRONMENT == "production":
+        if not token or not supabase_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="En entorno de producción se requiere autenticación obligatoria para autollenado IA."
+            )
+        if not req.template_version_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="En entorno de producción se exige template_version_id para registrar el ciclo de autollenado."
+            )
+
     # 0. Enforce conscious selection and resolve commercial profile (ADR-0008)
     resolved_cp = resolve_commercial_profile(req.commercial_profile_id, token=token)
 
@@ -1351,6 +1494,9 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
 
+    if APP_ENVIRONMENT == "production" and not history_id:
+        raise HTTPException(status_code=500, detail="Fallo al registrar historial de autollenado en Supabase.")
+
     # 1. Locate input PDF
     template_id = req.template_id
     pdf_path = os.path.join(INPUT_DIR, f"{template_id}.pdf")
@@ -1359,12 +1505,8 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
         if not os.path.exists(pdf_path):
             raise HTTPException(status_code=404, detail=f"Input PDF '{template_id}' not found")
 
-    # 2. Load company data
-    company_data_path = os.path.join(DATA_DIR, "company_data.json")
-    if not os.path.exists(company_data_path):
-        raise HTTPException(status_code=404, detail="Company data not found")
-    with open(company_data_path, "r", encoding="utf-8-sig") as f:
-        company_data = json.load(f)
+    # 2. Load company data (enforcing Supabase in production)
+    company_data = load_company_data_for_generation(supabase_user, user_client)
 
     instructions = (
         "Por favor llena este formulario PDF con los datos principales de la empresa:\n"
@@ -1376,7 +1518,7 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
 
     try:
         from backend.pdf_filling_agent.agent import PDFAgent
-        agent = PDFAgent(company_profile_path=company_data_path, commercial_profile=resolved_cp)
+        agent = PDFAgent(company_profile=company_data, commercial_profile=resolved_cp)
         output_path = agent.fill_pdf(pdf_path, instructions, output_dir=OUTPUT_DIR, mode="auto")
         out_filename = os.path.basename(output_path)
         download_url = f"/api/download/{out_filename}"

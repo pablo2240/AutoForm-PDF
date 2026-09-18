@@ -697,5 +697,103 @@ END $$;
 RESET ROLE;
 
 
+-- ==============================================================================
+-- TEST SCENARIO 11: handle_new_user() ON UPDATE Hardening & Anti-Forgery Check
+-- ==============================================================================
+DO $$
+DECLARE
+    v_test_uid UUID := '77777777-7777-7777-7777-777777777777'::UUID;
+    v_company_a UUID := 'a0000000-0000-0000-0000-000000000001'::UUID;
+    v_orig_created_at TIMESTAMPTZ;
+    v_curr_created_at TIMESTAMPTZ;
+    v_profile RECORD;
+BEGIN
+    RAISE NOTICE '>>> TEST 11: Running handle_new_user() ON UPDATE & Anti-Forgery Check...';
+
+    -- 11.1 Create initial user in auth.users
+    INSERT INTO auth.users (
+        id,
+        instance_id,
+        email,
+        encrypted_password,
+        email_confirmed_at,
+        raw_app_meta_data,
+        raw_user_meta_data,
+        created_at,
+        updated_at,
+        aud,
+        role
+    ) VALUES (
+        v_test_uid,
+        '00000000-0000-0000-0000-000000000000',
+        'update_tester@iaclatam.com',
+        'fake_hash',
+        NOW(),
+        jsonb_build_object('company_id', v_company_a::TEXT, 'role', 'commercial'),
+        jsonb_build_object('nombre', 'Carlos', 'apellido', 'Gomez', 'cargo', 'Ejecutivo', 'celular', '3001112233'),
+        NOW(),
+        NOW(),
+        'authenticated',
+        'authenticated'
+    );
+
+    SELECT * INTO v_profile FROM public.profiles WHERE id = v_test_uid;
+    IF v_profile.nombre != 'Carlos' OR v_profile.role != 'commercial' THEN
+        RAISE EXCEPTION 'TEST 11.1 FAILED: Initial profile was not properly created!';
+    END IF;
+    v_orig_created_at := v_profile.created_at;
+
+    -- 11.2 Update personal fields via raw_user_meta_data (nombre & celular)
+    UPDATE auth.users
+    SET raw_user_meta_data = jsonb_build_object(
+        'nombre', 'Carlos Andres',
+        'apellido', 'Gomez Perez',
+        'cargo', 'Director Comercial',
+        'celular', '3159998877'
+    )
+    WHERE id = v_test_uid;
+
+    SELECT * INTO v_profile FROM public.profiles WHERE id = v_test_uid;
+    IF v_profile.nombre != 'Carlos Andres' OR v_profile.celular != '3159998877' THEN
+        RAISE EXCEPTION 'TEST 11.2 FAILED: Profile personal fields did not update!';
+    END IF;
+    IF v_profile.created_at != v_orig_created_at THEN
+        RAISE EXCEPTION 'TEST 11.2 FAILED: created_at changed upon UPDATE!';
+    END IF;
+
+    -- 11.3 Update administrative role via raw_app_meta_data
+    UPDATE auth.users
+    SET raw_app_meta_data = jsonb_build_object('company_id', v_company_a::TEXT, 'role', 'admin')
+    WHERE id = v_test_uid;
+
+    SELECT * INTO v_profile FROM public.profiles WHERE id = v_test_uid;
+    IF v_profile.role != 'admin' THEN
+        RAISE EXCEPTION 'TEST 11.3 FAILED: Role did not update to admin via app_metadata!';
+    END IF;
+
+    -- 11.4 Attempted Privilege Escalation via raw_user_meta_data
+    -- Reset app_metadata to commercial, but malicious user sends 'role': 'admin' in user_metadata
+    UPDATE auth.users
+    SET raw_app_meta_data = jsonb_build_object('company_id', v_company_a::TEXT, 'role', 'commercial'),
+        raw_user_meta_data = jsonb_build_object(
+            'role', 'admin', -- MALICIOUS INJECTION IN USER_METADATA!
+            'nombre', 'Carlos Hacked',
+            'apellido', 'Gomez',
+            'cargo', 'Ejecutivo',
+            'celular', '3159998877'
+        )
+    WHERE id = v_test_uid;
+
+    SELECT * INTO v_profile FROM public.profiles WHERE id = v_test_uid;
+    IF v_profile.role != 'commercial' THEN
+        RAISE EXCEPTION 'TEST 11.4 FAILED: User could forge role via user_metadata!';
+    END IF;
+
+    RAISE NOTICE '[PASS] TEST 11: handle_new_user() ON UPDATE, created_at preservation, and anti-forgery verified.';
+END $$;
+
+RESET ROLE;
+
+
 -- Rollback all test data so database remains strictly 0 rows!
 ROLLBACK;

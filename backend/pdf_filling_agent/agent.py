@@ -81,6 +81,7 @@ class PDFAgent:
                  knowledge_base: Optional[KnowledgeBase] = None,
                  company_profile_path: Optional[str] = None,
                  commercial_profile: Optional[Dict[str, Any]] = None,
+                 company_profile: Optional[Dict[str, Any]] = None,
                  forms_dir: Optional[str] = None):
         
         # Always reload environment from .env with explicit path
@@ -173,7 +174,11 @@ class PDFAgent:
         self.last_audit_report: Optional[Dict[str, Any]] = None
 
         # Load company profile
-        self.company_profile = self._load_company_profile(company_profile_path)
+        if company_profile is not None:
+            self.company_profile = company_profile
+            print(f"[INFO] Initialized with in-memory company profile: {company_profile.get('razon_social', 'Custom')}")
+        else:
+            self.company_profile = self._load_company_profile(company_profile_path)
         self.commercial_profile = commercial_profile
 
         # Load static form maps

@@ -48,6 +48,7 @@ import { ResultModal } from './components/ResultModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { CommercialProfileAdminModal } from './components/CommercialProfileAdminModal';
 import { AuthPortal } from './components/auth/AuthPortal';
+import { ResetPasswordView } from './components/auth/ResetPasswordView';
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -86,6 +87,7 @@ export const App: React.FC = () => {
   // User Authentication & Auth Gate State
   const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AdminSessionUser | null>(null);
+  const [isPasswordRecoveryMode, setIsPasswordRecoveryMode] = useState<boolean>(false);
 
   // Global Signature State (Strictly Backend Authoritative, no localStorage)
   const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(null);
@@ -189,6 +191,14 @@ export const App: React.FC = () => {
     let isMounted = true;
 
     async function checkInitialAuth() {
+      if (typeof window !== 'undefined') {
+        const path = window.location.pathname;
+        const hash = window.location.hash || '';
+        if (path === '/auth/reset-password' || hash.includes('type=recovery') || hash.includes('type=invite')) {
+          if (isMounted) setIsPasswordRecoveryMode(true);
+        }
+      }
+
       try {
         const { data } = await supabase.auth.getSession();
         if (data.session && isMounted) {
@@ -231,7 +241,11 @@ export const App: React.FC = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      if (event === 'PASSWORD_RECOVERY') {
+        if (isMounted) {
+          setIsPasswordRecoveryMode(true);
+        }
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         if (session) {
           try {
             const user = await fetchCurrentAuthUser();
@@ -731,6 +745,20 @@ export const App: React.FC = () => {
           Verificando credenciales de acceso...
         </span>
       </div>
+    );
+  }
+
+  if (isPasswordRecoveryMode) {
+    return (
+      <ResetPasswordView
+        onComplete={() => {
+          setIsPasswordRecoveryMode(false);
+          showToast('Contraseña actualizada exitosamente. Inicia sesión con tus nuevas credenciales.', 'success');
+        }}
+        onCancel={() => {
+          setIsPasswordRecoveryMode(false);
+        }}
+      />
     );
   }
 

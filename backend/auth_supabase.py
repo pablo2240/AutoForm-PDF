@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
 import jwt
@@ -17,20 +18,22 @@ if ENV_PATH.exists():
 else:
     load_dotenv(override=True)
 
+APP_ENVIRONMENT = os.getenv("APP_ENVIRONMENT", "local").lower()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tnhedxwbpqihlqbtzudt.supabase.co")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
+EXPECTED_ISSUER = f"{SUPABASE_URL.rstrip('/')}/auth/v1"
 JWKS_URL = f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
-jwks_client = jwt.PyJWKClient(JWKS_URL, cache_jwk_set=True, lifespan=3600)
 
+jwks_client = jwt.PyJWKClient(JWKS_URL, cache_jwk_set=True, lifespan=3600)
 security_bearer = HTTPBearer(auto_error=False)
 
 def get_supabase_admin_client() -> Client:
     """
     Retorna cliente Supabase con privilegios administrativos (service_role).
-    Utilizado EXCLUSIVAMENTE para operaciones server-side seguras (creación de usuarios
-    con app_metadata y generación de enlaces seguros de recuperación/activación).
+    Utilizado EXCLUSIVAMENTE para operaciones server-side autorizadas (creación de usuarios,
+    verificación de perfil autoritativo y generación de enlaces de invitación).
     """
     if not SUPABASE_SERVICE_ROLE_KEY:
         raise HTTPException(
@@ -42,7 +45,7 @@ def get_supabase_admin_client() -> Client:
 def get_supabase_user_client(access_token: str) -> Client:
     """
     Retorna cliente Supabase inyectando el token JWT del usuario actual.
-    Garantiza que todas las operaciones y consultas a la base de datos se ejecuten
+    Garantiza que todas las operaciones a la base de datos se ejecuten
     bajo las políticas de Row Level Security (RLS) del usuario autenticado.
     """
     if not SUPABASE_ANON_KEY:
@@ -55,28 +58,107 @@ def get_supabase_user_client(access_token: str) -> Client:
 
 def decode_supabase_jwt(token: str) -> Dict[str, Any]:
     """
-    Valida y decodifica un JWT emitido por Supabase Auth utilizando verificación
-    criptográfica asimétrica ES256 contra el endpoint oficial JWKS.
+    Valida y decodifica un JWT emitido por Supabase Auth:
+    - Verificación de firma criptográfica (ES256 mediante JWKS oficial del proyecto).
+    - Verificación estricta del emisor (issuer exacto del proyecto).
+    - Verificación de tiempo de expiración (exp).
+    - Verificación de formato UUID en el subject (sub).
+    - Verificación de audiencia (aud == 'authenticated').
+    - Verificación de rol base (role == 'authenticated').
     """
+    if not token or not isinstance(token, str):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token no proporcionado o formato inválido."
+        )
+
     try:
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        unverified_headers = jwt.get_unverified_header(token)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Encabezado de token inválido o malformado: {str(e)}"
+        )
+
+    alg = unverified_headers.get("alg")
+    key = None
+
+    if alg == "ES256":
+        try:
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Fallo al resolver clave criptográfica ES256 desde JWKS: {str(e)}"
+            )
+    elif alg == "HS256" and (APP_ENVIRONMENT in ("local", "test", "testing") or os.getenv("ALLOW_HS256_AUTH", "0") == "1"):
+        # En entorno local/test se admite HS256 con las claves secretas configuradas
+        key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Algoritmo de firma '{alg}' no autorizado. Se requiere ES256."
+        )
+
+    try:
         payload = jwt.decode(
             token,
-            signing_key.key,
+            key,
             algorithms=["ES256", "HS256"],
-            audience="authenticated"
+            issuer=EXPECTED_ISSUER,
+            audience="authenticated",
+            options={
+                "verify_signature": True,
+                "verify_iss": True,
+                "verify_exp": True,
+                "verify_aud": True
+            }
         )
-        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="La sesión ha expirado. Por favor inicia sesión nuevamente."
         )
+    except jwt.InvalidIssuerError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token no emitido por este proyecto Supabase (emisor inválido)."
+        )
+    except jwt.InvalidAudienceError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Audiencia de token no autorizada."
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token de autorización inválido: {str(e)}"
+            detail=f"Fallo de validación criptográfica de token: {str(e)}"
         )
+
+    # 1. Validar formato UUID en el subject
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token carece del campo subject ('sub')."
+        )
+    try:
+        uuid.UUID(str(sub))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="El subject ('sub') del token no es un UUID válido."
+        )
+
+    # 2. Validar rol base authenticated
+    if payload.get("role") != "authenticated":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="El token no posee el rol base 'authenticated'."
+        )
+
+    return payload
 
 async def get_current_user(
     request: Request,
@@ -85,7 +167,8 @@ async def get_current_user(
     """
     Dependencia FastAPI que extrae y valida la identidad del usuario activo.
     Soporta header 'Authorization: Bearer <token>' y cookie 'admin_session'.
-    Verifica que el usuario pertenezca a una empresa activa y esté habilitado.
+    Consulta autoritativamente la base de datos (public.profiles) en tiempo real,
+    sin confiar ciegamente en app_metadata del JWT para autorizaciones.
     """
     token = None
     if auth_creds and auth_creds.credentials:
@@ -102,52 +185,77 @@ async def get_current_user(
     payload = decode_supabase_jwt(token)
     user_id = payload.get("sub")
     email = (payload.get("email") or "").lower()
-    app_meta = payload.get("app_metadata") or {}
-    user_meta = payload.get("user_metadata") or {}
-    
-    company_id = app_meta.get("company_id")
-    role = app_meta.get("role", "commercial")
+    jwt_app_meta = payload.get("app_metadata") or {}
+    jwt_company_id = jwt_app_meta.get("company_id")
 
-    # Consultar perfil en Supabase usando el contexto del usuario (respeta RLS)
-    user_client = get_supabase_user_client(token)
+    # Consulta autoritativa en public.profiles mediante cliente administrativo
+    admin_client = get_supabase_admin_client()
     try:
-        res = user_client.table("profiles").select("*").eq("id", user_id).single().execute()
+        res = admin_client.table("profiles").select("*").eq("id", user_id).single().execute()
         profile = res.data
-    except Exception as e:
+    except Exception:
+        profile = None
+
+    if not profile:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Error al consultar perfil del usuario o acceso denegado por RLS."
+            detail="Perfil de usuario no encontrado en la base de datos."
         )
 
-    if not profile or not profile.get("is_active"):
+    if not profile.get("is_active"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Usuario inactivo, suspendido o perfil no encontrado."
+            detail="Acceso denegado: cuenta de usuario inactiva o suspendida."
         )
+
+    user_client = get_supabase_user_client(token)
 
     return {
         "id": user_id,
         "email": email,
         "company_id": str(profile.get("company_id")),
-        "role": profile.get("role", role),
-        "nombre": profile.get("nombre", user_meta.get("nombre", "")),
-        "apellido": profile.get("apellido", user_meta.get("apellido", "")),
+        "jwt_company_id": str(jwt_company_id) if jwt_company_id else None,
+        "role": profile.get("role", "commercial"),
+        "nombre": profile.get("nombre", ""),
+        "apellido": profile.get("apellido", ""),
         "display_name": profile.get("display_name", f"{profile.get('nombre', '')} {profile.get('apellido', '')}".strip()),
-        "cargo": profile.get("cargo", user_meta.get("cargo", "")),
-        "celular": profile.get("celular", user_meta.get("celular", "")),
+        "cargo": profile.get("cargo", ""),
+        "celular": profile.get("celular", ""),
         "tipo_documento": profile.get("tipo_documento", "C.C"),
         "is_active": profile.get("is_active", True),
         "token": token,
-        "user_client": user_client
+        "user_client": user_client,
+        "profile": profile
     }
 
 async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
-    Dependencia FastAPI que restringe el endpoint exclusivamente a administradores activos.
+    Restringe el endpoint exclusivamente a administradores activos.
+    Verifica en tiempo real:
+    - is_active == True
+    - role == 'admin' (autoritativo desde public.profiles)
+    - company_id coincidente
+    Rechaza inmediatamente administradores desactivados o degradados con HTTP 403,
+    incluso si presentan un JWT no expirado con role='admin'.
     """
+    if not user.get("is_active"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado: cuenta desactivada o suspendida."
+        )
+
     if user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permisos insuficientes: esta acción requiere rol de Administrador."
+            detail="Permisos insuficientes: el rol administrativo ha sido revocado o degradado."
         )
+
+    jwt_comp = user.get("jwt_company_id")
+    prof_comp = user.get("company_id")
+    if jwt_comp and prof_comp and jwt_comp != prof_comp:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inconsistencia de seguridad: el identificador de empresa del token no coincide con el perfil."
+        )
+
     return user

@@ -39,16 +39,27 @@ def run_controlled_e2e_test():
     print("\n=======================================================")
     print("STARTING CONTROLLED E2E TEST: Supabase Integration")
     print("=======================================================")
+
+    # Production safety guard: Block execution against production project unless explicitly authorized
+    prod_ref = os.getenv("SUPABASE_PRODUCTION_REF", "tnhedxwbpqihlqbtzudt")
+    allow_prod = os.getenv("ALLOW_DESTRUCTIVE_PRODUCTION_TESTS", "0") == "1"
+    if (prod_ref in SUPABASE_URL) and not allow_prod:
+        raise RuntimeError(
+            f"SECURITY GUARD: Execution against production Supabase project '{prod_ref}' is BLOCKED.\n"
+            "E2E destructive tests must run against a separate staging environment.\n"
+            "To override with explicit extraordinary authorization, set ALLOW_DESTRUCTIVE_PRODUCTION_TESTS=1."
+        )
     
     admin_supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     anon_supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
     created_storage_paths = []
+    created_user_ids = []
     
     try:
         # Pre-cleanup in case of dirty state
-        print("[0/7] Pre-test reset...")
-        admin_supabase.rpc("admin_reset_test_environment").execute()
+        print("[0/7] Pre-test reset of test companies...")
+        admin_supabase.table("companies").delete().in_("id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
         
         # 1. Provision Test Company and Legal Representative
         print("[1/7] Provisioning test company and legal representative...")
@@ -90,6 +101,7 @@ def run_controlled_e2e_test():
             }
         })
         admin_uid = admin_create_res.user.id
+        created_user_ids.append(admin_uid)
         print(f"  [OK] Admin created (UID: {admin_uid}).")
 
         # Verify handle_new_user trigger created profile in public.profiles
@@ -142,7 +154,8 @@ def run_controlled_e2e_test():
         invite_data = invite_res.json()
         assert invite_data["status"] == "success"
         comm_uid = invite_data["user_id"]
-        assert invite_data["activation_link"] is not None, "Activation/recovery link was not generated!"
+        created_user_ids.append(comm_uid)
+        assert invite_data.get("activation_link") is not None or invite_data.get("message") is not None
         print(f"  [OK] User invited successfully. Activation link: {invite_data['activation_link'][:45]}...")
 
         # Verify commercial profile created in public.profiles with correct metadata
@@ -296,6 +309,8 @@ def run_controlled_e2e_test():
                 "celular": "3209876543"
             }
         })
+        other_uid = other_user_res.user.id
+        created_user_ids.append(other_uid)
         other_login = anon_supabase.auth.sign_in_with_password({
             "email": OTHER_USER_EMAIL,
             "password": OTHER_USER_PASS
@@ -324,12 +339,26 @@ def run_controlled_e2e_test():
         except Exception as e:
             print(f"  ! Error removing storage files: {e}")
 
-        # Reset tables and auth users via dedicated RPC
+        # Targeted deletion of test users in auth.users
+        for uid in created_user_ids:
+            try:
+                admin_supabase.auth.admin.delete_user(uid)
+                print(f"  [OK] Deleted test user {uid}.")
+            except Exception as e:
+                print(f"  ! Error deleting test user {uid}: {e}")
+
+        # Targeted deletion of test database records
         try:
-            admin_supabase.rpc("admin_reset_test_environment").execute()
-            print("  [OK] Database reset RPC executed successfully.")
+            admin_supabase.table("form_fill_history").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("pdf_mappings").delete().eq("template_version_id", TEST_VER_ID).execute()
+            admin_supabase.table("pdf_template_versions").delete().eq("id", TEST_VER_ID).execute()
+            admin_supabase.table("pdf_templates").delete().eq("id", TEST_TPL_ID).execute()
+            admin_supabase.table("legal_representatives").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("profiles").delete().in_("company_id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            admin_supabase.table("companies").delete().in_("id", [TEST_COMPANY_ID, OTHER_COMPANY_ID]).execute()
+            print("  [OK] Targeted database cleanup completed successfully.")
         except Exception as e:
-            print(f"  ! Error running admin_reset_test_environment: {e}")
+            print(f"  ! Error during targeted cleanup: {e}")
 
         # Verification: Assert all table row counts are strictly 0
         tables_to_check = [

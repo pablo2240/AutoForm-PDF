@@ -80,15 +80,19 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
 
     try {
       setIsSendingRecovery(true);
-      const { error } = await supabase.auth.resetPasswordForEmail(emailClean);
-      if (error) {
-        throw error;
-      }
+      const siteOrigin = window.location.origin;
+      await supabase.auth.resetPasswordForEmail(emailClean, {
+        redirectTo: `${siteOrigin}/auth/reset-password`
+      });
+      // Respuesta genérica para evitar enumeración de usuarios
       setRecoverySuccess(
-        `Se ha enviado un correo a ${emailClean} con las instrucciones para restablecer o crear tu contraseña. Por favor revisa tu bandeja de entrada o spam.`
+        'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
       );
-    } catch (err: any) {
-      setRecoveryError(err.message || 'Error al solicitar el restablecimiento de contraseña.');
+    } catch {
+      // Mantener respuesta genérica consistente
+      setRecoverySuccess(
+        'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
+      );
     } finally {
       setIsSendingRecovery(false);
     }
