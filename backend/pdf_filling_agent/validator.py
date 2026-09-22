@@ -245,11 +245,36 @@ class FillingValidator:
         # 3.4 Person names must not go into nationality, country, nit, phone fields
         if sem_type == "person_name":
             forbidden_name_targets = ["nacionalidad", "pais", "nit", "tel", "cel", "telefono", "correo", "email"]
-            if any(k in norm_label for k in forbidden_name_targets):
-                return ValidationResult(
-                    is_valid=False,
-                    reason=f"Tier 3 Type-Aware Guard: Person name '{val_str}' cannot be assigned to '{norm_label}'"
-                )
+            matched_forbidden = [k for k in forbidden_name_targets if k in norm_label]
+            if matched_forbidden:
+                is_invalid = True
+                has_explicit_name = any(k in norm_label for k in [
+                    "nombres y apellidos", "nombre y apellidos", "apellidos y nombres",
+                    "nombre completo", "nombres", "apellidos"
+                ])
+                if has_explicit_name:
+                    has_compound_name = any(k in norm_label for k in [
+                        "nombres y apellidos", "nombre y apellidos", "apellidos y nombres", "nombre completo"
+                    ])
+                    is_email_or_contact_target = any(
+                        re.search(rf'^(?:{re.escape(k)})\b', norm_label) or
+                        re.search(rf'\b(?:correo|email|telefono|celular)\s+(?:del|de\s+la|de)\s+', norm_label)
+                        for k in matched_forbidden
+                    )
+                    if has_compound_name and not is_email_or_contact_target:
+                        is_invalid = False
+                    elif "persona autorizada" in norm_label and not any(k in norm_label for k in ["correo electronico", "email"]):
+                        is_invalid = False
+                    elif has_compound_name and any(norm_label.endswith(sig) for sig in ["nombres y apellidos", "nombre y apellidos", "apellidos y nombres", "persona autorizada"]):
+                        is_invalid = False
+                elif "persona autorizada" in norm_label and not any(k in norm_label for k in ["correo electronico", "email"]):
+                    is_invalid = False
+
+                if is_invalid:
+                    return ValidationResult(
+                        is_valid=False,
+                        reason=f"Tier 3 Type-Aware Guard: Person name '{val_str}' cannot be assigned to '{norm_label}'"
+                    )
 
         # 3.5 Email values must go to email fields
         if sem_type == "email":

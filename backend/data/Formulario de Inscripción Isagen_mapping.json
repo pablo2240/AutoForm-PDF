@@ -2,5 +2,398 @@
   "template_id": "Formulario de Inscripción Isagen",
   "page_width": 612.0,
   "page_height": 792.0,
-  "mappings": []
+  "mappings": [
+    {
+      "id": "box-1789653282340-7rirf",
+      "field_key": "razon_social",
+      "label": "razon_social",
+      "page_number": 0,
+      "box": {
+        "x0": 210.24060216100386,
+        "y0": 393.09069014465854,
+        "x1": 404.1949604926342,
+        "y1": 416.03948749773656
+      },
+      "box_pct": {
+        "x0_pct": 0.3435303956879148,
+        "y0_pct": 0.4963266289705285,
+        "x1_pct": 0.6604492818507095,
+        "y1_pct": 0.5253023832042129
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653300651-s3vd3",
+      "field_key": "razon_social",
+      "label": "razon_social",
+      "page_number": 0,
+      "box": {
+        "x0": 242.21778132681905,
+        "y0": 450.09254163456194,
+        "x1": 372.21778132681914,
+        "y1": 471.7939605624778
+      },
+      "box_pct": {
+        "x0_pct": 0.3957806884425148,
+        "y0_pct": 0.5682986636800025,
+        "x1_pct": 0.6081989890961097,
+        "y1_pct": 0.5956994451546437
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653311355-r7vkx",
+      "field_key": "numero_cedula",
+      "label": "numero_cedula",
+      "page_number": 0,
+      "box": {
+        "x0": 140.6539239809533,
+        "y0": 340.5305413682541,
+        "x1": 241.33252219889886,
+        "y1": 359.03763600783316
+      },
+      "box_pct": {
+        "x0_pct": 0.22982667317149233,
+        "y0_pct": 0.4299628047578966,
+        "x1_pct": 0.3943341865995079,
+        "y1_pct": 0.4533303484947388
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653319028-xiez9",
+      "field_key": "pais",
+      "label": "pais",
+      "page_number": 0,
+      "box": {
+        "x0": 121.11659427488722,
+        "y0": 390.8698387879091,
+        "x1": 185.52128578195536,
+        "y1": 418.260338854486
+      },
+      "box_pct": {
+        "x0_pct": 0.19790293182171115,
+        "y0_pct": 0.4935225237221074,
+        "x1_pct": 0.3031393558528682,
+        "y1_pct": 0.5281064884526339
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653340964-7dnxo",
+      "field_key": "representante_legal",
+      "label": "representante_legal",
+      "page_number": 0,
+      "box": {
+        "x0": 220.23443360175582,
+        "y0": 521.8112383965255,
+        "x1": 394.2011290518823,
+        "y1": 548.4614546775194
+      },
+      "box_pct": {
+        "x0_pct": 0.359860185623784,
+        "y0_pct": 0.6588525737329868,
+        "x1_pct": 0.6441194919148403,
+        "y1_pct": 0.6925018367140396
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653374396-1guhb",
+      "field_key": "kelly_delgado_nombre_completo",
+      "label": "kelly_delgado_nombre_completo",
+      "page_number": 0,
+      "box": {
+        "x0": 190.99322308992606,
+        "y0": 427.7951976274641,
+        "x1": 426.40347480541635,
+        "y1": 443.34115712471043
+      },
+      "box_pct": {
+        "x0_pct": 0.3120804298855001,
+        "y0_pct": 0.5401454515498284,
+        "x1_pct": 0.6967377039304189,
+        "y1_pct": 0.5597741882887758
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653380260-t0e1z",
+      "field_key": "kelly_delgado_celular",
+      "label": "kelly_delgado_celular",
+      "page_number": 0,
+      "box": {
+        "x0": 176.9278306918307,
+        "y0": 490.7193194020328,
+        "x1": 263.54103651168094,
+        "y1": 501.82357618578015
+      },
+      "box_pct": {
+        "x0_pct": 0.28909776256835085,
+        "y0_pct": 0.6195951002550919,
+        "x1_pct": 0.4306226086792172,
+        "y1_pct": 0.6336156264971972
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653391101-015mr",
+      "field_key": "total_egresos_mensuales",
+      "label": "total_egresos_mensuales",
+      "page_number": 0,
+      "box": {
+        "x0": 441.94943482436383,
+        "y0": 463.3288193354558,
+        "x1": 521.1598025399533,
+        "y1": 483.3164815462012
+      },
+      "box_pct": {
+        "x0_pct": 0.7221395993862154,
+        "y0_pct": 0.5850111355245654,
+        "x1_pct": 0.8515683048038453,
+        "y1_pct": 0.610248082760355
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653393757-d2abb",
+      "field_key": "total_egresos_mensuales",
+      "label": "total_egresos_mensuales",
+      "page_number": 0,
+      "box": {
+        "x0": 456.15980253995326,
+        "y0": 399.78100834830616,
+        "x1": 586.1598025399533,
+        "y1": 417.78100834830616
+      },
+      "box_pct": {
+        "x0_pct": 0.7453591544770478,
+        "y0_pct": 0.5047740004397805,
+        "x1_pct": 0.9577774551306426,
+        "y1_pct": 0.5275012731670532
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653396013-8fgt4",
+      "field_key": "total_egresos_mensuales",
+      "label": "total_egresos_mensuales",
+      "page_number": 0,
+      "box": {
+        "x0": 482.0,
+        "y0": 359.57249478081116,
+        "x1": 612.0,
+        "y1": 377.57249478081116
+      },
+      "box_pct": {
+        "x0_pct": 0.7875816993464052,
+        "y0_pct": 0.45400567522829693,
+        "x1_pct": 1.0,
+        "y1_pct": 0.47673294795556964
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653396909-esp5x",
+      "field_key": "total_egresos_mensuales",
+      "label": "total_egresos_mensuales",
+      "page_number": 0,
+      "box": {
+        "x0": 426.40347480541635,
+        "y0": 354.390508281729,
+        "x1": 556.4034748054164,
+        "y1": 372.390508281729
+      },
+      "box_pct": {
+        "x0_pct": 0.6967377039304189,
+        "y0_pct": 0.44746276298198107,
+        "x1_pct": 0.9091560045840137,
+        "y1_pct": 0.47019003570925383
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653401149-tt8yj",
+      "field_key": "kelly_delgado_email",
+      "label": "kelly_delgado_email",
+      "page_number": 0,
+      "box": {
+        "x0": 394.2011290518823,
+        "y0": 521.8112383965255,
+        "x1": 524.2011290518822,
+        "y1": 539.8112383965256
+      },
+      "box_pct": {
+        "x0_pct": 0.6441194919148403,
+        "y0_pct": 0.6588525737329868,
+        "x1_pct": 0.856537792568435,
+        "y1_pct": 0.6815798464602596
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-1789653407981-p1ffh",
+      "field_key": "representante_legal",
+      "label": "Nombres y apellidos persona autorizada",
+      "page_number": 0,
+      "box": {
+        "x0": 146.43,
+        "y0": 632.13,
+        "x1": 369.09,
+        "y1": 645.18
+      },
+      "box_pct": {
+        "x0_pct": 0.23926470588235296,
+        "y0_pct": 0.7981439393939394,
+        "x1_pct": 0.6030882352941176,
+        "y1_pct": 0.8146212121212121
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    },
+    {
+      "id": "box-isagen-ariba-correo-rep",
+      "field_key": "correo_rep",
+      "label": "Correo electrónico",
+      "page_number": 0,
+      "box": {
+        "x0": 375.59,
+        "y0": 630.45,
+        "x1": 521.12,
+        "y1": 645.18
+      },
+      "box_pct": {
+        "x0_pct": 0.6137091503267973,
+        "y0_pct": 0.7960227272727274,
+        "x1_pct": 0.8515032679738562,
+        "y1_pct": 0.8146212121212121
+      },
+      "style": {
+        "font_family": "Arial",
+        "font_size": 10.0,
+        "bold": false,
+        "color": "#000000",
+        "align": "center",
+        "custom_text": null,
+        "image_base64": null,
+        "item_type": "text"
+      }
+    }
+  ]
 }

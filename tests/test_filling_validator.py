@@ -383,3 +383,32 @@ def test_beneficiarios_finales_secondary_rows_blocked(validator):
     assert not res_sec_name.is_valid
     assert "Single-Row" in res_sec_name.reason
 
+
+def test_isagen_ariba_persona_autorizada_person_name_allowed(validator):
+    """Person name must be allowed in ARIBA Text1 even if incidental text mentions 'correo'."""
+    label = (
+        "constituyen manifestacion valida de su voluntad tenga en cuenta que el los correo s "
+        "reportado s seran los unicos a traves de los cuales nombres y apellidos persona autorizada"
+    )
+    res = validator.validate(
+        label=label,
+        section="DATOS CONTACTO PARA ARIBA *",
+        field_name="Text1",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res.is_valid, f"Expected valid but got: {res.reason}"
+
+
+def test_ariba_persona_autorizada_email_blocks_person_name(validator):
+    """Person name must be rejected for actual email fields (Text5 / correo electronico)."""
+    label_email = "voluntad * los cuales podra recibir invitaciones o presentar ofertas. Correo electronico"
+    res = validator.validate(
+        label=label_email,
+        section="DATOS CONTACTO PARA ARIBA *",
+        field_name="Text5",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert not res.is_valid
+    assert "Person name" in res.reason and "cannot be assigned" in res.reason
+
+
