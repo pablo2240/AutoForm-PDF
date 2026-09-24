@@ -34,27 +34,56 @@ from backend.auth_supabase import (
 
 app = FastAPI(title="AutoForm PDF API")
 
-APP_ENVIRONMENT = os.getenv("APP_ENVIRONMENT", "local").lower()
-cors_origins_env = os.getenv("CORS_ORIGINS", "")
+def resolve_cors_origins(app_env: Optional[str] = None, raw_origins: Optional[str] = None) -> list[str]:
+    """
+    Resolves and enforces CORS origins based on the execution environment.
 
-if APP_ENVIRONMENT == "production":
-    if cors_origins_env:
-        allow_origins = [
-            o.strip() for o in cors_origins_env.split(",") 
-            if o.strip() and not ("localhost" in o or "127.0.0.1" in o)
-        ]
+    Rules:
+    - In staging and production environments, CORS_ORIGINS must be explicitly defined
+      and non-empty. Fallbacks are strictly prohibited.
+    - In production, origins containing 'localhost' or '127.0.0.1' are rejected, and at least
+      one valid production origin must be present.
+    - In local/development/test environments, if CORS_ORIGINS is not set, a safe set of
+      local development origins is used.
+    """
+    env = (app_env if app_env is not None else os.getenv("APP_ENVIRONMENT", os.getenv("ENVIRONMENT", "local"))).lower()
+    origins_str = raw_origins if raw_origins is not None else os.getenv("CORS_ORIGINS", "")
+
+    if env in ("production", "staging"):
+        if not origins_str or not origins_str.strip():
+            raise RuntimeError(
+                f"CORS_ORIGINS environment variable is required and must be explicitly defined in {env} environment."
+            )
+        parsed = [o.strip() for o in origins_str.split(",") if o.strip()]
+        if not parsed:
+            raise RuntimeError(
+                f"CORS_ORIGINS environment variable cannot be empty in {env} environment."
+            )
+        if env == "production":
+            if any(o == "*" for o in parsed):
+                raise RuntimeError(
+                    "CORS_ORIGINS wildcard '*' is strictly forbidden in production environment."
+                )
+            prod_origins = [o for o in parsed if not ("localhost" in o or "127.0.0.1" in o)]
+            if not prod_origins:
+                raise RuntimeError(
+                    "CORS_ORIGINS must contain at least one valid non-localhost origin in production environment."
+                )
+            return prod_origins
+        return parsed
     else:
-        allow_origins = ["https://autoform.iaclatam.com"]
-else:
-    if cors_origins_env:
-        allow_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
-    else:
-        allow_origins = [
-            "http://localhost:5173", 
-            "http://localhost:3000", 
-            "http://127.0.0.1:5173", 
+        if origins_str and origins_str.strip():
+            return [o.strip() for o in origins_str.split(",") if o.strip()]
+        return [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
             "http://127.0.0.1:3000"
         ]
+
+APP_ENVIRONMENT = os.getenv("APP_ENVIRONMENT", os.getenv("ENVIRONMENT", "local")).lower()
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+allow_origins = resolve_cors_origins(APP_ENVIRONMENT, cors_origins_env)
 
 app.add_middleware(
     CORSMiddleware,
@@ -279,7 +308,7 @@ def get_global_signature():
     meta_path = os.path.join(SIGNATURES_DIR, "signature_metadata.json")
     if not os.path.exists(sig_img_path):
         return {"signature": None}
-    
+
     metadata = {}
     if os.path.exists(meta_path):
         try:
@@ -864,7 +893,7 @@ def auth_register(dto: CommercialRegisterDTO, request: Request, response: Respon
     existing = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(email_clean)).first()
     if existing:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"El correo electrónico '{email_clean}' ya se encuentra registrado. Por favor utiliza otro correo o inicia sesión."
         )
 
@@ -1094,7 +1123,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 @app.delete("/api/templates/{template_id}")
 def delete_template(template_id: str):
     deleted_files = []
-    
+
     # Remove PDF candidates from input/
     pdf_candidates = [
         os.path.join(INPUT_DIR, f"{template_id}.pdf"),
@@ -1133,10 +1162,10 @@ def get_pdf_pages(template_id: str):
         pdf_path = os.path.join(INPUT_DIR, template_id)
         if not os.path.exists(pdf_path):
             raise HTTPException(status_code=404, detail=f"PDF '{template_id}' not found in input/")
-    
+
     processor = VisualPDFProcessor(output_dir=OUTPUT_DIR, dpi=120)
     pages = processor.render_all_pages(pdf_path, dpi=120)
-    
+
     return {
         "template_id": template_id,
         "total_pages": len(pages),
@@ -1336,7 +1365,7 @@ def generate_pdf(req: GenerateRequest, request: Request):
         field_key = item["field_key"]
         style = item.get("style", {}) or {}
         item_type = style.get("item_type", "text")
-        
+
         box = item["box"]
         rect = [box["x0"], box["y0"], box["x1"], box["y1"]]
 

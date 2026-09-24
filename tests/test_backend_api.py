@@ -41,41 +41,52 @@ def test_save_mapping_and_generate_with_styles():
     assert len(templates) > 0
     tpl_id = templates[0]["id"]
 
-    mapping_payload = {
-        "template_id": tpl_id,
-        "page_width": 612.0,
-        "page_height": 792.0,
-        "mappings": [
-            {
-                "id": "box-test-1",
-                "field_key": "razon_social",
-                "label": "Razón Social",
-                "page_number": 0,
-                "box": {"x0": 100.0, "y0": 150.0, "x1": 350.0, "y1": 170.0},
-                "box_pct": {"x0_pct": 0.16, "y0_pct": 0.18, "x1_pct": 0.57, "y1_pct": 0.21},
-                "style": {
-                    "font_family": "Arial",
-                    "font_size": 11.0,
-                    "bold": True,
-                    "color": "#000000",
-                    "item_type": "text"
+    mapping_path = os.path.join(DATA_DIR, f"{tpl_id}_mapping.json")
+    original_mapping = None
+    if os.path.exists(mapping_path):
+        with open(mapping_path, "r", encoding="utf-8") as f:
+            original_mapping = f.read()
+
+    try:
+        mapping_payload = {
+            "template_id": tpl_id,
+            "page_width": 612.0,
+            "page_height": 792.0,
+            "mappings": [
+                {
+                    "id": "box-test-1",
+                    "field_key": "razon_social",
+                    "label": "Razón Social",
+                    "page_number": 0,
+                    "box": {"x0": 100.0, "y0": 150.0, "x1": 350.0, "y1": 170.0},
+                    "box_pct": {"x0_pct": 0.16, "y0_pct": 0.18, "x1_pct": 0.57, "y1_pct": 0.21},
+                    "style": {
+                        "font_family": "Arial",
+                        "font_size": 11.0,
+                        "bold": True,
+                        "color": "#000000",
+                        "item_type": "text"
+                    }
                 }
-            }
-        ]
-    }
-    
-    save_res = client.post("/api/mapping", json=mapping_payload)
-    assert save_res.status_code == 200
-    
-    gen_res = client.post("/api/generate", json={
-        "template_id": tpl_id,
-        "commercial_profile_id": "legal_rep_only"
-    })
-    assert gen_res.status_code == 200
-    gen_data = gen_res.json()
-    assert gen_data["status"] == "success"
-    assert gen_data["total_placed"] >= 1
-    assert "filled_" in gen_data["filename"]
+            ]
+        }
+
+        save_res = client.post("/api/mapping", json=mapping_payload)
+        assert save_res.status_code == 200
+
+        gen_res = client.post("/api/generate", json={
+            "template_id": tpl_id,
+            "commercial_profile_id": "legal_rep_only"
+        })
+        assert gen_res.status_code == 200
+        gen_data = gen_res.json()
+        assert gen_data["status"] == "success"
+        assert gen_data["total_placed"] >= 1
+        assert "filled_" in gen_data["filename"]
+    finally:
+        if original_mapping is not None:
+            with open(mapping_path, "w", encoding="utf-8") as f:
+                f.write(original_mapping)
 
 def test_delete_template():
     # 1. Create a dummy test pdf in input/
@@ -84,15 +95,15 @@ def test_delete_template():
     with open(dummy_pdf, "wb") as f:
         # Create minimal PDF bytes
         f.write(b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 612 792]>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n160\n%%EOF")
-    
+
     dummy_mapping = os.path.join(DATA_DIR, f"{dummy_id}_mapping.json")
     with open(dummy_mapping, "w", encoding="utf-8") as f:
         json.dump({"template_id": dummy_id, "mappings": []}, f)
-        
+
     # Check template appears
     list_res = client.get("/api/templates")
     assert any(t["id"] == dummy_id for t in list_res.json()["templates"])
-    
+
     # 2. Delete template
     del_res = client.delete(f"/api/templates/{dummy_id}")
     assert del_res.status_code == 200
@@ -133,4 +144,3 @@ if __name__ == "__main__":
     test_delete_template()
     test_ai_fill_endpoint_validation()
     print("[SUCCESS] All backend API integration tests passed with Autollenado IA endpoint support!")
-
