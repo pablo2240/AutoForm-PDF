@@ -56,9 +56,11 @@ export interface AdminSessionUser {
   email?: string;
   role?: string;
   profile_name?: string;
+  display_name?: string;
   nombre?: string;
   apellido?: string;
   cargo?: string;
+  celular?: string;
   ciudad?: string;
 }
 

@@ -164,22 +164,44 @@ export const App: React.FC = () => {
   // Non-admin (commercial) ONLY sees their own profile ("el perfil de uno y no de los demás")
   // Admin sees all active commercial profiles
   const visibleCommercialProfiles: CommercialProfilePublic[] = useMemo(() => {
-    if (!currentUser) return [];
+    if (!currentUser) {
+      return commercialProfiles.filter((p: CommercialProfilePublic) => p.role !== 'admin');
+    }
     if (currentUser.role === 'admin') {
       return commercialProfiles.filter((p: CommercialProfilePublic) => p.role !== 'admin');
     }
-    return commercialProfiles.filter(
-      (p: CommercialProfilePublic) => p.id === currentUser.id || (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
+    // Usuario comercial autenticado: filtrar por ID o correo
+    const filtered = commercialProfiles.filter(
+      (p: CommercialProfilePublic) => 
+        p.id === currentUser.id || 
+        (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
     );
+    // Garantía autoritativa: si el catálogo aún está cargando o viene vacío, usar datos de currentUser
+    if (filtered.length === 0 && currentUser.email) {
+      const nombre = currentUser.nombre || '';
+      const apellido = currentUser.apellido || '';
+      const fallbackName = currentUser.profile_name || currentUser.display_name || `${nombre} ${apellido}`.trim() || currentUser.email;
+      return [{
+        id: currentUser.id || 'current_commercial',
+        profile_name: fallbackName,
+        nombre: nombre || fallbackName,
+        apellido: apellido,
+        cargo: currentUser.cargo || 'Comercial',
+        email: currentUser.email,
+        celular: currentUser.celular || '',
+        ciudad: currentUser.ciudad || '',
+        role: 'commercial',
+        is_active: true
+      }];
+    }
+    return filtered;
   }, [commercialProfiles, currentUser]);
 
   // Auto-select commercial's own profile upon login/loading
   useEffect(() => {
     if (currentUser && currentUser.role !== 'admin' && visibleCommercialProfiles.length > 0) {
-      const myProfile = visibleCommercialProfiles.find(
-        (p: CommercialProfilePublic) => p.id === currentUser.id || (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
-      );
-      if (myProfile && (!activeCommercialProfileId || activeCommercialProfileId !== myProfile.id)) {
+      const myProfile = visibleCommercialProfiles[0];
+      if (myProfile && (!activeCommercialProfileId || activeCommercialProfileId !== myProfile.id || activeCommercialProfileId === 'legal_rep_only')) {
         setActiveCommercialProfileId(myProfile.id);
         sessionStorage.setItem('active_commercial_profile_id', myProfile.id);
       }
@@ -245,15 +267,24 @@ export const App: React.FC = () => {
         if (isMounted) {
           setIsPasswordRecoveryMode(true);
         }
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Supabase refresca el token silenciosamente en background periódicamente (ej. cada ~60s).
+        // No recrear currentUser ni reiniciar el espacio de trabajo para evitar el spinner recurrente.
+        return;
+      } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         if (session) {
           try {
             const user = await fetchCurrentAuthUser();
             if (isMounted) {
-              setCurrentUser(user);
+              setCurrentUser((prev) => {
+                if (prev && prev.id === user.id && prev.email === user.email && prev.role === user.role) {
+                  return prev;
+                }
+                return user;
+              });
               if (user.id) {
-                setActiveCommercialProfileId(user.id);
-                sessionStorage.setItem('active_commercial_profile_id', user.id);
+                setActiveCommercialProfileId((prev) => prev || user.id || '');
+                if (user.id) sessionStorage.setItem('active_commercial_profile_id', user.id);
               }
             }
           } catch (err) {
@@ -278,7 +309,7 @@ export const App: React.FC = () => {
 
   // When user is authenticated, load workspace data
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser?.id) return;
 
     async function initWorkspace() {
       try {
@@ -320,7 +351,7 @@ export const App: React.FC = () => {
       }
     }
     initWorkspace();
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   const handleLogout = async () => {
     try {

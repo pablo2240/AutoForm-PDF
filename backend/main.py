@@ -672,9 +672,22 @@ def get_current_admin_user(request: Request, db = Depends(get_db)):
     if not token:
         raise HTTPException(status_code=401, detail="Sesión administrativa no encontrada o credenciales requeridas.")
 
-    payload = verify_session_token(token)
+    payload = None
+    try:
+        supa_payload = decode_supabase_jwt(token)
+        app_meta = supa_payload.get("app_metadata") or {}
+        payload = {
+            "email": supa_payload.get("email"),
+            "role": app_meta.get("role") or supa_payload.get("role")
+        }
+    except Exception:
+        payload = verify_session_token(token)
+
     if not payload:
         raise HTTPException(status_code=401, detail="Sesión expirada o token inválido.")
+
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Acceso denegado: se requieren permisos de administrador.")
 
     email = payload["email"]
     user = db.query(CommercialProfile).filter(
@@ -689,8 +702,9 @@ def get_current_admin_user(request: Request, db = Depends(get_db)):
 def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
     """
     Retorna catálogo público de perfiles comerciales activos.
-    Si se presenta un token de Supabase, consulta la RPC get_company_commercial_profiles() respetando RLS.
-    Si no, usa la lógica legacy SQLite.
+    Si se presenta un token de Supabase y la RPC retorna perfiles (> 0), los retorna respetando RLS.
+    Si no, consulta SQLite. Si el usuario autenticado es un asesor comercial (no admin),
+    retorna su propio perfil comercial para garantizar la visualización y preselección inmediata.
     """
     token = request.cookies.get("admin_session")
     auth_header = request.headers.get("Authorization", "")
@@ -701,7 +715,7 @@ def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
         try:
             user_client = get_supabase_user_client(token)
             res = user_client.rpc("get_company_commercial_profiles").execute()
-            if res.data is not None:
+            if res.data and len(res.data) > 0:
                 return [
                     {
                         "id": str(r["id"]),
@@ -715,15 +729,33 @@ def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
         except Exception:
             pass
 
-    session_payload = verify_session_token(token) if token else None
+    user_email = None
+    user_role = None
+
+    if token:
+        try:
+            supa_payload = decode_supabase_jwt(token)
+            user_email = (supa_payload.get("email") or "").lower()
+            user_role = (supa_payload.get("app_metadata") or {}).get("role") or supa_payload.get("role")
+        except Exception:
+            pass
+
+        if not user_email:
+            session_payload = verify_session_token(token)
+            if session_payload:
+                user_email = (session_payload.get("email") or "").lower()
+                user_role = session_payload.get("role")
 
     query = db.query(CommercialProfile).filter(CommercialProfile.is_active == True)
-    if session_payload and session_payload.get("role") != "admin":
-        user_email = session_payload.get("email", "").lower()
-        rows = query.filter(CommercialProfile.email.ilike(user_email)).all()
-    else:
-        rows = query.all()
 
+    # Si es comercial (no admin) y tenemos su email, retornamos su perfil
+    if user_role and user_role != "admin" and user_email:
+        user_rows = query.filter(CommercialProfile.email.ilike(user_email)).all()
+        if user_rows:
+            return [CommercialProfilePublicDTO(**r.to_public_dict()) for r in user_rows]
+
+    # Para administradores o usuarios generales
+    rows = query.all()
     return [CommercialProfilePublicDTO(**r.to_public_dict()) for r in rows]
 
 # ==============================================================================

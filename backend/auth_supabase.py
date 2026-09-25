@@ -167,7 +167,7 @@ async def get_current_user(
     """
     Dependencia FastAPI que extrae y valida la identidad del usuario activo.
     Soporta header 'Authorization: Bearer <token>' y cookie 'admin_session'.
-    Consulta autoritativamente la base de datos (public.profiles) en tiempo real,
+    Consulta autoritativamente la base de datos (public.profiles en Supabase o local_dev.db en SQLite) en tiempo real,
     sin confiar ciegamente en app_metadata del JWT para autorizaciones.
     """
     token = None
@@ -175,6 +175,10 @@ async def get_current_user(
         token = auth_creds.credentials
     elif "admin_session" in request.cookies:
         token = request.cookies.get("admin_session")
+    else:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
 
     if not token:
         raise HTTPException(
@@ -182,19 +186,76 @@ async def get_current_user(
             detail="No autenticado: se requiere token Bearer o sesión activa."
         )
 
-    payload = decode_supabase_jwt(token)
-    user_id = payload.get("sub")
+    # 1. Intentar decodificar como Supabase JWT
+    payload = None
+    is_supabase_token = False
+    try:
+        payload = decode_supabase_jwt(token)
+        is_supabase_token = True
+    except Exception:
+        # 2. Si no es Supabase JWT, intentar verificar como token de sesión HMAC local
+        from backend.db.auth import verify_session_token
+        session_payload = verify_session_token(token)
+        if not session_payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesión inválida o expirada. Por favor inicia sesión nuevamente."
+            )
+        payload = session_payload
+
+    user_id = payload.get("sub") or payload.get("id")
     email = (payload.get("email") or "").lower()
     jwt_app_meta = payload.get("app_metadata") or {}
     jwt_company_id = jwt_app_meta.get("company_id")
+    jwt_role = jwt_app_meta.get("role") or payload.get("role") or "commercial"
 
-    # Consulta autoritativa en public.profiles mediante cliente administrativo
-    admin_client = get_supabase_admin_client()
-    try:
-        res = admin_client.table("profiles").select("*").eq("id", user_id).single().execute()
-        profile = res.data
-    except Exception:
-        profile = None
+    profile = None
+    user_client = None
+
+    # Consulta autoritativa en public.profiles mediante cliente administrativo si es token Supabase
+    if is_supabase_token:
+        try:
+            admin_client = get_supabase_admin_client()
+            res = admin_client.table("profiles").select("*").eq("id", user_id).single().execute()
+            if res.data:
+                profile = res.data
+        except Exception:
+            profile = None
+
+        try:
+            user_client = get_supabase_user_client(token)
+        except Exception:
+            user_client = None
+
+    # Fallback autoritativo a SQLite (backend/data/local_dev.db) si no está en Supabase profiles o es sesión local
+    if not profile:
+        from backend.db.session import SessionLocal
+        from backend.db.models import CommercialProfile
+        db_session = SessionLocal()
+        try:
+            query = db_session.query(CommercialProfile).filter(CommercialProfile.is_active == True)
+            local_prof = None
+            if user_id:
+                local_prof = query.filter(CommercialProfile.id == str(user_id)).first()
+            if not local_prof and email:
+                local_prof = query.filter(CommercialProfile.email.ilike(email)).first()
+
+            if local_prof:
+                profile = {
+                    "id": str(local_prof.id),
+                    "email": local_prof.email,
+                    "company_id": str(jwt_company_id) if jwt_company_id else "local_company",
+                    "role": local_prof.role or jwt_role,
+                    "nombre": local_prof.nombre or "",
+                    "apellido": local_prof.apellido or "",
+                    "display_name": local_prof.profile_name or f"{local_prof.nombre or ''} {local_prof.apellido or ''}".strip() or local_prof.email,
+                    "cargo": local_prof.cargo or "Comercial",
+                    "celular": local_prof.celular or "",
+                    "tipo_documento": local_prof.tipo_documento or "CC",
+                    "is_active": local_prof.is_active,
+                }
+        finally:
+            db_session.close()
 
     if not profile:
         raise HTTPException(
@@ -208,14 +269,12 @@ async def get_current_user(
             detail="Acceso denegado: cuenta de usuario inactiva o suspendida."
         )
 
-    user_client = get_supabase_user_client(token)
-
     return {
-        "id": user_id,
-        "email": email,
-        "company_id": str(profile.get("company_id")),
+        "id": str(profile.get("id") or user_id),
+        "email": profile.get("email") or email,
+        "company_id": str(profile.get("company_id") or "local_company"),
         "jwt_company_id": str(jwt_company_id) if jwt_company_id else None,
-        "role": profile.get("role", "commercial"),
+        "role": profile.get("role", jwt_role),
         "nombre": profile.get("nombre", ""),
         "apellido": profile.get("apellido", ""),
         "display_name": profile.get("display_name", f"{profile.get('nombre', '')} {profile.get('apellido', '')}".strip()),

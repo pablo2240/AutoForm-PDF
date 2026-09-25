@@ -39,11 +39,17 @@ export const CommercialProfileSelector: React.FC<CommercialProfileSelectorProps>
             ⚖️ Sin comercial (Solo Rep. Legal)
           </option>
           <optgroup label="Perfiles Comerciales">
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                👤 {p.profile_name} ({p.cargo || 'Comercial'})
+            {profiles.length === 0 ? (
+              <option value="" disabled>
+                (No hay perfiles disponibles)
               </option>
-            ))}
+            ) : (
+              profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  👤 {p.profile_name} ({p.cargo || 'Comercial'})
+                </option>
+              ))
+            )}
           </optgroup>
         </select>
         {isUnselected && (
