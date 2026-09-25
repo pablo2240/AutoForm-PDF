@@ -191,6 +191,61 @@ body {
   color: #f8fafc;
 }
 
+/* Single-file Slot Controls */
+.single-file-slot-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.single-file-slot-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(248, 177, 38, 0.25);
+  border-radius: 6px;
+  padding: 4px 8px;
+  max-width: 280px;
+}
+
+.single-file-name {
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+}
+
+.single-file-badge {
+  background: rgba(248, 177, 38, 0.15);
+  color: #f8b126;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.single-file-empty-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px dashed #334155;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.single-file-empty-label {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 400;
+  font-style: italic;
+}
+
 .pagination-group {
   display: flex;
   align-items: center;

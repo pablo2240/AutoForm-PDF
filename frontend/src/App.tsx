@@ -297,8 +297,19 @@ export const App: React.FC = () => {
         setEmployerProfiles(profiles || []);
         setGlobalSignature(sig || null);
 
-        if (tplList.length > 0) {
-          setSelectedTemplate(tplList[0].id);
+        // Selección de ranura única persistente:
+        // Prioridad 1: ID guardado en localStorage si coincide con la lista activa
+        // Prioridad 2: Primer/único documento retornado por el backend
+        const savedActiveId = localStorage.getItem('autoform_active_template_id');
+        const activeTpl = (savedActiveId && tplList.find((t) => t.id === savedActiveId)) || (tplList.length > 0 ? tplList[0] : null);
+        if (activeTpl) {
+          setSelectedTemplate(activeTpl.id);
+          localStorage.setItem('autoform_active_template_id', activeTpl.id);
+        } else {
+          setSelectedTemplate('');
+          setPages([]);
+          setMappings([]);
+          localStorage.removeItem('autoform_active_template_id');
         }
 
         await loadCommercialProfiles();
@@ -389,17 +400,25 @@ export const App: React.FC = () => {
   const handleUploadTemplate = async (file: File, isTemp: boolean = false) => {
     try {
       setIsLoading(true);
+      // Limpiar estado previo antes de recibir el nuevo documento en el slot único
+      setSelectedField(null);
+      setSelectedBoxId(null);
+      setActiveImage(null);
+      setMappings([]);
+      setCurrentPage(0);
+
       const res = await uploadPdfTemplate(file);
       setIsTemporarySession(isTemp);
       
       const updatedTemplates = await fetchTemplates();
       setTemplates(updatedTemplates);
       setSelectedTemplate(res.template_id);
+      localStorage.setItem('autoform_active_template_id', res.template_id);
 
       if (isTemp) {
         showToast(`⚡ Llenado Rápido: "${res.filename}" listo para estampar`, 'info');
       } else {
-        showToast(`Plantilla "${res.filename}" subida exitosamente`, 'success');
+        showToast(`Documento "${res.filename}" activo en el espacio de trabajo`, 'success');
       }
     } catch (err: any) {
       showToast(`Error al subir archivo: ${err.message}`, 'error');
@@ -418,14 +437,16 @@ export const App: React.FC = () => {
       if (selectedTemplate === templateId) {
         if (remaining.length > 0) {
           setSelectedTemplate(remaining[0].id);
+          localStorage.setItem('autoform_active_template_id', remaining[0].id);
         } else {
           setSelectedTemplate('');
           setPages([]);
           setMappings([]);
+          localStorage.removeItem('autoform_active_template_id');
         }
       }
       setIsTemporarySession(false);
-      showToast('Plantilla y mapeos eliminados exitosamente', 'info');
+      showToast('Documento y mapeos eliminados exitosamente', 'info');
     } catch (err: any) {
       showToast(`Error al eliminar plantilla: ${err.message}`, 'error');
     } finally {

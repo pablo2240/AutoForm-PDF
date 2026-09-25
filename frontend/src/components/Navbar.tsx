@@ -48,7 +48,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   templates,
   selectedTemplate,
-  onSelectTemplate,
+  onSelectTemplate: _onSelectTemplate,
   onUploadTemplate,
   onDeleteTemplate,
   currentPage,
@@ -73,7 +73,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const tempFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, isTemp: boolean = false) => {
     if (e.target.files && e.target.files[0]) {
@@ -82,9 +81,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (e.target) e.target.value = '';
   };
 
+  const currentTemplateObj = templates.find((t) => t.id === selectedTemplate) || (templates.length > 0 ? templates[0] : null);
+
   const handleDeleteCurrentTemplate = () => {
-    if (!selectedTemplate) return;
-    onDeleteTemplate(selectedTemplate);
+    const targetId = selectedTemplate || (currentTemplateObj ? currentTemplateObj.id : '');
+    if (!targetId) return;
+    onDeleteTemplate(targetId);
   };
 
   const getUserInitials = (user?: AdminSessionUser | null) => {
@@ -128,37 +130,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       <div className="navbar-controls">
-        {/* Template Selector & Action Buttons */}
-        <div className="control-group">
-          <FileText className="control-icon" size={15} />
-          <select 
-            className="select-input"
-            value={selectedTemplate} 
-            onChange={(e) => onSelectTemplate(e.target.value)}
-          >
-            {templates.length === 0 && (
-              <option value="" disabled>No hay plantillas disponibles</option>
-            )}
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.filename} ({t.size_kb} KB)
-              </option>
-            ))}
-          </select>
-
-          {/* Delete Template Button */}
-          {selectedTemplate && (
-            <button
-              type="button"
-              className="btn btn-icon-only btn-delete-template"
-              onClick={handleDeleteCurrentTemplate}
-              title={`Eliminar plantilla "${templates.find(t => t.id === selectedTemplate)?.filename || selectedTemplate}"`}
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
-
-          {/* Hidden Regular Upload */}
+        {/* Single-file Slot: Mantiene un único documento activo con reemplazo atómico */}
+        <div className="control-group single-file-slot-group">
+          {/* Hidden File Input */}
           <input 
             type="file" 
             ref={fileInputRef} 
@@ -167,31 +141,51 @@ export const Navbar: React.FC<NavbarProps> = ({
             onChange={(e) => handleFileChange(e, false)}
           />
 
-          {/* Hidden Quick/Temporary Upload */}
-          <input 
-            type="file" 
-            ref={tempFileInputRef} 
-            style={{ display: 'none' }} 
-            accept="application/pdf" 
-            onChange={(e) => handleFileChange(e, true)}
-          />
+          {currentTemplateObj ? (
+            <div className="single-file-slot-pill" title={`Documento activo: ${currentTemplateObj.filename}`}>
+              <FileText className="control-icon text-amber" size={15} />
+              <span className="single-file-name" title={currentTemplateObj.filename}>
+                {currentTemplateObj.filename}
+              </span>
+              <span className="single-file-badge">
+                {currentTemplateObj.size_kb} KB
+              </span>
+              <button
+                type="button"
+                className="btn btn-icon-only btn-delete-template"
+                onClick={handleDeleteCurrentTemplate}
+                title={`Eliminar "${currentTemplateObj.filename}"`}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ) : (
+            <div className="single-file-empty-pill">
+              <FileText className="control-icon text-muted" size={15} />
+              <span className="single-file-empty-label">Sin documento activo</span>
+            </div>
+          )}
 
           <button 
             className="btn btn-secondary btn-icon"
             onClick={() => fileInputRef.current?.click()}
-            title="Subir PDF como plantilla permanente"
+            title={currentTemplateObj ? "Subir nuevo PDF y reemplazar el actual automáticamente" : "Subir archivo PDF"}
           >
             <Upload size={14} />
-            <span className="btn-label-responsive">Subir PDF</span>
+            <span className="btn-label-responsive">
+              {currentTemplateObj ? "Reemplazar PDF" : "Subir PDF"}
+            </span>
           </button>
 
           <button 
             className="btn btn-secondary btn-icon btn-ai-fill"
             onClick={onAiFill}
-            disabled={isAiFilling || !activeCommercialProfileId}
-            title={!activeCommercialProfileId 
-              ? "⚠️ Debes seleccionar un responsable comercial o 'Solo Representante Legal' antes de autollenar con IA" 
-              : "Autollenar inteligentemente este PDF con IA (Soporta PDF planos y AcroForms con datos de empresa, contacto y banco)"}
+            disabled={isAiFilling || !currentTemplateObj || !activeCommercialProfileId}
+            title={!currentTemplateObj
+              ? "⚠️ Sube un PDF antes de autollenar con IA"
+              : (!activeCommercialProfileId
+                  ? "⚠️ Debes seleccionar un responsable comercial o 'Solo Representante Legal' antes de autollenar con IA"
+                  : "Autollenar inteligentemente este PDF con IA (Soporta PDF planos y AcroForms con datos de empresa, contacto y banco)")}
           >
             <Sparkles size={13} className={`sparkles-icon ${isAiFilling ? 'spinning-sparkle' : ''}`} />
             <span className="ai-fill-text-full">{isAiFilling ? 'Autollenando IA...' : 'Autollenado IA'}</span>

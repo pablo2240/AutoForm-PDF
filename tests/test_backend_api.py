@@ -135,6 +135,50 @@ def test_ai_fill_endpoint_validation():
     print("[SUCCESS] AI Fill endpoint validation test passed!")
 
 
+def test_single_file_slot_atomic_replacement():
+    """Valida que subir un nuevo PDF reemplace atómicamente el documento previo del slot único."""
+    pdf_bytes = (
+        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj "
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj "
+        b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]>>endobj\n"
+        b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n"
+        b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n160\n%%EOF"
+    )
+
+    # 1. Subir primer archivo en el slot
+    filename_1 = "test_slot_document_a.pdf"
+    res1 = client.post("/api/upload-pdf", files={"file": (filename_1, pdf_bytes, "application/pdf")})
+    assert res1.status_code == 200
+    tpl1_id = res1.json()["template_id"]
+
+    list1 = client.get("/api/templates").json()
+    assert list1["active_slot"] is not None
+    assert list1["active_slot"]["template_id"] == tpl1_id
+    assert len(list1["templates"]) == 1
+    assert list1["templates"][0]["id"] == tpl1_id
+
+    # 2. Subir segundo archivo: debe sobreescribir y eliminar físicamente el anterior
+    filename_2 = "test_slot_document_b.pdf"
+    res2 = client.post("/api/upload-pdf", files={"file": (filename_2, pdf_bytes, "application/pdf")})
+    assert res2.status_code == 200
+    tpl2_id = res2.json()["template_id"]
+
+    path_1 = os.path.join(INPUT_DIR, filename_1)
+    assert not os.path.exists(path_1), f"El archivo previo {filename_1} no fue eliminado de input/"
+
+    list2 = client.get("/api/templates").json()
+    assert list2["active_slot"] is not None
+    assert list2["active_slot"]["template_id"] == tpl2_id
+    assert len(list2["templates"]) == 1
+    assert list2["templates"][0]["id"] == tpl2_id
+
+    # 3. Eliminar el archivo activo limpia el slot
+    del_res = client.delete(f"/api/templates/{tpl2_id}")
+    assert del_res.status_code == 200
+    path_2 = os.path.join(INPUT_DIR, filename_2)
+    assert not os.path.exists(path_2)
+
+
 if __name__ == "__main__":
     test_root()
     test_company_data()
@@ -143,4 +187,5 @@ if __name__ == "__main__":
     test_save_mapping_and_generate_with_styles()
     test_delete_template()
     test_ai_fill_endpoint_validation()
-    print("[SUCCESS] All backend API integration tests passed with Autollenado IA endpoint support!")
+    test_single_file_slot_atomic_replacement()
+    print("[SUCCESS] All backend API integration tests passed with Single-file Slot support!")

@@ -5,6 +5,7 @@ import shutil
 import re
 import time
 import uuid
+from datetime import datetime
 from collections import defaultdict
 from sqlalchemy import func
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response, Depends, status
@@ -106,6 +107,46 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(SIGNATURES_DIR, exist_ok=True)
+
+ACTIVE_SLOT_FILE = os.path.join(DATA_DIR, "active_slot.json")
+
+def get_active_slot() -> Optional[dict]:
+    """Obtiene el slot del archivo activo actualmente si existe físicamente en INPUT_DIR."""
+    if os.path.exists(ACTIVE_SLOT_FILE):
+        try:
+            with open(ACTIVE_SLOT_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                tid = data.get("template_id")
+                fn = data.get("filename")
+                pdf_path = os.path.join(INPUT_DIR, f"{tid}.pdf") if tid else None
+                if not pdf_path or not os.path.exists(pdf_path):
+                    if fn:
+                        pdf_path = os.path.join(INPUT_DIR, fn)
+                if pdf_path and os.path.exists(pdf_path):
+                    return data
+        except Exception as e:
+            print(f"[WARN] Error reading active_slot.json: {e}")
+    return None
+
+def set_active_slot(template_id: str, filename: str):
+    """Establece de forma atómica el archivo activo en el slot único."""
+    try:
+        with open(ACTIVE_SLOT_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "template_id": template_id,
+                "filename": filename,
+                "updated_at": datetime.now().isoformat()
+            }, f, indent=2)
+    except Exception as e:
+        print(f"[WARN] Error saving active_slot.json: {e}")
+
+def clear_active_slot():
+    """Limpia el slot activo eliminando active_slot.json."""
+    if os.path.exists(ACTIVE_SLOT_FILE):
+        try:
+            os.remove(ACTIVE_SLOT_FILE)
+        except Exception:
+            pass
 
 class SignaturePayload(BaseModel):
     image_base64: str
@@ -1236,7 +1277,26 @@ def delete_commercial_profile(
 
 @app.get("/api/templates")
 def list_templates():
+    active_slot = get_active_slot()
     templates = []
+
+    # Si hay un slot activo configurado y su PDF existe, se retorna únicamente este documento
+    if active_slot:
+        tid = active_slot.get("template_id")
+        fn = active_slot.get("filename", f"{tid}.pdf")
+        pdf_path = os.path.join(INPUT_DIR, f"{tid}.pdf")
+        if not os.path.exists(pdf_path):
+            pdf_path = os.path.join(INPUT_DIR, fn)
+        if os.path.exists(pdf_path):
+            size_kb = round(os.path.getsize(pdf_path) / 1024, 1)
+            templates.append({
+                "id": tid,
+                "filename": fn,
+                "size_kb": size_kb
+            })
+            return {"templates": templates, "active_slot": active_slot}
+
+    # Fallback si no hay slot activo: devolver archivos disponibles en input/
     if os.path.exists(INPUT_DIR):
         for f in os.listdir(INPUT_DIR):
             if f.lower().endswith(".pdf"):
@@ -1247,19 +1307,50 @@ def list_templates():
                     "filename": f,
                     "size_kb": size_kb
                 })
-    return {"templates": templates}
+    return {"templates": templates, "active_slot": None}
 
 @app.post("/api/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se admiten archivos PDF")
+
+    new_template_id = os.path.splitext(file.filename)[0]
+
+    # Gestión de ranura única (Single-file Slot):
+    # 1. Limpieza automática del documento previo del slot para evitar acumulación
+    prev_slot = get_active_slot()
+    if prev_slot:
+        prev_id = prev_slot.get("template_id")
+        if prev_id and prev_id != new_template_id:
+            # Eliminar PDF previo de input/
+            for candidate in [
+                os.path.join(INPUT_DIR, f"{prev_id}.pdf"),
+                os.path.join(INPUT_DIR, prev_slot.get("filename", ""))
+            ]:
+                if os.path.exists(candidate):
+                    try:
+                        os.remove(candidate)
+                    except Exception as e:
+                        print(f"[WARN] Error al eliminar PDF previo del slot {candidate}: {e}")
+            # Eliminar mapping previo de backend/data/
+            prev_map = os.path.join(DATA_DIR, f"{prev_id}_mapping.json")
+            if os.path.exists(prev_map):
+                try:
+                    os.remove(prev_map)
+                except Exception as e:
+                    print(f"[WARN] Error al eliminar mapeo previo {prev_map}: {e}")
+
+    # 2. Guardar el nuevo archivo en input/
     dest_path = os.path.join(INPUT_DIR, file.filename)
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    template_id = os.path.splitext(file.filename)[0]
+
+    # 3. Registrar el nuevo archivo como el slot activo
+    set_active_slot(new_template_id, file.filename)
+
     return {
         "status": "success",
-        "template_id": template_id,
+        "template_id": new_template_id,
         "filename": file.filename
     }
 
@@ -1267,11 +1358,19 @@ async def upload_pdf(file: UploadFile = File(...)):
 def delete_template(template_id: str):
     deleted_files = []
 
-    # Remove PDF candidates from input/
+    # Si la plantilla a eliminar es la ranura activa, limpiar el slot
+    active_slot = get_active_slot()
+    if active_slot and active_slot.get("template_id") == template_id:
+        clear_active_slot()
+
+    # Eliminar candidatos de PDF en input/
     pdf_candidates = [
         os.path.join(INPUT_DIR, f"{template_id}.pdf"),
         os.path.join(INPUT_DIR, template_id)
     ]
+    if active_slot and active_slot.get("filename"):
+        pdf_candidates.append(os.path.join(INPUT_DIR, active_slot["filename"]))
+
     for p in pdf_candidates:
         if os.path.exists(p):
             try:
@@ -1280,7 +1379,7 @@ def delete_template(template_id: str):
             except Exception as e:
                 print(f"[ERROR] Removing PDF {p}: {e}")
 
-    # Remove mapping JSON from backend/data/
+    # Eliminar JSON de mapeo en backend/data/
     map_path = os.path.join(DATA_DIR, f"{template_id}_mapping.json")
     if os.path.exists(map_path):
         try:
