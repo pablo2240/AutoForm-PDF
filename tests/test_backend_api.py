@@ -89,13 +89,19 @@ def test_save_mapping_and_generate_with_styles():
                 f.write(original_mapping)
 
 def test_delete_template():
-    # 1. Create a dummy test pdf in input/
+    # 1. Upload a dummy test pdf in the single-slot
     dummy_id = "test_dummy_temp_tpl"
-    dummy_pdf = os.path.join(INPUT_DIR, f"{dummy_id}.pdf")
-    with open(dummy_pdf, "wb") as f:
-        # Create minimal PDF bytes
-        f.write(b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 612 792]>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n160\n%%EOF")
+    pdf_bytes = (
+        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj "
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj "
+        b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]>>endobj\n"
+        b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n"
+        b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n160\n%%EOF"
+    )
+    up_res = client.post("/api/upload-pdf", files={"file": (f"{dummy_id}.pdf", pdf_bytes, "application/pdf")})
+    assert up_res.status_code == 200
 
+    dummy_pdf = os.path.join(INPUT_DIR, f"{dummy_id}.pdf")
     dummy_mapping = os.path.join(DATA_DIR, f"{dummy_id}_mapping.json")
     with open(dummy_mapping, "w", encoding="utf-8") as f:
         json.dump({"template_id": dummy_id, "mappings": []}, f)
@@ -112,7 +118,7 @@ def test_delete_template():
     assert not os.path.exists(dummy_mapping)
     print("[SUCCESS] Template deletion test passed!")
 
-def test_ai_fill_endpoint_validation():
+def test_ai_fill_endpoint_validation(monkeypatch):
     # 1. Non-existent template should return 404
     res = client.post("/api/ai-fill", json={
         "template_id": "non_existent_template_999",
@@ -120,9 +126,22 @@ def test_ai_fill_endpoint_validation():
     })
     assert res.status_code == 404
 
-    # 2. Existing template route check
+    # 2. Mock PDFAgent.fill_pdf to avoid slow external API calls during integration tests
+    from backend.pdf_filling_agent.agent import PDFAgent
+    from backend.main import OUTPUT_DIR
+    mock_out = os.path.join(OUTPUT_DIR, "test_mock_filled.pdf")
+    with open(mock_out, "wb") as f:
+        f.write(b"%PDF-1.4\n%%EOF")
+    monkeypatch.setattr(PDFAgent, "fill_pdf", lambda self, *args, **kwargs: mock_out)
+
     templates_res = client.get("/api/templates")
     templates = templates_res.json().get("templates", [])
+    if not templates:
+        pdf_bytes = b"%PDF-1.4\n%%EOF"
+        client.post("/api/upload-pdf", files={"file": ("sample_test_doc.pdf", pdf_bytes, "application/pdf")})
+        templates_res = client.get("/api/templates")
+        templates = templates_res.json().get("templates", [])
+
     assert len(templates) > 0
     tpl_id = templates[0]["id"]
 
@@ -130,7 +149,6 @@ def test_ai_fill_endpoint_validation():
         "template_id": tpl_id,
         "commercial_profile_id": "legal_rep_only"
     })
-    # If API key is present, returns 200; if missing/invalid credit, returns 500 with error detail
     assert res2.status_code in [200, 500]
     print("[SUCCESS] AI Fill endpoint validation test passed!")
 

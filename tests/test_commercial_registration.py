@@ -25,12 +25,38 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_teardown():
-    """Reset rate limiters and clean state before/after each test."""
+    """Reset rate limiters, mock Supabase admin by default, and clean test rows after each test."""
     registration_rate_limiter.reset()
     check_email_rate_limiter.reset()
-    yield
+
+    mock_sb = MagicMock()
+    mock_sb.auth.admin.create_user.side_effect = lambda payload: MagicMock(user=MagicMock(id=str(uuid.uuid4())))
+    mock_comp = MagicMock()
+    mock_comp.data = [{"id": str(uuid.uuid4())}]
+    mock_sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = mock_comp
+
+    with patch("backend.main.get_supabase_admin_client", return_value=mock_sb):
+        yield
+
     registration_rate_limiter.reset()
     check_email_rate_limiter.reset()
+
+    # Limpieza automática de registros de prueba en la base de datos
+    db = SessionLocal()
+    try:
+        db.query(CommercialProfile).filter(
+            CommercialProfile.email.notin_([
+                "guillermo.canon@iaclatam.com",
+                "kelly.delgado@iaclatam.com",
+                "Kelly.Delgado@iaclatam.com",
+                "pablo.reyes@iaclatam.com"
+            ])
+        ).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 def _unique_email(prefix: str = "comercial") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}@iaclatam.com"
