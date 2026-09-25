@@ -16,7 +16,11 @@ import {
   Briefcase,
   Phone,
   CreditCard,
-  MapPin
+  MapPin,
+  Sparkles,
+  ShieldCheck,
+  Layers,
+  FileCheck2
 } from 'lucide-react';
 import { adminLogin, registerCommercial, checkEmailAvailability } from '../../api';
 import { supabase } from '../../supabaseClient';
@@ -89,17 +93,22 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
   };
 
   const handleEmailBlur = async () => {
-    const vEmail = validateCorporateEmail(regEmail);
+    const emailClean = regEmail.trim().toLowerCase();
+    if (!emailClean) {
+      setEmailAvailable(null);
+      return;
+    }
+    const vEmail = validateCorporateEmail(emailClean);
     if (!vEmail.isValid) {
       setEmailAvailable(null);
       return;
     }
     try {
       setEmailChecking(true);
-      const res = await checkEmailAvailability(regEmail.trim().toLowerCase());
+      const res = await checkEmailAvailability(emailClean);
       setEmailAvailable(res.available);
       if (!res.available) {
-        setRegError(`El correo ${regEmail.trim().toLowerCase()} ya se encuentra registrado.`);
+        setRegError(`El correo ${emailClean} ya se encuentra registrado.`);
       } else {
         if (regError?.includes('ya se encuentra registrado')) {
           setRegError(null);
@@ -135,7 +144,16 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
     const vCargo = validateCargo(regCargo);
     if (!vCargo.isValid) { setRegError(vCargo.error!); return; }
 
-    const vEmail = validateCorporateEmail(regEmail);
+    const emailClean = regEmail.trim().toLowerCase();
+    if (!emailClean) {
+      setRegError('El correo corporativo es obligatorio.');
+      return;
+    }
+    if (!emailClean.includes('@')) {
+      setRegError('Por favor selecciona o incluye el dominio corporativo (@iaclatam.com o @iac.com.co).');
+      return;
+    }
+    const vEmail = validateCorporateEmail(emailClean);
     if (!vEmail.isValid) { setRegError(vEmail.error!); return; }
 
     const vPass = validatePassword(regPassword);
@@ -244,27 +262,69 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
               </div>
             </div>
 
-            <div className="sample-profile-chip">
-              <div className="sample-chip-header">
-                <span className="chip-indicator" />
-                <span className="chip-title">Entorno Autoritativo Activo</span>
-              </div>
-              <div className="sample-chip-body">
-                <div className="sample-field-row">
-                  <span className="sample-field-label">Razón Social</span>
-                  <span className="sample-field-val">Ingeniería Asistida Por Computador S.A.S</span>
+            <div className="showcase-doc-animation">
+              <div className="doc-anim-glow" />
+              <div className="doc-anim-card">
+                <div className="doc-anim-scanner" />
+
+                <div className="doc-anim-header">
+                  <div className="doc-anim-badge">
+                    <FileCheck2 size={14} className="doc-anim-icon" />
+                    <span>Motor de Mapeo Inteligente</span>
+                  </div>
+                  <div className="doc-anim-status-pulse">
+                    <span className="pulse-dot" />
+                    <span className="pulse-text">En Vivo</span>
+                  </div>
                 </div>
-                <div className="sample-field-row">
-                  <span className="sample-field-label">NIT</span>
-                  <span className="sample-field-val">811.004.721-2</span>
+
+                <div className="doc-anim-body">
+                  <div className="anim-field-row">
+                    <div className="anim-field-meta">
+                      <span className="anim-field-tag">DOC</span>
+                      <span className="anim-field-name">AcroForms & Flat Overlays</span>
+                    </div>
+                    <div className="anim-field-badge badge-gold">
+                      <Sparkles size={11} />
+                      <span>Auto-Detección</span>
+                    </div>
+                  </div>
+
+                  <div className="anim-field-row">
+                    <div className="anim-field-meta">
+                      <span className="anim-field-tag">IA</span>
+                      <span className="anim-field-name">Mapeo Semántico Vectorial</span>
+                    </div>
+                    <div className="anim-field-badge badge-emerald">
+                      <ShieldCheck size={11} />
+                      <span>99.8% Precisión</span>
+                    </div>
+                  </div>
+
+                  <div className="anim-field-row">
+                    <div className="anim-field-meta">
+                      <span className="anim-field-tag">PDF</span>
+                      <span className="anim-field-name">Superposición Visual 1:1</span>
+                    </div>
+                    <div className="anim-field-badge badge-cyan">
+                      <Layers size={11} />
+                      <span>Fidelidad Total</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="sample-field-row">
-                  <span className="sample-field-label">Representante Legal</span>
-                  <span className="sample-field-val">Guillermo Humberto Cañón Sarria</span>
-                </div>
-                <div className="sample-field-row">
-                  <span className="sample-field-label">Cédula de Contacto</span>
-                  <span className="sample-field-val masked">CC ••••••••</span>
+
+                <div className="doc-anim-footer">
+                  <div className="doc-anim-pipeline">
+                    <span className="pipeline-step">Datos</span>
+                    <span className="pipeline-arrow">→</span>
+                    <span className="pipeline-step">Mapeo</span>
+                    <span className="pipeline-arrow">→</span>
+                    <span className="pipeline-step highlight">PDF Final</span>
+                  </div>
+                  <div className="doc-anim-seal">
+                    <CheckCircle2 size={13} className="text-emerald" />
+                    <span>Certificado</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -340,7 +400,6 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                         type="email"
                         required
                         autoComplete="email"
-                        placeholder="ejemplo@iaclatam.com"
                         value={loginEmail}
                         onChange={(e) => setLoginEmail(e.target.value)}
                       />
@@ -544,7 +603,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
 
                   <div className="auth-field">
                     <div className="field-label-row">
-                      <label htmlFor="regEmail">Correo Corporativo (@iaclatam.com o @iac.com.co) *</label>
+                      <label htmlFor="regEmail">Correo Corporativo *</label>
                       {emailChecking && <span className="text-xs text-muted">Comprobando disponibilidad...</span>}
                       {emailAvailable === true && <span className="text-xs text-success font-medium">✓ Disponible</span>}
                       {emailAvailable === false && <span className="text-xs text-danger font-medium">✗ No disponible</span>}
@@ -556,7 +615,6 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                         type="email"
                         required
                         autoComplete="email"
-                        placeholder="tu.nombre@iaclatam.com"
                         value={regEmail}
                         onChange={(e) => {
                           setRegEmail(e.target.value);
@@ -681,7 +739,6 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                         type="email"
                         required
                         autoComplete="email"
-                        placeholder="nombre.apellido@iaclatam.com"
                         value={recoveryEmail}
                         onChange={(e) => setRecoveryEmail(e.target.value)}
                       />

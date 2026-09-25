@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Eye, EyeOff, CheckCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ArrowLeft, KeyRound } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import logoIac from '../../assets/logo_iac.png';
 import './AuthPortal.css';
@@ -18,33 +18,31 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({ onComplete
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const validatePassword = (pass: string): string | null => {
-    if (pass.length < 8) {
-      return 'La contraseña debe tener al menos 8 caracteres.';
-    }
-    if (!/[A-Z]/.test(pass)) {
-      return 'La contraseña debe contener al menos una letra mayúscula.';
-    }
-    if (!/[a-z]/.test(pass)) {
-      return 'La contraseña debe contener al menos una letra minúscula.';
-    }
-    if (!/[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pass)) {
-      return 'La contraseña debe contener al menos un número o carácter especial.';
-    }
-    return null;
-  };
+  // Live criteria validation
+  const hasMinLength = password.length >= 8;
+  const hasUpper = /[A-Z]/.test(password);
+  const hasLower = /[a-z]/.test(password);
+  const hasNumberOrSpecial = /[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password);
+  const passwordsMatch = password.length > 0 && confirmPassword.length > 0 && password === confirmPassword;
+  const isFormValid = hasMinLength && hasUpper && hasLower && hasNumberOrSpecial && passwordsMatch;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    const validationError = validatePassword(password);
-    if (validationError) {
-      setError(validationError);
+    if (!hasMinLength) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
       return;
     }
-
+    if (!hasUpper || !hasLower) {
+      setError('La contraseña debe contener al menos una letra mayúscula y una minúscula.');
+      return;
+    }
+    if (!hasNumberOrSpecial) {
+      setError('La contraseña debe contener al menos un número o símbolo.');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('Las contraseñas ingresadas no coinciden.');
       return;
@@ -65,10 +63,10 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({ onComplete
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
-      setSuccess('Tu contraseña ha sido actualizada exitosamente.');
+      setSuccess('Tu contraseña corporativa ha sido actualizada exitosamente.');
       setTimeout(() => {
         onComplete();
-      }, 2000);
+      }, 1800);
     } catch (err: any) {
       setError(err.message || 'Error al actualizar la contraseña. El enlace puede haber expirado.');
     } finally {
@@ -78,108 +76,143 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({ onComplete
 
   return (
     <div className="auth-portal-page">
-      <div className="auth-portal-layout" style={{ maxWidth: 500, margin: '0 auto' }}>
-        <main className="auth-form-column" style={{ width: '100%' }}>
-          <div className="auth-form-card">
-            <div className="auth-form-header">
-              <div className="auth-card-brand">
-                <img src={logoIac} alt="IAC Logo" className="auth-brand-logo-img" />
-                <span className="auth-brand-name">AutoForm PDF</span>
+      <div className="auth-portal-layout layout-single-card">
+        <main className="auth-form-column" style={{ padding: '36px 32px', maxHeight: 'none' }}>
+          <div className="auth-form-card" style={{ maxWidth: '100%' }}>
+
+            <div className="auth-view-header text-center">
+              <div className="reset-brand-badge">
+                <img src={logoIac} alt="IAC Latam" className="reset-brand-logo" />
+                <span className="reset-brand-title">AutoForm PDF</span>
               </div>
-              <h2 className="auth-form-title">Establecer Nueva Contraseña</h2>
-              <p className="auth-form-subtitle">
-                Ingresa y confirma tu nueva contraseña corporativa para acceder a la plataforma.
-              </p>
+              <div className="auth-view-header-badge badge-amber">
+                <KeyRound size={13} />
+                <span>Seguridad Corporativa</span>
+              </div>
+              <h3>Establecer Nueva Contraseña</h3>
+              <p>Crea tu nueva contraseña para acceder a la plataforma comercial.</p>
             </div>
 
             {error && (
-              <div className="auth-alert error" role="alert">
-                <AlertTriangle size={15} className="alert-icon" />
+              <div className="auth-alert alert-error" role="alert">
+                <AlertCircle size={16} />
                 <span>{error}</span>
               </div>
             )}
 
             {success && (
-              <div className="auth-alert success" role="alert">
-                <CheckCircle size={15} className="alert-icon" />
+              <div className="auth-alert alert-success" role="alert">
+                <CheckCircle2 size={16} />
                 <span>{success}</span>
               </div>
             )}
 
             {!success && (
-              <form onSubmit={handleSubmit} className="auth-form-body">
-                <div className="auth-field-group">
-                  <label className="auth-field-label">Nueva Contraseña</label>
+              <form onSubmit={handleSubmit} className="auth-form">
+                <div className="auth-field">
+                  <label htmlFor="resetPassword">Nueva Contraseña</label>
                   <div className="auth-input-wrapper">
-                    <Lock size={15} className="field-icon" />
+                    <Lock size={17} className="auth-input-icon" />
                     <input
+                      id="resetPassword"
                       type={showPassword ? 'text' : 'password'}
-                      className="auth-text-input"
-                      placeholder="Mínimo 8 caracteres"
+                      required
+                      autoComplete="new-password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      autoComplete="new-password"
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (error) setError(null);
+                      }}
                     />
                     <button
                       type="button"
-                      className="field-toggle-btn"
+                      className="btn-toggle-eye"
                       onClick={() => setShowPassword(!showPassword)}
+                      title={showPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
                     >
-                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
 
-                <div className="auth-field-group">
-                  <label className="auth-field-label">Confirmar Contraseña</label>
+                <div className="auth-field">
+                  <label htmlFor="resetConfirmPassword">Confirmar Contraseña</label>
                   <div className="auth-input-wrapper">
-                    <Lock size={15} className="field-icon" />
+                    <Lock size={17} className="auth-input-icon" />
                     <input
+                      id="resetConfirmPassword"
                       type={showConfirmPassword ? 'text' : 'password'}
-                      className="auth-text-input"
-                      placeholder="Repite tu contraseña"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
                       required
                       autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        if (error) setError(null);
+                      }}
                     />
                     <button
                       type="button"
-                      className="field-toggle-btn"
+                      className="btn-toggle-eye"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      title={showConfirmPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
                     >
-                      {showConfirmPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
 
-                <div className="password-hints" style={{ fontSize: '0.8rem', color: '#64748b', margin: '8px 0 16px' }}>
-                  <p>La contraseña debe contener:</p>
-                  <ul style={{ paddingLeft: '1.2rem', margin: '4px 0' }}>
-                    <li>Mínimo 8 caracteres</li>
-                    <li>Al menos una letra mayúscula y una minúscula</li>
-                    <li>Al menos un número o símbolo</li>
-                  </ul>
+                {/* Interactive Dynamic Checklist */}
+                <div className="password-requirements-card">
+                  <span className="req-title">Requisitos de seguridad:</span>
+                  <div className="req-grid">
+                    <div className={`req-item ${hasMinLength ? 'met' : ''}`}>
+                      <CheckCircle2 size={13} className="req-icon" />
+                      <span>Mínimo 8 caracteres</span>
+                    </div>
+                    <div className={`req-item ${hasUpper && hasLower ? 'met' : ''}`}>
+                      <CheckCircle2 size={13} className="req-icon" />
+                      <span>Mayúscula y minúscula</span>
+                    </div>
+                    <div className={`req-item ${hasNumberOrSpecial ? 'met' : ''}`}>
+                      <CheckCircle2 size={13} className="req-icon" />
+                      <span>Número o símbolo</span>
+                    </div>
+                    <div className={`req-item ${passwordsMatch ? 'met' : ''}`}>
+                      <CheckCircle2 size={13} className="req-icon" />
+                      <span>Contraseñas coinciden</span>
+                    </div>
+                  </div>
                 </div>
 
                 <button
                   type="submit"
-                  className="auth-submit-btn primary"
-                  disabled={isLoading}
+                  className="btn btn-auth-primary"
+                  disabled={isLoading || !isFormValid}
                 >
-                  {isLoading ? 'Actualizando contraseña...' : 'Actualizar Contraseña'}
+                  {isLoading ? (
+                    <>
+                      <span className="auth-spinner" />
+                      <span>Actualizando credenciales...</span>
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound size={17} />
+                      <span>Actualizar Contraseña y Acceder</span>
+                    </>
+                  )}
                 </button>
 
                 {onCancel && (
-                  <button
-                    type="button"
-                    className="auth-link-button center"
-                    onClick={onCancel}
-                    style={{ marginTop: 12 }}
-                  >
-                    <ArrowLeft size={14} /> Volver al Inicio de Sesión
-                  </button>
+                  <div className="reset-back-wrapper">
+                    <button
+                      type="button"
+                      className="auth-back-link"
+                      onClick={onCancel}
+                    >
+                      <ArrowLeft size={15} />
+                      <span>Volver al Inicio de Sesión</span>
+                    </button>
+                  </div>
                 )}
               </form>
             )}
