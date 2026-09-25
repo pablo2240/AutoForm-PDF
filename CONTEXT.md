@@ -55,8 +55,9 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **`financiero` Category**: Dedicated domain category separating corporate statutory balance sheets from operational payment accounts (`banco`).
 - **Accounting Invariant**: Corporate balance sheet rule enforced in canonical data: $\text{Activos} - \text{Pasivos} = \text{Patrimonio}$.
 
-### Commercial Profiles & Secure Relational Persistence (ADR-0008)
-- **`CommercialProfile` (Responsable Comercial)**: Designated corporate sales representative or contact liaison. Contains `profile_name`, `nombre`, `apellido`, `cargo`, `email`, `celular`, and optional sensitive identity `documento_identidad`.
+### Commercial Profiles & Secure Relational Persistence (ADR-0008, ADR-0009)
+- **`CommercialProfile` (Responsable Comercial)**: Designated corporate sales representative or contact liaison. Contains `profile_name`, `nombre`, `apellido`, `cargo`, `email`, `celular`, `ciudad`, and optional sensitive identity `documento_identidad`.
+- **Direct Commercial Self-Registration (Auto-Registro Comercial Inmediato)**: Self-service onboarding mechanism allowing commercial advisors with corporate email (`@iaclatam.com` or `@iac.com.co`) to register with strict validation rules (name/apellido >= 4 chars, cargo >= 5 chars, celular 10 digits, cedula 8-11 digits, ciudad >= 3 chars), receiving immediate active status (`is_active: true`, role: `commercial`) and direct session issuance without pending administrative approval queues.
 - **Three-Zone Form Demarcation**: Strict separation of target form domains:
   1. *Zona Legal / Corporativa / Declaraciones*: Strictly Legal Representative (`Guillermo Cañón Sarria`).
   2. *Zona Bancaria / Financiera*: Corporate accounts & balance sheets.

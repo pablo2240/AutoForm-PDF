@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --test tests/apiConfig.test.ts",
+    "test": "node --test tests/apiConfig.test.ts tests/registrationValidation.test.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },

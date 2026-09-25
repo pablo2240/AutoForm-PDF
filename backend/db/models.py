@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime
+from sqlalchemy import Column, String, Boolean, DateTime, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import declarative_base
 
@@ -8,6 +8,9 @@ Base = declarative_base()
 
 class CommercialProfile(Base):
     __tablename__ = "commercial_profiles"
+    __table_args__ = (
+        Index("uq_commercial_profiles_email_lower", func.lower(Column("email")), unique=True),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     profile_name = Column(String(100), nullable=False)   # e.g. "Kelly Delgado"
@@ -18,6 +21,7 @@ class CommercialProfile(Base):
     celular = Column(String(50), nullable=False)         # "301 4750760"
     tipo_documento = Column(String(20), default="C.C")
     documento_identidad = Column(String(50), nullable=True) # Sensitive - excluded from public DTOs
+    ciudad = Column(String(100), nullable=True)
     role = Column(String(30), default="commercial", nullable=False) # "admin" or "commercial"
     password_hash = Column(String(200), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False) # Soft-delete flag
@@ -38,6 +42,7 @@ class CommercialProfile(Base):
             "cargo": clean_cargo,
             "email": self.email,
             "celular": self.celular,
+            "ciudad": self.ciudad or "",
             "role": self.role or "commercial",
             "is_active": self.is_active
         }
@@ -52,6 +57,7 @@ class CommercialProfile(Base):
             "cargo": self.cargo,
             "email": self.email,
             "celular": self.celular,
+            "ciudad": self.ciudad or "",
             "tipo_documento": self.tipo_documento or "C.C",
             "documento_identidad": self.documento_identidad or "",
             "role": self.role or "commercial",

@@ -36,6 +36,7 @@ export interface CommercialProfilePublic {
   cargo: string;
   email: string;
   celular: string;
+  ciudad?: string;
   role?: string;
   is_active: boolean;
 }
@@ -58,6 +59,7 @@ export interface AdminSessionUser {
   nombre?: string;
   apellido?: string;
   cargo?: string;
+  ciudad?: string;
 }
 
 export interface CommercialRegisterPayload {
@@ -67,8 +69,9 @@ export interface CommercialRegisterPayload {
   cargo: string;
   email: string;
   celular: string;
+  ciudad: string;
   tipo_documento?: string;
-  documento_identidad?: string;
+  documento_identidad: string;
   password: string;
 }
 

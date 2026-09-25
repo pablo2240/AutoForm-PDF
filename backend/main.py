@@ -2,6 +2,11 @@ import os
 import sys
 import json
 import shutil
+import re
+import time
+import uuid
+from collections import defaultdict
+from sqlalchemy import func
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -146,6 +151,7 @@ class CommercialProfilePublicDTO(BaseModel):
     cargo: str
     email: str
     celular: str
+    ciudad: Optional[str] = ""
     role: Optional[str] = "commercial"
     is_active: bool
 
@@ -157,6 +163,7 @@ class CommercialProfileAdminDTO(BaseModel):
     cargo: str
     email: str
     celular: str
+    ciudad: Optional[str] = ""
     tipo_documento: Optional[str] = "C.C"
     documento_identidad: Optional[str] = None
     role: str
@@ -172,6 +179,7 @@ class CommercialProfileCreateDTO(BaseModel):
     cargo: str
     email: str
     celular: str
+    ciudad: Optional[str] = None
     tipo_documento: Optional[str] = "C.C"
     documento_identidad: Optional[str] = None
     role: Optional[str] = "commercial"
@@ -184,6 +192,7 @@ class CommercialProfileUpdateDTO(BaseModel):
     cargo: Optional[str] = None
     email: Optional[str] = None
     celular: Optional[str] = None
+    ciudad: Optional[str] = None
     tipo_documento: Optional[str] = None
     documento_identidad: Optional[str] = None
     role: Optional[str] = None
@@ -201,8 +210,9 @@ class CommercialRegisterDTO(BaseModel):
     cargo: str
     email: str
     celular: str
+    ciudad: str
     tipo_documento: Optional[str] = "CC"
-    documento_identidad: Optional[str] = None
+    documento_identidad: str
     password: str
 
 class TemplateMapping(BaseModel):
@@ -873,9 +883,47 @@ def admin_login(dto: AdminLoginDTO, response: Response, db = Depends(get_db)):
         "token": token
     }
 
+class RegistrationRateLimiter:
+    """Sliding window in-memory rate limiter for user registration."""
+    def __init__(self, max_requests: int = 5, window_seconds: int = 900): # 5 attempts per 15 min
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.attempts: Dict[str, List[float]] = defaultdict(list)
+
+    def is_allowed(self, client_ip: str) -> bool:
+        now = time.time()
+        cutoff = now - self.window_seconds
+        self.attempts[client_ip] = [ts for ts in self.attempts[client_ip] if ts > cutoff]
+        if len(self.attempts[client_ip]) >= self.max_requests:
+            return False
+        self.attempts[client_ip].append(now)
+        return True
+
+    def reset(self, client_ip: Optional[str] = None):
+        if client_ip:
+            self.attempts.pop(client_ip, None)
+        else:
+            self.attempts.clear()
+
+registration_rate_limiter = RegistrationRateLimiter()
+
+CORPORATE_EMAIL_REGEX = re.compile(r"^[^@\s]+@(iaclatam\.com|iac\.com\.co)$", re.IGNORECASE)
+NAME_REGEX = re.compile(r"^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$")
+CARGO_REGEX = re.compile(r"^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s\.\-]+$")
+CIUDAD_REGEX = re.compile(r"^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s\.\-]+$")
+
+check_email_rate_limiter = RegistrationRateLimiter(max_requests=10, window_seconds=60)
+
 @app.get("/api/auth/check-email")
-def check_email_availability(email: str, db = Depends(get_db)):
+def check_email_availability(email: str, request: Request, db = Depends(get_db)):
     """Verifica si un correo electrónico ya está registrado en la base de datos."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if not check_email_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Límite de consultas de verificación de correo excedido. Por favor intenta de nuevo más tarde."
+        )
+
     email_clean = email.strip().lower()
     if not email_clean or "@" not in email_clean:
         return {"available": False, "exists": False, "message": "Formato de correo no válido"}
@@ -885,11 +933,23 @@ def check_email_availability(email: str, db = Depends(get_db)):
 @app.post("/api/auth/register")
 def auth_register(dto: CommercialRegisterDTO, request: Request, response: Response, db = Depends(get_db)):
     """Registra un nuevo responsable comercial individual y abre su sesión de inmediato."""
-    email_clean = dto.email.strip().lower()
-    if not email_clean or "@" not in email_clean:
-        raise HTTPException(status_code=400, detail="El correo electrónico ingresado no es válido.")
+    client_ip = request.client.host if request.client else "127.0.0.1"
 
-    # 1. Comprobar que no exista previamente en la base de datos
+    # 1. Rate Limiting: máximo 5 intentos por ventana de 15 minutos por IP
+    if not registration_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Límite de intentos de registro excedido. Por favor intenta de nuevo más tarde."
+        )
+
+    # 2. Correo Corporativo y Unicidad en Base de Datos (normalización trim + lowercase)
+    email_clean = dto.email.strip().lower()
+    if not email_clean or not CORPORATE_EMAIL_REGEX.match(email_clean):
+        raise HTTPException(
+            status_code=400,
+            detail="Dominio de correo no autorizado. Solo se permiten cuentas corporativas @iaclatam.com o @iac.com.co."
+        )
+
     existing = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(email_clean)).first()
     if existing:
         raise HTTPException(
@@ -897,63 +957,142 @@ def auth_register(dto: CommercialRegisterDTO, request: Request, response: Respon
             detail=f"El correo electrónico '{email_clean}' ya se encuentra registrado. Por favor utiliza otro correo o inicia sesión."
         )
 
-    # 2. Nombres y Apellidos: Validar longitud mínima de más de 3 caracteres en ambos campos
+    # 3. Nombres y Apellidos: letras, tildes y espacios; mínimo 4 caracteres en cada uno
     nombre_clean = dto.nombre.strip()
     apellido_clean = dto.apellido.strip()
-    if len(nombre_clean) <= 3:
-        raise HTTPException(status_code=400, detail="El nombre debe tener más de 3 caracteres.")
-    if len(apellido_clean) <= 3:
-        raise HTTPException(status_code=400, detail="El apellido debe tener más de 3 caracteres.")
+    if len(nombre_clean) < 4:
+        raise HTTPException(status_code=400, detail="El nombre debe tener al menos 4 caracteres.")
+    if not NAME_REGEX.match(nombre_clean):
+        raise HTTPException(status_code=400, detail="El nombre debe contener únicamente letras y espacios.")
 
-    # 3. Cargo: Validar longitud mínima de más de 4 caracteres
+    if len(apellido_clean) < 4:
+        raise HTTPException(status_code=400, detail="El apellido debe tener al menos 4 caracteres.")
+    if not NAME_REGEX.match(apellido_clean):
+        raise HTTPException(status_code=400, detail="El apellido debe contener únicamente letras y espacios.")
+
+    # 4. Cargo: texto alfanumérico y espacios; mínimo 5 caracteres
     cargo_clean = dto.cargo.strip()
-    if len(cargo_clean) <= 4:
-        raise HTTPException(status_code=400, detail="El cargo debe tener más de 4 caracteres.")
+    if len(cargo_clean) < 5:
+        raise HTTPException(status_code=400, detail="El cargo debe tener al menos 5 caracteres.")
+    if not CARGO_REGEX.match(cargo_clean):
+        raise HTTPException(status_code=400, detail="El cargo contiene caracteres no permitidos.")
 
-    # 4. Celular: Permitir únicamente números y exigir más de 9 dígitos
+    # 5. Celular: numérico estricto y exactamente 10 dígitos
     celular_clean = dto.celular.strip()
-    if not celular_clean.isdigit():
-        raise HTTPException(status_code=400, detail="El número de celular debe contener únicamente números.")
-    if len(celular_clean) <= 9:
-        raise HTTPException(status_code=400, detail="El número de celular debe tener más de 9 dígitos.")
+    if not celular_clean.isdigit() or len(celular_clean) != 10:
+        raise HTTPException(status_code=400, detail="El número de celular debe ser numérico y contener exactamente 10 dígitos.")
 
-    # 5. Cédula: Permitir únicamente números y exigir más de 7 dígitos
+    # 6. Cédula: numérico estricto y entre 8 y 11 dígitos
     documento_clean = dto.documento_identidad.strip() if dto.documento_identidad else ""
-    if not documento_clean:
-        raise HTTPException(status_code=400, detail="El número de cédula es obligatorio.")
-    if not documento_clean.isdigit():
-        raise HTTPException(status_code=400, detail="El número de cédula debe contener únicamente números.")
-    if len(documento_clean) <= 7:
-        raise HTTPException(status_code=400, detail="El número de cédula debe tener más de 7 dígitos.")
+    if not documento_clean.isdigit() or not (8 <= len(documento_clean) <= 11):
+        raise HTTPException(status_code=400, detail="El número de cédula debe ser numérico y contener entre 8 y 11 dígitos.")
 
-    # 6. Contraseña
-    if len(dto.password.strip()) < 6:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
+    # 7. Ciudad: letras, tildes, espacios, punto y guion; mínimo 3 caracteres
+    ciudad_clean = dto.ciudad.strip() if dto.ciudad else ""
+    if not ciudad_clean or len(ciudad_clean) < 3:
+        raise HTTPException(status_code=400, detail="La ciudad es obligatoria y debe tener al menos 3 caracteres.")
+    if not CIUDAD_REGEX.match(ciudad_clean):
+        raise HTTPException(status_code=400, detail="La ciudad debe contener únicamente letras, espacios, punto o guion.")
 
-    client_ip = request.client.host if request.client else None
-    pwd_hash = hash_password(dto.password.strip())
+    # 8. Contraseña: mínimo 12 caracteres (nunca registrar en logs ni devolver)
+    password_clean = dto.password.strip()
+    if len(password_clean) < 12:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 12 caracteres.")
 
-    display_name = dto.profile_name.strip() if (dto.profile_name and dto.profile_name.strip()) else f"{dto.nombre.strip()} {dto.apellido.strip()}"
+    # 9. Valores de seguridad impuestos por el backend (nunca aceptados del payload)
+    enforced_role = "commercial"
+    enforced_is_active = True
 
-    new_profile = CommercialProfile(
-        profile_name=display_name,
-        nombre=dto.nombre.strip(),
-        apellido=dto.apellido.strip(),
-        cargo=dto.cargo.strip() or "Comercial",
-        email=email_clean,
-        celular=dto.celular.strip(),
-        tipo_documento=dto.tipo_documento or "CC",
-        documento_identidad=dto.documento_identidad.strip() if dto.documento_identidad else None,
-        role="commercial",
-        password_hash=pwd_hash,
-        is_active=True,
-        last_modified_by_ip=client_ip
-    )
-    db.add(new_profile)
-    db.commit()
-    db.refresh(new_profile)
+    # 10. Supabase Auth Administrativo (Fase 1: crear usuario antes de persistir perfil)
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception:
+        admin_client = None
 
-    # Establish session immediately
+    auth_user_id = None
+    if admin_client:
+        resolved_company_id = os.getenv("DEFAULT_COMPANY_ID")
+        if not resolved_company_id:
+            try:
+                comp_res = admin_client.table("companies").select("id").eq("is_active", True).limit(1).execute()
+                if comp_res.data and len(comp_res.data) > 0:
+                    resolved_company_id = comp_res.data[0]["id"]
+            except Exception:
+                pass
+
+        auth_payload = {
+            "email": email_clean,
+            "password": password_clean,
+            "email_confirm": True,
+            "app_metadata": {
+                "role": enforced_role,
+                "is_active": enforced_is_active
+            },
+            "user_metadata": {
+                "nombre": nombre_clean,
+                "apellido": apellido_clean,
+                "cargo": cargo_clean,
+                "celular": celular_clean,
+                "ciudad": ciudad_clean,
+                "tipo_documento": dto.tipo_documento or "CC",
+                "documento_identidad": documento_clean
+            }
+        }
+        if resolved_company_id:
+            auth_payload["app_metadata"]["company_id"] = str(resolved_company_id)
+
+        try:
+            auth_res = admin_client.auth.admin.create_user(auth_payload)
+            auth_user = getattr(auth_res, "user", None) or auth_res
+            auth_user_id = str(getattr(auth_user, "id", None) or (auth_user.get("id") if isinstance(auth_user, dict) else None))
+        except Exception as e:
+            # Si falla la creación en Supabase Auth, se detiene de inmediato: no se persiste perfil
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error al registrar usuario en Supabase Auth: {str(e)}"
+            )
+
+    # 11. Persistencia de Perfil en Base de Datos (Fase 2)
+    try:
+        profile_id = auth_user_id if auth_user_id else str(uuid.uuid4())
+        pwd_hash = hash_password(password_clean)
+        display_name = dto.profile_name.strip() if (dto.profile_name and dto.profile_name.strip()) else f"{nombre_clean} {apellido_clean}"
+
+        new_profile = CommercialProfile(
+            id=profile_id,
+            profile_name=display_name,
+            nombre=nombre_clean,
+            apellido=apellido_clean,
+            cargo=cargo_clean or "Asesor Comercial",
+            email=email_clean,
+            celular=celular_clean,
+            ciudad=ciudad_clean,
+            tipo_documento=dto.tipo_documento or "CC",
+            documento_identidad=documento_clean,
+            role=enforced_role,
+            password_hash=pwd_hash,
+            is_active=enforced_is_active,
+            last_modified_by_ip=client_ip
+        )
+        db.add(new_profile)
+        db.commit()
+        db.refresh(new_profile)
+    except Exception as db_err:
+        db.rollback()
+        # COMPENSACIÓN SEGURA: Si falla la persistencia después de crear el usuario Auth,
+        # eliminar el usuario de Supabase Auth para evitar una cuenta huérfana
+        if admin_client and auth_user_id:
+            try:
+                admin_client.auth.admin.delete_user(auth_user_id)
+            except Exception as comp_err:
+                print(f"[SECURITY ALERT] Fallo al compensar y eliminar usuario huérfano de Auth {auth_user_id}: {comp_err}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error al persistir el perfil comercial en la base de datos."
+        )
+
+    # 12. Emisión de sesión directa (sin aprobación manual ni estados pendientes)
     token = create_session_token(new_profile.email, new_profile.role)
     is_prod = os.getenv("ENVIRONMENT", "").lower() == "production"
     response.set_cookie(
@@ -974,8 +1113,10 @@ def auth_register(dto: CommercialRegisterDTO, request: Request, response: Respon
         "nombre": new_profile.nombre,
         "apellido": new_profile.apellido,
         "cargo": new_profile.cargo,
+        "ciudad": new_profile.ciudad,
         "token": token
     }
+
 
 @app.get("/api/admin/check")
 @app.get("/api/auth/check")
@@ -1031,6 +1172,7 @@ def create_commercial_profile(
         cargo=dto.cargo.strip(),
         email=dto.email.strip().lower(),
         celular=dto.celular.strip(),
+        ciudad=dto.ciudad.strip() if dto.ciudad else None,
         tipo_documento=dto.tipo_documento or "C.C",
         documento_identidad=dto.documento_identidad.strip() if dto.documento_identidad else None,
         role=dto.role or "commercial",
@@ -1064,6 +1206,7 @@ def update_commercial_profile(
     if dto.cargo is not None: profile.cargo = dto.cargo.strip()
     if dto.email is not None: profile.email = dto.email.strip().lower()
     if dto.celular is not None: profile.celular = dto.celular.strip()
+    if dto.ciudad is not None: profile.ciudad = dto.ciudad.strip()
     if dto.tipo_documento is not None: profile.tipo_documento = dto.tipo_documento
     if dto.documento_identidad is not None: profile.documento_identidad = dto.documento_identidad.strip()
     if dto.is_active is not None and current_user.role == "admin": profile.is_active = dto.is_active

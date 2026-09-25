@@ -837,3 +837,75 @@
     font-size: 0.85rem;
   }
 }
+
+/* Modern Tab Switcher and 2-column Grid */
+.auth-tabs-nav {
+  position: relative;
+  display: flex;
+  background-color: #0b0f17;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 24px;
+  gap: 6px;
+}
+
+.auth-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.auth-tab-btn:hover {
+  color: #f8fafc;
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.auth-tab-btn.active {
+  background-color: #1e293b;
+  color: #f8fafc;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.form-row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .form-row-2col {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+.text-success {
+  color: #10b981;
+}
+
+.text-danger {
+  color: #ef4444;
+}
+
+.text-muted {
+  color: #64748b;
+}
+
+.font-medium {
+  font-weight: 500;
+}
