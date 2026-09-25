@@ -106,8 +106,8 @@ export function validateCorporateEmail(val: string): ValidationResult {
 }
 
 export function validatePassword(val: string): ValidationResult {
-  if (!val || val.length < 12) {
-    return { isValid: false, error: 'La contraseña debe tener al menos 12 caracteres.' };
+  if (!val || val.length < 8) {
+    return { isValid: false, error: 'La contraseña debe tener al menos 8 caracteres.' };
   }
   return { isValid: true };
 }

@@ -994,10 +994,10 @@ def auth_register(dto: CommercialRegisterDTO, request: Request, response: Respon
     if not CIUDAD_REGEX.match(ciudad_clean):
         raise HTTPException(status_code=400, detail="La ciudad debe contener únicamente letras, espacios, punto o guion.")
 
-    # 8. Contraseña: mínimo 12 caracteres (nunca registrar en logs ni devolver)
+    # 8. Contraseña: mínimo 8 caracteres (nunca registrar en logs ni devolver)
     password_clean = dto.password.strip()
-    if len(password_clean) < 12:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 12 caracteres.")
+    if len(password_clean) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres.")
 
     # 9. Valores de seguridad impuestos por el backend (nunca aceptados del payload)
     enforced_role = "commercial"

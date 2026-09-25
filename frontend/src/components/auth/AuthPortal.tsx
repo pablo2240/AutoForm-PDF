@@ -634,7 +634,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
                         type={showRegPassword ? 'text' : 'password'}
                         required
                         autoComplete="new-password"
-                        placeholder="Mínimo 12 caracteres"
+                        placeholder="Mínimo 8 caracteres"
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
                       />

@@ -87,12 +87,12 @@ test('validateCorporateEmail accepts @iaclatam.com and @iac.com.co and rejects o
   assert.strictEqual(validateCorporateEmail('not-an-email').isValid, false);
 });
 
-test('validatePassword accepts at least 12 characters', () => {
-  assert.strictEqual(validatePassword('123456789012').isValid, true);
+test('validatePassword accepts at least 8 characters', () => {
+  assert.strictEqual(validatePassword('12345678').isValid, true);
   assert.strictEqual(validatePassword('SecurePassword2026').isValid, true);
 
-  // Rejects less than 12 chars
-  assert.strictEqual(validatePassword('12345678901').isValid, false);
-  assert.strictEqual(validatePassword('short_pass').isValid, false);
+  // Rejects less than 8 chars
+  assert.strictEqual(validatePassword('1234567').isValid, false);
+  assert.strictEqual(validatePassword('short').isValid, false);
   assert.strictEqual(validatePassword('').isValid, false);
 });

@@ -226,12 +226,12 @@ def test_registration_profile_failure_triggers_auth_compensation():
 
 
 # ==============================================================================
-# 3. Password Hardening (Minimum 12 Characters)
+# 3. Password Hardening (Minimum 8 Characters)
 # ==============================================================================
 
-def test_registration_rejects_password_shorter_than_12():
-    """Rechaza contraseñas con menos de 12 caracteres y nunca filtra la contraseña en el error."""
-    short_pass = "Pass1234567" # 11 characters (< 12)
+def test_registration_rejects_password_shorter_than_8():
+    """Rechaza contraseñas con menos de 8 caracteres y nunca filtra la contraseña en el error."""
+    short_pass = "Pass123" # 7 characters (< 8)
     payload = {
         "nombre": "Gabriel",
         "apellido": "Rincón",
@@ -244,8 +244,26 @@ def test_registration_rejects_password_shorter_than_12():
     }
     res = client.post("/api/auth/register", json=payload)
     assert res.status_code == 400
-    assert "al menos 12 caracteres" in res.json()["detail"]
+    assert "al menos 8 caracteres" in res.json()["detail"]
     assert short_pass not in res.json()["detail"]
+
+
+def test_registration_accepts_8_character_password():
+    """Acepta contraseñas con exactamente 8 caracteres."""
+    pass_8 = "Abc12345" # exactly 8 characters
+    payload = {
+        "nombre": "Gabriel",
+        "apellido": "Rincón",
+        "cargo": "Asesor de Ventas",
+        "email": _unique_email("pwd_exact8"),
+        "celular": "3001234567",
+        "documento_identidad": "12345678",
+        "ciudad": "Bucaramanga",
+        "password": pass_8
+    }
+    res = client.post("/api/auth/register", json=payload)
+    assert res.status_code == 200
+    assert res.json()["authenticated"] is True
 
 
 # ==============================================================================
