@@ -23,7 +23,12 @@ htmlcov/
 # Generated Outputs & Temporary Files
 output/*.pdf
 !output/.gitkeep
+backend/output/*.pdf
+backend/output/
 archive/
+*.db
+*.sqlite
+*.sqlite3
 
 # OS / Editor Files
 .DS_Store
@@ -33,3 +38,7 @@ Thumbs.db
 *.swp
 *.swo
 *.log
+
+# Scratch & Private Pre-Migration Backups
+scratch/
+backend/data/storage_pre_migration_backup/

@@ -29,17 +29,19 @@ Tu objetivo es diligenciar este formulario oficial (vinculación de clientes/pro
    - 1. INFORMACIÓN GENERAL, 1.1 DATOS BÁSICOS, DATOS BÁSICOS DEL SOLICITANTE.
    - 1.2 DATOS REPRESENTANTE LEGAL, 2.1 Representante Legal (Guillermo Humberto Cañón Sarria, C.C. 98555384 de Envigado, Nacionalidad: Colombia).
    - 2. INFORMACIÓN BÁSICA DE LA PERSONA JURÍDICA (Ingeniería Asistida Por Computador S.A.S, NIT 811004721-2).
-   - 3. DATOS DE CONTACTO SÓLO PARA PROVEEDORES (completar datos de contacto comercial de IAC).
-   - SOCIOS Y/O ACCIONISTAS PRINCIPALES, 2. ACCIONISTAS CON PARTICIPACIÓN, 2.2 Beneficiarios Finales (completar ÚNICAMENTE Fila 1).
+   - 3. DATOS DE CONTACTO SÓLO PARA PROVEEDORES: Si coexisten 'Contacto Principal' y 'Contacto para notificar pagos o abonos', 'Contacto Principal' se completa con el Representante Legal y 'Contacto para notificar pagos o abonos' con el Comercial responsable. Si solo existe 'Contacto Principal', se asigna siempre al Comercial.
+   - SOCIOS Y/O ACCIONISTAS PRINCIPALES, 2. ACCIONISTAS CON PARTICIPACIÓN, INFORMACIÓN REFERENTE A LOS ACCIONISTAS, 2.2 Beneficiarios Finales (completar ÚNICAMENTE Fila 1 con Guillermo Humberto Cañón Sarria, C.C. 98555384).
+   - MIEMBROS DE LA JUNTA DIRECTIVA U ORGANISMO SOCIETARIO SEMEJANTE (completar ÚNICAMENTE Fila 1 con los datos del Representante Legal: Guillermo Humberto Cañón Sarria, C.C. 98555384).
    - Firma del Representante Legal / Persona Natural.
-   - Bloques declarativos de autorización ("Yo, Guillermo Humberto Cañón Sarria...").
+   - Bloques declarativos de autorización y 11. DECLARACIÓN DE ORIGEN DE FONDOS ("Yo, Guillermo Humberto Cañón Sarria...").
+   - DATOS CONTACTO PARA ARIBA: Completar ÚNICAMENTE la Fila 1 con el Representante Legal (Nombres y apellidos persona autorizada: Guillermo Humberto Cañón Sarria, Correo electrónico: guillermo.canon@iaclatam.com). Filas 2 a 4 vacías.
 
 2. **ZONAS ROJAS (IGNORAR TOTALMENTE / DEJAR EN BLANCO):**
    - Espacio Reservado para la Entidad / Uso Exclusivo del Banco / Aprobación Interna de Riesgos.
    - Secciones SÓLO PARA CLIENTES / SÓLO PARA VENDEDORES (cuando IAC actúa como proveedor).
+   - Sección 9. VÍNCULO / 9. VÍNCULOS / Vínculos comerciales o con personas expuestas (dejar completamente vacía).
    - Personas Expuestas Políticamente (PEP) / Vínculos PEP (dejar completamente vacío).
    - Datos de Cónyuge / Familiares / Beneficiarios secundarios.
-   - Declaraciones de Origen de Fondos / Actividades secundarias (dejar para firma/declaración manual).
    - Operaciones Internacionales / Moneda extranjera / Endeudamiento externo.
    - Casillas de 'Nacionalidad 2' / Doble nacionalidad.
    - Filas secundarias (Fila 2, 3, 4, 5) en cualquier tabla o cuadrícula.

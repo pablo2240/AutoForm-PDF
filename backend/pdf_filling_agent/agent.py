@@ -80,6 +80,8 @@ class PDFAgent:
                  model: Optional[str] = None,
                  knowledge_base: Optional[KnowledgeBase] = None,
                  company_profile_path: Optional[str] = None,
+                 commercial_profile: Optional[Dict[str, Any]] = None,
+                 company_profile: Optional[Dict[str, Any]] = None,
                  forms_dir: Optional[str] = None):
         
         # Always reload environment from .env with explicit path
@@ -172,7 +174,12 @@ class PDFAgent:
         self.last_audit_report: Optional[Dict[str, Any]] = None
 
         # Load company profile
-        self.company_profile = self._load_company_profile(company_profile_path)
+        if company_profile is not None:
+            self.company_profile = company_profile
+            print(f"[INFO] Initialized with in-memory company profile: {company_profile.get('razon_social', 'Custom')}")
+        else:
+            self.company_profile = self._load_company_profile(company_profile_path)
+        self.commercial_profile = commercial_profile
 
         # Load static form maps
         self.forms_dir = forms_dir or os.path.join(os.path.dirname(__file__), "..", "forms")
@@ -473,8 +480,8 @@ class PDFAgent:
                 txt = b[4].strip().replace("\n", " ")
                 norm_b = self._normalize_label(txt)
                 if len(txt) > 3 and (
-                    re.match(r'^\d+(\.\d+)*\.?\s+[A-ZÁÉÍÓÚÑ]', txt) or
-                    any(norm_b.startswith(h) for h in [
+                    re.match(r'^\d+(\.\d+)*\.?\s*[A-ZÁÉÍÓÚÑ]', txt) or
+                    any(norm_b.startswith(h) or h in norm_b for h in [
                         "anexo",
                         "anexos",
                         "apendice",
@@ -482,10 +489,26 @@ class PDFAgent:
                         "habeas data",
                         "manifiesto de cumplimiento",
                         "datos de contacto",
+                        "datos contacto",
+                        "ariba",
                         "informacion general",
                         "datos representante legal",
+                        "datos del representante legal",
+                        "datos contacto comercial",
                         "declaracion de prevencion",
-                        "anexos obligatorios"
+                        "anexos obligatorios",
+                        "informacion referente a los accionistas",
+                        "miembros de la junta directiva",
+                        "informacion de revisores fiscales",
+                        "referencias bancarias",
+                        "datos de contacto del contratante",
+                        "composicion de capital",
+                        "tipo de actividad",
+                        "relacione o indique a continuacion",
+                        "datos de la persona que esta a cargo",
+                        "proceso de relacionamiento",
+                        "relacionamiento o de contratacion",
+                        "persona que esta a cargo"
                     ])
                 ):
                     section_candidates.append((b[1], b[3], txt))
@@ -494,16 +517,22 @@ class PDFAgent:
             for w in widgets:
                 wr = w.rect
                 attr_label = getattr(w, 'field_label', '') or ''
-                if re.match(r'^(celda|cell|textfield|datetimefield|field|fila|row|tabla|table|texto|independiente|listabotonesradio)\d*$', attr_label.strip(), re.IGNORECASE):
+                if re.match(r'^(celda|cell|textfield|datetimefield|field|fila|row|tabla|table|texto|independiente|listabotonesradio)\d*$', attr_label.strip(), re.IGNORECASE) or re.match(r'^\d+\.?$', attr_label.strip()):
                     attr_label = ""
                 
-                # Words immediately above the widget strictly overlapping its column width (up to 32pt for table column headers)
-                above_words = [nw[4] for nw in sorted([wd for wd in words if 0 <= wr.y0 - wd[3] < 32 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)], key=lambda x: (x[1], x[0]))]
+                # Words immediately above the widget strictly overlapping its column width (up to 35pt for table column headers)
+                # Allows up to 4pt vertical overlap for descenders, and excludes words separated by an intervening widget in the same column
+                cands = [wd for wd in words if wd[1] <= wr.y0 + 2 and wr.y0 - wd[3] >= -4 and (wr.y0 - wd[1]) < 35 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)]
+                cands = [wd for wd in cands if not any(other.field_name != w.field_name and (other.rect.x0 <= wr.x1 and other.rect.x1 >= wr.x0) and (wd[1] < other.rect.y0 and other.rect.y0 < wr.y0 - 2) for other in widgets)]
+                if cands:
+                    cands_sorted = sorted(cands, key=lambda x: (round(x[1] / 6), x[0]))
+                    above_str = " ".join(wd[4] for wd in cands_sorted)
+                else:
+                    above_str = ""
+                
                 # Words to the left on the same horizontal baseline band
                 left_words = [nw[4] for nw in sorted([wd for wd in words if abs(wd[1] - wr.y0) < 10 and wd[2] <= wr.x0 + 2 and (wr.x0 - wd[2]) < 130], key=lambda x: (x[1], x[0]))]
-                
                 left_str = " ".join(left_words)
-                above_str = " ".join(above_words)
                 
                 # Closest preceding section header
                 section_header = ""
@@ -530,8 +559,40 @@ class PDFAgent:
                     "section": section_header,
                     "page": pno,
                     "is_prefilled": is_prefilled,
-                    "current_value": val_str
+                    "current_value": val_str,
+                    "is_secondary_row": False
                 })
+
+        # Identify table secondary rows across widgets
+        for rw in rich_widgets:
+            fn = rw["field_name"]
+            wr = rw["rect"]
+            sec_norm = self._normalize_label(rw.get("section", ""))
+            
+            # 1. Explicit row indices in field name: Fila1[1], Row[2], Item[3]
+            m_brk = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', fn, re.IGNORECASE)
+            if m_brk and int(m_brk.group(1)) > 0:
+                rw["is_secondary_row"] = True
+                continue
+            m_num = re.search(r'(?:fila|row|item)(\d+)', fn, re.IGNORECASE)
+            if m_num and int(m_num.group(1)) > 1:
+                rw["is_secondary_row"] = True
+                continue
+            if re.search(r'(?:accionistas|junta|revisor|patente|publicacion|profesionales|vinculo|contrat)[\w\s]*_([2-9]|\d{2,})$', fn, re.IGNORECASE):
+                rw["is_secondary_row"] = True
+                continue
+            # Table/list secondary rows with explicit numerical suffixes (e.g. 'beneficiario final 2', 'Tipo Ident. 2', 'número de identificación 2')
+            if re.search(r'(?:beneficiario|accionista|socio|miembro|directivo|tipo\s+ident\.?|identificaci[oó]n)[\w\s\.]*?\s+([2-9]|\d{2,})$', fn, re.IGNORECASE):
+                rw["is_secondary_row"] = True
+                continue
+                
+            # 2. Table grid sections with unindexed cell IDs (e.g. Composición Accionaria in F-UC 01)
+            is_composicion_sec = any(k in sec_norm for k in [
+                "composicion accionaria", "anexo de composicion", "socios con participacion"
+            ])
+            if is_composicion_sec and (wr.y0 > 235 or (fn.isdigit() and int(fn) not in [1, 2, 38, 57])):
+                rw["is_secondary_row"] = True
+                continue
 
         # Cross-widget counterpart detection (e.g. SI/NO pairs or Radio options where one is already answered)
         prefilled_names = {rw["field_name"] for rw in rich_widgets if rw["is_prefilled"]}
@@ -574,6 +635,39 @@ class PDFAgent:
 
         mappings = {}
         assigned_section_categories = set()
+        force_blank_fields: set = set()  # Fields deterministically decided must remain empty
+
+        # ADR-0008: Commercial profile resolution
+        cp = self.commercial_profile
+        if not cp and (profile.get("kelly_delgado_email") or profile.get("kelly_delgado_nombre")):
+            cp = {
+                "nombre": profile.get("kelly_delgado_nombre", "Kelly Yohana"),
+                "apellido": profile.get("kelly_delgado_apellido", "Delgado Macea"),
+                "profile_name": profile.get("kelly_delgado_nombre_completo", "Kelly Yohana Delgado Macea"),
+                "email": profile.get("kelly_delgado_email", "kelly.delgado@iaclatam.com"),
+                "celular": str(profile.get("kelly_delgado_celular", "3014750760")).replace(" ", ""),
+                "cargo": "Especialista Comercial / Licitaciones",
+                "documento_identidad": ""
+            }
+        cp_nombre = f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() if cp else ""
+        if not cp_nombre and cp:
+            cp_nombre = cp.get("profile_name", "")
+        cp_email = cp.get("email") if cp else ""
+        cp_celular = str(cp.get("celular", "")).replace(" ", "") if cp else ""
+
+        # ADR: Coexistence of Contacto Principal & Contacto para notificar pagos/abonos
+        def _is_pagos_abonos(text: str) -> bool:
+            return bool(re.search(r'\b(pagos|abonos|notificar pagos|notificacion de pagos|notificar abonos)\b', text, re.IGNORECASE))
+
+        has_pagos_abonos_contact = False
+        for rw in rich_widgets:
+            rw_sec = self._normalize_label(rw.get("section", ""))
+            if any(phrase in rw_sec for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "datos de contacto solo para clientes"]):
+                continue
+            rw_text = self._normalize_label(f"{rw.get('label', '')} {rw.get('field_name', '')} {rw.get('above_text', '')} {rw.get('left_text', '')}")
+            if ("contacto" in rw_text or "notificar" in rw_text) and _is_pagos_abonos(rw_text):
+                has_pagos_abonos_contact = True
+                break
         
         for item in rich_widgets:
             fn = item["field_name"]
@@ -587,40 +681,114 @@ class PDFAgent:
             # 2. CheckBoxes handling (tax status: NO5 Régimen Simple, NO6 Régimen Especial, NO8 Auto Retenedor)
             if ftype in ["RadioButton", "CheckBox", "Button"]:
                 norm_fn = self._normalize_label(fn)
+                norm_lbl = self._normalize_label(item.get("label", ""))
+                norm_left_cb = self._normalize_label(item.get("left_text", ""))
                 if fn in ["NO5", "NO6", "NO8"] or "no" in norm_fn:
-                    if fn == "NO5" or "regimen simple" in self._normalize_label(item.get("label", "")):
+                    if fn == "NO5" or "regimen simple" in norm_lbl:
                         mappings[fn] = ("On", "chk_no_regimen_simple")
-                    elif fn == "NO6" or "regimen especial" in self._normalize_label(item.get("label", "")):
+                    elif fn == "NO6" or "regimen especial" in norm_lbl:
                         mappings[fn] = ("On", "chk_no_regimen_especial")
-                    elif fn == "NO8" or "auto retenedor" in self._normalize_label(item.get("label", "")):
+                    elif fn == "NO8" or "auto retenedor" in norm_lbl:
                         mappings[fn] = ("On", "chk_no_auto_retenedor")
+                elif fn == "Check Box3" or "inscripcion" in norm_left_cb:
+                    mappings[fn] = ("On", "chk_tipo_solicitud")
+                elif fn == "Check Box7" or "privado" in norm_left_cb:
+                    mappings[fn] = ("On", "chk_composicion_privado")
+                elif fn == "COMERCIAL" or (norm_fn == "comercial" and "tipo de actividad" in item.get("section", "").lower()):
+                    mappings[fn] = ("On", "chk_tipo_actividad_comercial")
+                elif fn == "Check Box12" or ("en moneda extranjera" in norm_left_cb and "no" in norm_left_cb):
+                    mappings[fn] = ("On", "chk_no_moneda_extranjera")
                 continue
 
             # 3. SKIP secondary table rows (Row index >= 1) - ONLY fill Row 1 [0]
+            if item.get("is_secondary_row"):
+                force_blank_fields.add(fn)
+                continue
             row_match = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', fn, re.IGNORECASE)
             if row_match and int(row_match.group(1)) > 0:
                 continue
+            row_num_match = re.search(r'(?:fila|row|item)(\d+)', fn, re.IGNORECASE)
+            if row_num_match and int(row_num_match.group(1)) > 1:
+                continue
+            # Table secondary rows with suffix _2, _3, _4 in table sections
+            if re.search(r'(?:accionistas|junta|revisor|patente|publicacion|profesionales|vinculo|contrat)[\w\s]*_([2-9]|\d{2,})$', fn, re.IGNORECASE):
+                continue
 
             # ADR-0005: Strict Local-First Hierarchy
-            # 1. Native field label / attribute
-            # 2. left_text (same baseline)
-            # 3. above_text (only as fallback when local gives no signal)
             local_raw = f"{item['attr_label']} {item['left_text']}".strip()
             norm_local = self._normalize_label(local_raw)
-            norm_left = self._normalize_label(item["left_text"])
-            norm_above = self._normalize_label(item["above_text"])
-            norm_section = self._normalize_label(item["section"])
+            norm_attr = self._normalize_label(item.get("attr_label", ""))
+            norm_left = self._normalize_label(item.get("left_text", ""))
+            norm_above = self._normalize_label(item.get("above_text", ""))
+            norm_section = self._normalize_label(item.get("section", ""))
+            norm_fn = self._normalize_label(fn)
             
-            # Use local first; if empty, consult above_text
             is_table_cell = bool(re.search(r'(?:tabla|fila|cell|celda|grid|table|row)[\d_\[]', fn, re.IGNORECASE))
-            eval_target = norm_above if (is_table_cell and norm_above) else (norm_local if norm_local else norm_above)
-            full_context = f"{local_raw} {item['above_text']} {item['section']} {fn}".strip()
+            eval_target = norm_attr if norm_attr else (norm_above if (is_table_cell and norm_above) else (norm_local if norm_local else norm_above))
+            full_context = f"{local_raw} {item.get('above_text', '')} {item.get('section', '')} {fn}".strip()
             norm = self._normalize_label(full_context)
 
-            # Section-scoped uniqueness key: (category, normalized_section)
-            sec_key = norm_section[:40]
+            # Sub-block differentiation (clean hierarchy)
+            sub_block = "main"
+            is_relacionamiento_contact = bool(
+                re.search(
+                    r'\b(proceso de relacionamiento|relacionamiento o de contratacion|persona que est[aá] a cargo|informaci[oó]n del contacto o los datos de la persona|relacione o indique a continuaci[oó]n|contacto o los datos de la persona)\b',
+                    norm_section + " " + norm_above + " " + norm_left
+                )
+            )
+            if is_relacionamiento_contact or \
+               fn in ["Nombres y Apellidos_2", "Correo electrónico_3", "Teléfono Fijo_2", "Teléfono celular_2"] or \
+               fn in ["Nombre y Apellidos del contacto", "Correo electrónico_5", "Teléfono Fijo_3", "Teléfono Celular"] or \
+               any(k in norm_attr or k in norm_fn or k in norm_left for k in ["contacto comercial", "relacion comercia"]):
+                sub_block = "comercial"
+            elif "ariba" in norm_section or "ariba" in norm_fn or "ariba" in norm or "ariba" in norm_left or fn in ["Text1", "Text5", "Text2", "Text7", "Text3", "Text8", "Text9", "Text10"]:
+                sub_block = "ariba"
+            elif "accionistas" in norm_section or "accionistas" in norm_fn:
+                sub_block = "accionistas"
+            elif "junta" in norm_section or "junta" in norm_fn:
+                sub_block = "junta_directiva"
+            elif "revisor" in norm_section or "revisor" in norm_fn:
+                sub_block = "revisor_fiscal"
+            elif fn in ["Nombres y Apellidos", "Correo electrónico_2", "Teléfono Fijo", "Teléfono celular"] or \
+                 re.search(r'\b(?:rl)\b', norm_fn) or \
+                 any(k in norm_attr or k in norm_fn or k in norm_left or k in norm_section for k in ["representante legal", "datos del representante legal", "informacion representante legal"]):
+                sub_block = "rep_legal"
+            elif any(k in norm_section or k in norm_fn for k in ["referencias bancarias", "informacion financiera"]):
+                sub_block = "financiera_bancos"
+            elif any(k in norm_section or k in norm_fn for k in ["origen de fondos", "declaracion de origen"]):
+                sub_block = "origen_fondos"
+
+            sec_key = f"{norm_section[:30]}_{sub_block}"
+
+            is_persona_juridica_context = (
+                any(k in norm_section for k in [
+                    "informacion general", "datos basicos", "datos generales", "informacion basica",
+                    "datos de la empresa", "informacion de la empresa", "persona juridica",
+                    "personas juridicas", "contraparte", "proveedor", "asociado de negocio",
+                    "datos del solicitante", "identificacion de la empresa"
+                ]) or ("p_razon_social" in [c for c, _ in mappings.values()])
+            ) and not any(k in norm_section for k in [
+                "representante legal", "persona natural", "personas naturales",
+                "oficial de cumplimiento", "accionistas", "junta directiva",
+                "beneficiario final", "beneficiarios finales", "revisor fiscal"
+            ]) and sub_block not in ["rep_legal", "comercial", "accionistas", "junta_directiva", "revisor_fiscal"]
+
+            # Transversal Suppression: Persona Jurídica / Company NIT does not have place/date of personal expedition
+            if is_persona_juridica_context and (
+                any(k in eval_target or k in norm_fn for k in ["lugar y fecha de expedicion", "lugar de expedicion", "fecha de expedicion", "expedicion"]) or
+                fn in ["LUGAR Y FECHA DE EXPEDICIÓN", "Fecha7_af_date"]
+            ):
+                continue
 
             # --- EXCLUSION RULES ---
+
+            # Section 9 exclusion (Vínculos / Vínculo): Must be 100% blank (Domain Isolation)
+            if (
+                any(v in norm_section for v in ["9 vinculo", "9 vinculos", "vinculos", "vinculo"]) or
+                any(v in norm_fn or v in norm_attr for v in ["tipo de vinculo", "vinculo"])
+            ) and not ("profesionales vinculados" in norm_section or "profesionales vinculados" in norm):
+                continue
+
             # A. Ignore PEP, foreign, internal-use, birth, foreign currency, conditional annexes
             if any(ign in norm for ign in [
                 "extranjero", "foreign", "uso exclusivo", "espacio reservado", "aprobacion interna", 
@@ -628,27 +796,83 @@ class PDFAgent:
                 "persona expuesta", "moneda extranjera", "cuentas en moneda extranjera",
                 "conocimiento mejorado", "conocimiento ampliado", "vinculados a personas expuestas",
                 "relacion de vehiculos", "plan de mantenimiento vehicular", "consorcio", "union temporal"
-            ]):
-                continue
-            # B. Ignore entire sections labeled "solo para clientes", PEP annexes, Anexo 3 (conocimiento ampliado), etc.
+            ]) and not ("no en moneda extranjera" in norm_left):
+                if (sub_block in ["rep_legal", "comercial"] or "representante" in norm_section) and \
+                   any(k in eval_target for k in ["nombres", "apellidos", "nombre", "cargo", "cedula", "identificacion", "correo", "email", "telefono", "celular", "expedicion"]):
+                    pass
+                else:
+                    continue
+            # B. Ignore entire sections labeled "solo para clientes", PEP annexes, Anexo 3, etc.
             if any(phrase in norm_section for phrase in [
                 "solo para clientes", "para clientes", "solo para vendedores", "para uso del banco", 
                 "para uso de la entidad", "uso del banco", "datos de contacto solo para clientes", 
-                "moneda extranjera", "persona expuesta politicamente", "personas expuestas politicamente",
+                "persona expuesta politicamente", "personas expuestas politicamente",
                 "conocimiento mejorado", "conocimiento ampliado", "vinculados a personas expuestas",
                 "anexo 1", "anexo 2", "anexo 3",
                 "anexos obligatorios clientes", "anexo obligatorio clientes"
             ]):
                 continue
-            # C. Ignore OTRA/OTRO fields
-            if re.search(r'\b(otra|otro|otras|otros)\b', norm) and not any(k in norm for k in ["razon social", "representante legal"]):
+            # C. Ignore OTRA/OTRO fields (must target the field itself, not surrounding context)
+            if re.search(r'\b(otra|otro|otras|otros)\b', eval_target) and not any(k in eval_target for k in ["razon social", "representante legal", "identificacion", "nit"]):
+                continue
+
+            # D. Skip Revisor fiscal fields (e.g. TeléfonoRow1 in revisor fiscal)
+            if sub_block == "revisor_fiscal":
                 continue
 
             val_to_set = None
             assigned_cat = None
             
+            # Section 11: DECLARACIÓN DE ORIGEN DE FONDOS
+            if fn == "Yo" or (norm_section.startswith("11") and norm_attr == "yo"):
+                val_to_set = rep_full
+                assigned_cat = "dec_rep_nombre"
+            elif fn == "número" or (norm_section.startswith("11") and norm_attr == "numero"):
+                val_to_set = profile.get("numero_cedula", "98555384")
+                assigned_cat = "dec_cedula"
+            elif fn == "expedido en" or (norm_section.startswith("11") and norm_attr == "expedido en"):
+                val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
+                assigned_cat = "dec_lugar_exp"
+            elif fn == "2 Que los recursos que manejo provienen de la siguiente fuente detalle el origen":
+                val_to_set = profile.get("actividad_economica_principal", "Venta de Licencias y Servicios")
+                assigned_cat = "dec_fuente_origen"
+
+            # Section 13: AUTORIZACIONES Y DECLARACIONES ESPECIALES
+            elif fn == "Nombre del Representante Legal o del inscrito":
+                val_to_set = rep_full
+                assigned_cat = "firma_rep_nombre"
+            elif fn == "Tipo y Número de identificación":
+                val_to_set = f"{profile.get('tipo_documento', 'C.C.')} {profile.get('numero_cedula', '98555384')}"
+                assigned_cat = "firma_cedula"
+            elif fn == "Text6" and "fecha de diligenciamiento" in norm_left:
+                val_to_set = datetime.now().strftime("%d/%m/%Y")
+                assigned_cat = "fecha_diligenciamiento"
+
+            # Section 3: SÓLO PARA PERSONAS NATURALES
+            elif fn == "Primer Apellido":
+                val_to_set = primer_apellido
+                assigned_cat = "p_primer_apellido"
+            elif fn == "Segundo Apellido":
+                val_to_set = segundo_apellido
+                assigned_cat = "p_segundo_apellido"
+            elif fn == "Nombres":
+                val_to_set = rep_nombre
+                assigned_cat = "p_rep_nombre"
+            elif fn == "Tipo Documento" and norm_section.startswith("3"):
+                val_to_set = profile.get("tipo_documento", "C.C.")
+                assigned_cat = "p_tipo_doc"
+            elif fn == "País Expedición Documento":
+                val_to_set = profile.get("pais", "Colombia")
+                assigned_cat = "p_pais"
+            elif fn == "Número" and norm_section.startswith("3"):
+                val_to_set = profile.get("numero_cedula", "98555384")
+                assigned_cat = "numero_cedula"
+            elif fn == "Profesión u oficio":
+                val_to_set = profile.get("cargo", "Gerente General")
+                assigned_cat = "p_cargo"
+
             # Declarative In-line Sequence in Section 9 (LA/FT)
-            if fn == "Texto47" or (norm_left in ["yo", "yo,"] or any(dec in norm_left for dec in ["yo ", "yo,", "el suscrito", "la suscrita"])):
+            elif fn == "Texto47" or (norm_left in ["yo", "yo,"] or any(dec in norm_left for dec in ["yo ", "yo,", "el suscrito", "la suscrita"])):
                 val_to_set = rep_full
                 assigned_cat = "dec_rep_nombre"
             elif fn == "Texto48" or (re.search(r'\b(cedula|documento)\b', norm_left) and "no" in norm_left):
@@ -664,7 +888,7 @@ class PDFAgent:
                 val_to_set = nit_base or nit_val
                 assigned_cat = "dec_nit"
 
-            # Signature block on Page 7
+            # Signature block on Page 7 (Legacy formats)
             elif fn == "Texto53" or (norm_left.startswith("nombre completo") and "identificacion" in norm_left):
                 val_to_set = rep_full
                 assigned_cat = "firma_rep_nombre"
@@ -675,30 +899,204 @@ class PDFAgent:
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
                 assigned_cat = "firma_lugar_exp"
 
+            # Accionistas / Composición Accionaria (Fila 1)
+            elif sub_block == "accionistas":
+                if any(k in eval_target for k in ["nombre persona juridica", "persona juridica nombre"]) or (
+                    "persona juridica" in eval_target and "nombre" in eval_target
+                ):
+                    # Nombre del accionista va en campo Persona Jurídica (field 02)
+                    val_to_set = rep_full
+                    assigned_cat = "acc_rep_full"
+                elif any(k in eval_target for k in ["nombres y apellidos pn", "nombres pn", "apellidos pn"]) or (
+                    "nombres" in eval_target and "pn" in eval_target
+                ):
+                    # Campo PN (field 01) debe quedar vacío — el nombre ya va en campo PJ
+                    force_blank_fields.add(fn)
+                elif any(k in eval_target for k in ["identificacion", "nit/cc", "nit cc"]):
+                    # Accionista identificado con cédula (no NIT)
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "acc_cedula"
+                elif "nombre o razon social" in norm_fn or ("nombre" in norm_attr and "juridica" not in norm_attr) or ("razon social" in norm_attr and "juridica" not in norm_attr):
+                    val_to_set = rep_full
+                    assigned_cat = "acc_rep_full"
+                elif "tipo de documento" in norm_attr or "tipo de documento" in norm_fn:
+                    val_to_set = profile.get("tipo_documento", "C.C.")
+                    assigned_cat = "acc_tipo_doc"
+                elif "documento de identidad" in norm_attr or "documento de identidad" in norm_fn:
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "acc_cedula"
+
+
+
+            # Junta Directiva (Fila 1)
+            elif sub_block == "junta_directiva":
+                if "nombre o razon social" in norm_fn:
+                    val_to_set = rep_full
+                    assigned_cat = "jd_rep_full"
+                elif "tipo de documento" in norm_fn:
+                    val_to_set = profile.get("tipo_documento", "C.C.")
+                    assigned_cat = "jd_tipo_doc"
+                elif "documento de identidad" in norm_fn:
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "jd_cedula"
+                elif "telefono" in norm_fn:
+                    val_to_set = profile.get("celular_rep", profile.get("telefono", "3104120217"))
+                    assigned_cat = "jd_telefono"
+                elif "ciudad" in norm_fn:
+                    val_to_set = profile.get("ciudad", "Medellin")
+                    assigned_cat = "jd_ciudad"
+
+            # Beneficiarios Finales (Fila 1)
+            elif (
+                "beneficiario" in norm_section or 
+                any(k in norm_fn for k in ["beneficiario final 1", "beneficiario final", "beneficiarios finales"]) or 
+                "beneficiario" in norm_fn
+            ) and not item.get("is_secondary_row") and not any(k in norm_fn for k in ["empresa", "representante", "invitacion", "oferta", "objeto", "contratacion"]):
+                if any(k in eval_target or k in norm_fn for k in ["nombre"]):
+                    val_to_set = rep_full
+                    assigned_cat = "bf_nombre"
+                elif any(k in eval_target or k in norm_fn for k in ["tipo de identificacion", "tipo ident", "tipo id"]):
+                    val_to_set = "C.C."
+                    assigned_cat = "bf_tipo_doc"
+                elif any(k in eval_target or k in norm_fn for k in ["numero de identificacion", "numero documento", "identificacion", "documento", "cedula", "numero"]):
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "bf_cedula"
+                elif re.search(r'\b(es beneficiario final)\b', eval_target) and not any(k in eval_target or k in norm_fn for k in ["nombre", "identificacion", "documento", "tipo", "numero"]):
+                    val_to_set = "SI"
+                    assigned_cat = "bf_es_beneficiario"
+
+
+            # Commercial Sub-Block (Page 0 & Page 2)
+            elif sub_block == "comercial":
+                if any(k in eval_target or k in norm_fn for k in ["correo", "email"]):
+                    val_to_set = cp_email or profile.get("correo_rep")
+                    assigned_cat = "com_correo"
+                elif any(k in eval_target or k in norm_fn for k in ["celular", "movil"]):
+                    val_to_set = cp_celular or profile.get("celular_rep")
+                    assigned_cat = "com_celular"
+                elif any(k in eval_target or k in norm_fn for k in ["telefono", "tel"]):
+                    val_to_set = cp_celular or profile.get("telefono")
+                    assigned_cat = "com_telefono"
+                elif any(k in eval_target or k in norm_fn for k in ["cargo", "puesto", "rol"]):
+                    val_to_set = (cp.get("cargo") if cp else "") or "Especialista Comercial / Licitaciones"
+                    assigned_cat = "com_cargo"
+                elif any(k in eval_target or k in norm_fn for k in ["nombre", "contacto"]):
+                    val_to_set = cp_nombre or rep_full
+                    assigned_cat = "com_nombre"
+
+            # Legal Representative Sub-Block (Page 0)
+            elif sub_block == "rep_legal":
+                if any(k in eval_target or k in norm_fn for k in ["nombre de la empresa", "nombre empresa", "razon social"]) or ("empresa" in norm_fn and "representante" not in norm_fn):
+                    val_to_set = profile.get("razon_social")
+                    assigned_cat = "p_razon_social"
+                elif any(k in eval_target or k in norm_fn for k in ["correo", "email"]):
+                    val_to_set = profile.get("correo_rep")
+                    assigned_cat = "rep_correo"
+                elif any(k in eval_target or k in norm_fn for k in ["celular", "movil"]):
+                    val_to_set = profile.get("celular_rep")
+                    assigned_cat = "rep_celular"
+                elif any(k in eval_target or k in norm_fn for k in ["telefono", "tel"]):
+                    val_to_set = profile.get("telefono")
+                    assigned_cat = "rep_telefono"
+                elif (
+                    re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', eval_target) or
+                    re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', norm_fn)
+                ):
+                    val_to_set = f"{profile.get('lugar_expedicion_rep', 'Envigado')} {profile.get('fecha_expedicion_rep', '26-06-1989')}"
+                    assigned_cat = "rep_lugar_fecha_exp"
+                elif fn == "Fecha8_af_date" or (fn.startswith("Fecha") and "expedicion" in eval_target):
+                    val_to_set = profile.get("fecha_expedicion_rep", "26-06-1989")
+                    assigned_cat = "rep_fecha_exp"
+                elif any(k in eval_target or k in norm_fn for k in ["lugar de expedicion", "lugar expedicion", "expedida en"]):
+                    val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
+                    assigned_cat = "rep_lugar_exp"
+                elif (
+                    re.search(r'\b(tipo y numero de identificacion|tipo y nro de identificacion|tipo y no de identificacion)\b', eval_target) or
+                    fn.lower().startswith("tipo y n")
+                ):
+                    val_to_set = f"{profile.get('tipo_documento', 'C.C.')} {profile.get('numero_cedula', '98555384')}"
+                    assigned_cat = "firma_cedula"
+                elif any(k in eval_target or k in norm_fn for k in ["tipo id", "tipo documento", "tipo de documento", "tipo de identificacion"]):
+                    val_to_set = "C.C."
+                    assigned_cat = "rep_tipo_doc"
+                elif any(k in eval_target or k in norm_fn for k in ["cedula", "numero id", "no id", "identificacion", "documento de identidad", "numero documento"]):
+                    val_to_set = profile.get("numero_cedula", "98555384")
+                    assigned_cat = "numero_cedula"
+                elif "primer apellido" in eval_target:
+                    val_to_set = primer_apellido
+                    assigned_cat = "p_primer_apellido"
+                elif "segundo apellido" in eval_target:
+                    val_to_set = segundo_apellido
+                    assigned_cat = "p_segundo_apellido"
+                elif any(k in eval_target for k in ["apellidos", "primer y segundo apellido"]) and not any(k in eval_target for k in ["nombres", "nombre"]):
+                    val_to_set = rep_apellido
+                    assigned_cat = "p_rep_apellido"
+                elif "nombres" in eval_target and "apellidos" not in eval_target:
+                    val_to_set = rep_nombre
+                    assigned_cat = "p_rep_nombre"
+                elif any(k in eval_target or k in norm_fn for k in ["nombre"]):
+                    val_to_set = rep_full
+                    assigned_cat = "rep_nombre"
+                elif any(k in eval_target or k in norm_fn for k in ["direccion", "domicilio"]):
+                    val_to_set = profile.get("direccion_principal")
+                    assigned_cat = "rep_dir"
+                elif re.search(r'\b(ciudad\s*pais|ciudad\s*/\s*pais)\b', eval_target):
+                    val_to_set = f"{profile.get('ciudad', 'Medellín')} / {profile.get('pais', 'Colombia')}"
+                    assigned_cat = "rep_ciudad_pais"
+                elif re.search(r'\b(ciudad|municipio)\b', eval_target):
+                    val_to_set = profile.get("ciudad", "Medellin")
+                    assigned_cat = "rep_ciudad"
+
+            # ARIBA Sub-Block (Page 0) - ONLY Row 1 (Authorized person: Legal Representative)
+            elif sub_block == "ariba":
+                if any(k in eval_target or k in norm_fn for k in ["nombre", "nombres", "apellidos", "autorizada"]) or fn == "Text1":
+                    val_to_set = rep_full
+                    assigned_cat = "ariba_rep_nombre"
+                elif any(k in eval_target or k in norm_fn for k in ["correo", "email"]) or fn == "Text5":
+                    val_to_set = profile.get("correo_rep")
+                    assigned_cat = "ariba_rep_correo"
+                else:
+                    continue  # Secondary rows must remain completely empty per user instruction and ADR-0001
+
             elif (
                 (re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_left) or re.search(r'\b(nombres y apellidos|apellidos y nombres)\b', norm_above))
                 and ("razon social" in norm_left or "razon social" in norm_above)
             ):
-                # Compound: 'NOMBRES Y APELLIDOS / RAZÓN SOCIAL' -> Prioritize Legal Representative
                 val_to_set = rep_full
                 assigned_cat = "p_rep_full"
             
-            # 2. DV (Check early to avoid being swallowed by NIT)
+            # DV (Check early to avoid being swallowed by NIT)
             elif re.search(r'\b(dv|digito verificacion|digito de verificacion)\b', eval_target):
                 val_to_set = nit_dv
                 assigned_cat = "p_dv"
 
-            # 3. NIT / RUT (Local-first prevents 'NOMBRE O RAZÓN SOCIAL' above text pollution)
-            elif (re.search(r'\b(nit|rut|identificacion tributaria)\b', eval_target) or fn == "Texto34") and "dv" not in eval_target:
+            # NIT / RUT / TAX ID
+            elif (
+                re.search(r'\b(nit|rut|tax\s*id|identificacion\s*tributaria)\b', eval_target) or
+                (
+                    re.search(r'\b(nit|rut|tax\s*id)\b', norm_left) and 
+                    not any(k in eval_target for k in ["direccion", "ciudad", "pais", "telefono", "celular", "email", "correo", "nombre", "apellido", "cargo", "cuenta", "banco"])
+                ) or
+                (
+                    is_persona_juridica_context and 
+                    re.search(r'\b(numero\s+de\s+identificacion|numero\s+identificacion|no\s+identificacion|num\s+identificacion|identificacion\s+no|identificacion)\b', eval_target) and
+                    not any(k in eval_target for k in ["tipo", "lugar", "fecha", "expedicion"])
+                ) or
+                fn in ["Text4", "Texto34"]
+            ) and "dv" not in eval_target:
                 if "tipo" not in norm and ("p_nit", sec_key) not in assigned_section_categories:
-                    val_to_set = nit_base or nit_val
+                    sec_has_dv = any(re.search(r'\b(dv|digito)\b', rw.get("label", "") or rw.get("field_name", ""), re.IGNORECASE) for rw in rich_widgets if rw.get("section") == item.get("section"))
+                    val_to_set = (nit_base if sec_has_dv else nit_val) or nit_val
                     assigned_cat = "p_nit"
                 elif ftype == "ComboBox":
                     val_to_set = "NIT"
                     assigned_cat = "p_tipo_doc"
 
-            # 1. Razón Social (Assigned once per section to primary company name field)
-            elif any(k in eval_target for k in ["razon social", "nombre empresa", "nombre o razon social", "denominacion social"]) or fn == "Tipo de identificación":
+            # Razón Social
+            elif (
+                any(k in eval_target for k in ["razon social", "nombre empresa", "nombre o razon social", "denominacion social"]) or
+                fn in ["Text11", "Tipo de identificación"]
+            ):
                 if "representante" not in norm and "intermediario" not in norm and ("p_razon_social", sec_key) not in assigned_section_categories:
                     val_to_set = profile.get("razon_social")
                     assigned_cat = "p_razon_social"
@@ -708,32 +1106,53 @@ class PDFAgent:
                 val_to_set = profile.get("nombre_comercial", profile.get("razon_social"))
                 assigned_cat = "p_nom_comercial"
 
-            # 4. Apellidos y Nombres / Nombres y Apellidos en una sola casilla
+            # Bank references (Entidad and Producto)
+            elif (fn.startswith("Entidad") or eval_target == "entidad") and ("financiera" in norm_section or any(k in norm for k in ["bancaria", "bancarias", "referencias", "entidad"])):
+                val_to_set = profile.get("entidad_bancaria", "BANCOLOMBIA")
+                assigned_cat = "p_entidad_bancaria"
+            elif (fn.startswith("Producto") or eval_target in ["producto", "producto *"]) and ("financiera" in norm_section or any(k in norm for k in ["bancaria", "bancarias", "referencias", "entidad"])):
+                val_to_set = profile.get("tipo_cuenta", "Ahorros")
+                assigned_cat = "p_producto_bancario"
+
+            # Apellidos y Nombres / Nombres y Apellidos en una sola casilla
             elif any(k in eval_target for k in ["apellidos y nombres", "nombres y apellidos", "nombre y apellidos", "apellidos y nombre", "nombre completo"]):
                 val_to_set = rep_full
                 assigned_cat = "p_rep_full"
 
-            # 5. Primer Apellido (Representante Legal)
+            # Primer Apellido (Representante Legal)
             elif "primer apellido" in eval_target:
                 val_to_set = primer_apellido
                 assigned_cat = "p_primer_apellido"
                 
-            # 6. Segundo Apellido (Representante Legal)
+            # Segundo Apellido (Representante Legal)
             elif "segundo apellido" in eval_target:
                 val_to_set = segundo_apellido
                 assigned_cat = "p_segundo_apellido"
+
+            # Apellidos (Representante Legal when separate from Nombres)
+            elif any(k in eval_target for k in ["apellidos", "primer y segundo apellido"]) and not any(k in eval_target for k in ["nombres", "nombre"]):
+                val_to_set = rep_apellido
+                assigned_cat = "p_rep_apellido"
                 
-            # 7. Nombres (Representante Legal)
+            # Nombres (Representante Legal)
             elif "nombres" in eval_target and "apellidos" not in eval_target:
                 val_to_set = rep_nombre
                 assigned_cat = "p_rep_nombre"
                 
-            # 8. Representante Legal Full Name
+            # Representante Legal Full Name
             elif "representante legal" in eval_target and ("nombre" in eval_target or "apellidos" in eval_target or "representante" in eval_target) and ("p_rep_full", sec_key) not in assigned_section_categories:
                 val_to_set = rep_full
                 assigned_cat = "p_rep_full"
+
+            # Tipo y Número de identificación (Legal Representative)
+            elif (
+                re.search(r'\b(tipo y numero de identificacion|tipo y nro de identificacion|tipo y no de identificacion)\b', eval_target) or
+                (fn.lower().startswith("tipo y n") and (sub_block == "rep_legal" or "representante" in norm_section))
+            ):
+                val_to_set = f"{profile.get('tipo_documento', 'C.C.')} {profile.get('numero_cedula', '98555384')}"
+                assigned_cat = "firma_cedula"
             
-            # 9. Cédula / Número ID (incluye 'Tipo de identificación No')
+            # Cédula / Número ID
             elif (
                 (
                     re.search(r'\b(numero\s+id|nro\s+id|no\s+id|num\s+id|numero\s+de\s+id|cedula|numero\s+de\s+documento|no\s+documento|no\s+identificacion|identificacion\s+no|tipo\s+de\s+identificacion\s+no)\b', eval_target) or 
@@ -747,7 +1166,18 @@ class PDFAgent:
                 val_to_set = profile.get("numero_cedula")
                 assigned_cat = "numero_cedula"
 
-            # 10. Document Type
+            # Combined Lugar y Fecha de Expedición (Legal Representative)
+            elif (
+                re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', eval_target) or
+                re.search(r'\b(lugar y fecha de expedicion|lugar y fecha expedicion)\b', norm_fn)
+            ) and (sub_block == "rep_legal" or "representante" in norm_section or "representante" in norm):
+                val_to_set = f"{profile.get('lugar_expedicion_rep', 'Envigado')} {profile.get('fecha_expedicion_rep', '26-06-1989')}"
+                assigned_cat = "rep_lugar_fecha_exp"
+            elif fn == "Fecha8_af_date" or (fn.startswith("Fecha") and (sub_block == "rep_legal" or "representante" in norm_section)):
+                val_to_set = profile.get("fecha_expedicion_rep", "26-06-1989")
+                assigned_cat = "rep_fecha_exp"
+
+            # Document Type
             elif re.search(r'\b(tipo de documento|tipo doc|tipo id)\b', eval_target) and "no" not in eval_target:
                 if "empresa" in norm or "juridica" in norm:
                     val_to_set = "NIT"
@@ -756,7 +1186,7 @@ class PDFAgent:
                     val_to_set = profile.get("tipo_documento", "C.C.")
                     assigned_cat = "p_tipo_doc"
             
-            # 11. Lugar Expedición ('de' / 'De' tras cédula / expedida en)
+            # Lugar Expedición ('de' / 'De' tras cédula / expedida en)
             elif (
                 (
                     re.search(r'\b(lugar de expedicion|lugar expedicion|expedida en|ciudad de expedicion)\b', eval_target) or 
@@ -769,113 +1199,157 @@ class PDFAgent:
             ):
                 val_to_set = profile.get("lugar_expedicion_rep", "Envigado")
                 assigned_cat = "lugar_expedicion_rep"
+
+            # Ciudad y País combinados
+            elif re.search(r'\b(ciudad\s*pais|ciudad\s*/\s*pais)\b', eval_target) and ("p_ciudad_pais", sec_key) not in assigned_section_categories:
+                val_to_set = f"{profile.get('ciudad', 'Medellín')} / {profile.get('pais', 'Colombia')}"
+                assigned_cat = "p_ciudad_pais"
             
-            # 12. Nacionalidad (referencia al país: "Colombia", NO "Colombiana")
+            # Nacionalidad
             elif re.search(r'\bnacionalidad\b', eval_target):
                 val_to_set = profile.get("pais", "Colombia")
                 assigned_cat = "nacionalidad"
 
-            # 13. Contacto Principal / Persona de Contacto en Sección de Proveedores
-            elif "contacto" in norm and not any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "datos de contacto solo para clientes"]):
-                if any(k in eval_target for k in ["correo", "email", "e mail"]):
-                    val_to_set = profile.get("correo_rep", "guillermo.canon@iaclatam.com")
-                    assigned_cat = "contacto_correo"
-                elif any(k in eval_target for k in ["celular", "movil"]):
-                    val_to_set = profile.get("celular_rep", "3104120217")
-                    assigned_cat = "contacto_celular"
-                elif any(k in eval_target for k in ["telefono", "tel"]):
-                    val_to_set = profile.get("telefono", "2656868")
-                    assigned_cat = "contacto_telefono"
-                elif "cargo" in eval_target:
-                    val_to_set = "Representante Legal"
-                    assigned_cat = "contacto_cargo"
-                elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal"]):
-                    val_to_set = profile.get("representante_legal", rep_full)
-                    assigned_cat = "contacto_nombre"
+            # Generic Contact Rules (Single vs Coexistence)
+            elif ("contacto" in norm or _is_pagos_abonos(norm)) and not any(phrase in norm_section for phrase in ["solo para clientes", "para clientes", "solo para vendedores", "datos de contacto solo para clientes"]):
+                is_pagos = _is_pagos_abonos(norm) or _is_pagos_abonos(eval_target)
+                target_is_commercial = is_pagos or (not has_pagos_abonos_contact)
+                cat_prefix = "contacto_pagos" if is_pagos else "contacto"
 
-            # 14. Dirección Domicilio Principal
+                if target_is_commercial and cp:
+                    if any(k in eval_target for k in ["correo", "email", "e mail"]):
+                        val_to_set = cp_email or profile.get("correo_rep")
+                        assigned_cat = f"{cat_prefix}_correo"
+                    elif any(k in eval_target for k in ["celular", "movil"]):
+                        val_to_set = cp_celular or profile.get("celular_rep")
+                        assigned_cat = f"{cat_prefix}_celular"
+                    elif any(k in eval_target for k in ["telefono", "tel"]):
+                        val_to_set = cp_celular or profile.get("telefono")
+                        assigned_cat = f"{cat_prefix}_telefono"
+                    elif "cargo" in eval_target:
+                        val_to_set = cp.get("cargo") or "Asesor Comercial"
+                        assigned_cat = f"{cat_prefix}_cargo"
+                    elif any(k in eval_target or k in norm for k in ["documento", "cedula", "identificacion"]):
+                        val_to_set = cp.get("documento_identidad")
+                        assigned_cat = f"{cat_prefix}_cedula"
+                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal", "notificar pagos", "abonos"]):
+                        val_to_set = cp_nombre or profile.get("representante_legal", rep_full)
+                        assigned_cat = f"{cat_prefix}_nombre"
+                else:
+                    if any(k in eval_target for k in ["correo", "email", "e mail"]):
+                        val_to_set = profile.get("correo_rep", "guillermo.canon@iaclatam.com")
+                        assigned_cat = f"{cat_prefix}_correo"
+                    elif any(k in eval_target for k in ["celular", "movil"]):
+                        val_to_set = profile.get("celular_rep", "3104120217")
+                        assigned_cat = f"{cat_prefix}_celular"
+                    elif any(k in eval_target for k in ["telefono", "tel"]):
+                        val_to_set = profile.get("telefono", "2656868")
+                        assigned_cat = f"{cat_prefix}_telefono"
+                    elif "cargo" in eval_target:
+                        val_to_set = "Representante Legal"
+                        assigned_cat = f"{cat_prefix}_cargo"
+                    elif any(k in eval_target or k in norm for k in ["documento", "cedula", "identificacion"]):
+                        val_to_set = profile.get("numero_cedula", "98555384")
+                        assigned_cat = f"{cat_prefix}_cedula"
+                    elif any(k in eval_target or k in norm for k in ["nombre", "persona de contacto", "contacto principal", "notificar pagos", "abonos"]):
+                        val_to_set = profile.get("representante_legal", rep_full)
+                        assigned_cat = f"{cat_prefix}_nombre"
+
+            # Dirección Domicilio Principal
             elif (re.search(r'\b(direccion|domicilio|oficina principal direccion|direccion domicilio)\b', eval_target)) and ("p_dir", sec_key) not in assigned_section_categories:
                 val_to_set = profile.get("direccion_principal")
                 assigned_cat = "p_dir"
             
-            # 15. Ciudad
+            # Ciudad
             elif (re.search(r'\b(ciudad|municipio)\b', eval_target)) and "sucursal" not in norm and "expedicion" not in norm and "nacimiento" not in norm and ("p_ciudad", sec_key) not in assigned_section_categories:
                 val_to_set = profile.get("ciudad", "Medellin")
                 assigned_cat = "p_ciudad"
             
-            # 16. Departamento
-            elif (re.search(r'\b(departamento|dpto)\b', eval_target)) and ("p_dpto", sec_key) not in assigned_section_categories:
-                val_to_set = profile.get("departamento", "Antioquia")
+            # Departamento / País
+            elif (re.search(r'\b(departamentopais|departamento|dpto)\b', eval_target)) and ("p_dpto", sec_key) not in assigned_section_categories:
+                if "pais" in eval_target or "/" in item.get("attr_label", ""):
+                    val_to_set = f"{profile.get('departamento', 'Antioquia')} / {profile.get('pais', 'Colombia')}"
+                else:
+                    val_to_set = profile.get("departamento", "Antioquia")
                 assigned_cat = "p_dpto"
             
-            # 17. País
+            # País
             elif (re.search(r'\b(pais|pais de domicilio)\b', eval_target)) and ("p_pais", sec_key) not in assigned_section_categories:
                 val_to_set = profile.get("pais", "Colombia")
                 assigned_cat = "p_pais"
             
-            # 18. Email / Correo (evaluated before phone to avoid cell/email label collision)
+            # Email / Correo
             elif (re.search(r'\b(correo|e mail|email|correo electronico)\b', eval_target) or "email" in fn.lower() or "correo" in fn.lower()) and ("p_email", sec_key) not in assigned_section_categories:
                 val_to_set = profile.get("correo_rep")
                 assigned_cat = "p_email"
 
-            # 19. Teléfono / Celular
+            # Teléfono / Celular
             elif (re.search(r'\b(telefono celular|celular)\b', eval_target)) and ("p_cel", sec_key) not in assigned_section_categories:
                 val_to_set = profile.get("celular_rep", profile.get("telefono"))
                 assigned_cat = "p_cel"
-            elif (re.search(r'\b(telefono|telefono fijo|tel)\b', eval_target)) and ("p_tel", sec_key) not in assigned_section_categories:
+            elif (re.search(r'\b(telefonos|telefono|telefono fijo|tel)\b', eval_target)) and ("p_tel", sec_key) not in assigned_section_categories:
                 val_to_set = profile.get("telefono")
                 assigned_cat = "p_tel"
             
-            # 20. Web
+            # Web
             elif re.search(r'\b(pagina web|sitio web|web)\b', eval_target):
                 val_to_set = profile.get("pagina_web")
             
-            # 21. Banco / Cuenta
+            # Banco / Cuenta
             elif re.search(r'\b(banco|entidad bancaria|entidad financiera)\b', eval_target):
                 val_to_set = profile.get("entidad_bancaria")
-            elif (re.search(r'\b(numero de cuenta|no cuenta|cuenta no)\b', eval_target)) and "tipo" not in norm:
+            elif (
+                re.search(r'\b(numero de cuenta|no cuenta|cuenta no|numero cuenta|no de cuenta|numerodecuenta)\b', eval_target) or
+                re.search(r'\b(numero de cuenta|no cuenta|cuenta no|numero cuenta|no de cuenta)\b', norm_fn)
+            ) and not re.search(r'\b(tipo de cuenta|tipo cuenta)\b', eval_target):
                 val_to_set = profile.get("numero_cuenta")
+                assigned_cat = "p_numero_cuenta"
             elif re.search(r'\b(tipo de cuenta|tipo cuenta)\b', eval_target):
                 val_to_set = profile.get("tipo_cuenta")
             
-            # 22. Tipo de empresa
+            # Tipo de empresa
             elif re.search(r'\b(tipo de empresa)\b', eval_target):
                 val_to_set = "PRIVADA"
 
-            # 23. Porcentaje de participación (Accionistas / Beneficiarios)
+            # Porcentaje de participación
             elif re.search(r'\b(participacion|porcentaje de participacion)\b', eval_target):
                 val_to_set = "100"
                 assigned_cat = "p_participacion"
 
-            # 24. Beneficiario final
-            elif re.search(r'\b(es beneficiario final|beneficiario final)\b', eval_target):
+            # Beneficiario final (Only for boolean/confirmation fields, never when asking for name/id/doc)
+            elif re.search(r'\b(es beneficiario final)\b', eval_target) and not any(k in eval_target or k in norm_fn for k in ["nombre", "identificacion", "documento", "tipo", "numero"]):
                 val_to_set = "SI"
                 assigned_cat = "p_beneficiario_final"
 
-            # 25. Total Activos
-            elif re.search(r'\b(total activos|activos)\b', eval_target) and "pasivo" not in eval_target and "ingreso" not in eval_target:
+            # Total Activos
+            elif re.search(r'\b(total activos|activos|activo totales|activo total|activos totales|total de activos|activo)\b', eval_target) and "pasivo" not in eval_target and "ingreso" not in eval_target and "actividad" not in eval_target:
                 val_to_set = profile.get("total_activos")
                 assigned_cat = "p_activos"
 
-            # 26. Total Pasivos
+            # Total Pasivos
             elif re.search(r'\b(total pasivos|pasivos)\b', eval_target) and "activo" not in eval_target:
                 val_to_set = profile.get("total_pasivos")
                 assigned_cat = "p_pasivos"
 
-            # 27. Total Patrimonio
+            # Total Patrimonio
             elif re.search(r'\b(total patrimonio|patrimonio)\b', eval_target):
                 val_to_set = profile.get("total_patrimonio")
                 assigned_cat = "p_patrimonio"
 
-            # 28. Total Ingresos Mensuales
+            # Total Ingresos Mensuales / Operacionales
             elif re.search(r'\b(total ingresos mensuales|ingresos mensuales|ingresos operacionales)\b', eval_target) and "egreso" not in eval_target:
                 val_to_set = profile.get("total_ingresos_mensuales")
                 assigned_cat = "p_ingresos"
 
-            # 29. Total Egresos Mensuales
+            # Total Egresos Mensuales
             elif re.search(r'\b(total egresos mensuales|egresos mensuales|gastos mensuales)\b', eval_target) and "ingreso" not in eval_target:
                 val_to_set = profile.get("total_egresos_mensuales")
                 assigned_cat = "p_egresos"
+
+            # Actividad económica principal
+            elif "actividad economica de la cual proviene" in eval_target:
+                val_to_set = profile.get("actividad_economica_principal", "Venta de Licencias y Servicios")
+                assigned_cat = "p_actividad_economica"
 
             if val_to_set:
                 val_str = str(val_to_set).strip()
@@ -883,7 +1357,8 @@ class PDFAgent:
                     label=item.get("label", ""),
                     section=item.get("section", ""),
                     field_name=fn,
-                    proposed_value=val_str
+                    proposed_value=val_str,
+                    is_secondary_row=item.get("is_secondary_row", False)
                 )
                 if v_res.is_valid:
                     mappings[fn] = (val_str, assigned_cat or "general")
@@ -892,16 +1367,24 @@ class PDFAgent:
                 else:
                     print(f"[INFO] Deterministic match skipped for '{fn}': {v_res.reason}")
 
-        return mappings
+        return mappings, force_blank_fields
+
 
     def _fill_acroform(self, pdf_path: str, fields: Dict[str, str], user_instructions: str) -> str:
         """Fill an interactive PDF form with AcroForm widgets using rich label extraction + LLM + dictionary hybrid."""
         doc = fitz.open(pdf_path)
         rich_widgets = self._extract_rich_acro_widgets(doc)
+
+        cp = self.commercial_profile
+        com_nombre = (f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() or cp.get("profile_name", "")) if cp else "Kelly Yohana Delgado Macea"
+        com_email = (cp.get("email") if cp else "") or "kelly.delgado@iaclatam.com"
+        com_celular = (str(cp.get("celular", "")).replace(" ", "") if cp else "") or "3014750760"
+        com_cargo = (cp.get("cargo") if cp else "") or "Especialista Comercial / Licitaciones"
         
         # 1. Deterministic high-confidence matches from dictionary
-        deterministic_matches = self._deterministic_acroform_match(rich_widgets)
-        print(f"[INFO] Deterministic AcroForm matches found: {len(deterministic_matches)}")
+        deterministic_matches, det_force_blank = self._deterministic_acroform_match(rich_widgets)
+        print(f"[INFO] Deterministic AcroForm matches found: {len(deterministic_matches)}, force-blank: {det_force_blank}")
+
 
         # 2. LLM enriched page-by-page mapping
         llm_matches: Dict[str, str] = {}
@@ -931,7 +1414,7 @@ Given the following interactive PDF form fields on Page {pno + 1}:
 {fields_text}
 
 Company Profile Data:
-{json.dumps(self.company_profile, ensure_ascii=False, indent=2)}
+{json.dumps(dict(self.company_profile, comercial_responsable=self.commercial_profile) if self.commercial_profile else self.company_profile, ensure_ascii=False, indent=2)}
 
 User Instructions:
 {user_instructions}
@@ -966,7 +1449,16 @@ CRITICAL RULES — READ CAREFULLY:
 9. DO NOT fill: Foreigners, Counterparties, Internal entity use ('Uso exclusivo de la entidad'), Fund Origins ('Origen de fondos').
 10. OTRA / OTRO fields → leave completely empty.
 11. CheckBoxes → '1' or 'Yes' when True, 'Off' when False.
-12. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
+12. REGLA DE CONTACTOS: Si coexisten casillas de 'Contacto Principal' y 'Contacto para notificar pagos o abonos': 'Contacto Principal' se completa con los datos del Representante Legal ({self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}), y 'Contacto para notificar pagos o abonos' con el Comercial responsable. Si solo existe 'Contacto Principal', se asigna siempre al Comercial responsable.
+14. REGLA GLOBAL DE IDENTIFICACIÓN Y SUPRESIÓN DE EXPEDICIÓN EN PERSONA JURÍDICA:
+    - Si el formulario solicita 'NÚMERO DE IDENTIFICACIÓN' en contexto corporativo / Persona Jurídica / Información General, registrar el NIT de la empresa ({self.company_profile.get('nit')}), NUNCA la cédula del representante legal.
+    - CONDICIÓN DE SUPRESIÓN TRANSVERSAL: Todo campo de 'LUGAR Y FECHA DE EXPEDICIÓN' o 'EXPEDICIÓN' en la sección corporativa / persona jurídica DEBE PERMANECER ESTRICTAMENTE VACÍO (no aplica expedición personal para el NIT).
+15. LUGAR Y FECHA DE EXPEDICIÓN DEL REPRESENTANTE LEGAL: En campos combinados 'LUGAR Y FECHA DE EXPEDICIÓN' del Representante Legal, asignar: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')} {self.company_profile.get('fecha_expedicion_rep', '26-06-1989')}'.
+16. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: Encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...' asignan SIEMPRE los datos del Contacto Comercial en sesión ({com_nombre}, {com_email}, {com_celular}, {com_cargo}), NUNCA los del Representante Legal.
+18. CAMPOS DE PERSONA NATURAL (PN): Dejar COMPLETAMENTE VACÍOS los campos etiquetados con 'Nombres y apellidos PN' o que contengan la sigla 'PN'. No escribir información allí cuando la entidad diligenciada es Persona Jurídica.
+19. FILAS SECUNDARIAS EN TABLAS: En cuadrículas o tablas (como el Anexo de Composición Accionaria), diligenciar ÚNICAMENTE la Fila 1. NUNCA diligenciar filas secundarias (dejar completamente vacías sin repetir la razón social).
+20. REGLA DE CONSISTENCIA CONTEXTUAL DE IDENTIFICACIÓN: Si en una fila o bloque se diligenció Persona Jurídica ('{self.company_profile.get('razon_social')}'), el campo subsiguiente de 'Identificación (NIT/CC)' asocia estrictamente el NIT ({self.company_profile.get('nit')}). Si se diligenció una persona natural ('{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'), asocia su cédula de ciudadanía ({self.company_profile.get('numero_cedula', '98555384')}).
+17. Return ONLY a valid JSON object mapping exact field IDs to string values. If no data, return {{}}.
 """
                 try:
                     raw_text = self._call_llm([
@@ -994,7 +1486,8 @@ CRITICAL RULES — READ CAREFULLY:
                 label=meta.get("label", k),
                 section=meta.get("section", ""),
                 field_name=k,
-                proposed_value=v
+                proposed_value=v,
+                is_secondary_row=meta.get("is_secondary_row", False)
             )
             if v_res.is_valid:
                 filtered_llm[k] = v
@@ -1015,7 +1508,7 @@ CRITICAL RULES — READ CAREFULLY:
             proposals.append((k, lbl, cat, v, 1.0, sec))
 
         for k, v in filtered_llm.items():
-            if k not in deterministic_matches:
+            if k not in deterministic_matches and k not in det_force_blank:
                 meta = widget_meta_map.get(k, {})
                 lbl = meta.get("label", k)
                 sec = meta.get("section", "")

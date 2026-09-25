@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { 
   TemplateInfo, 
   PDFPage, 
@@ -11,7 +11,9 @@ import type {
   GlobalSignature,
   CategorizedCompanyData,
   EmployerProfile,
-  FillResultData
+  FillResultData,
+  CommercialProfilePublic,
+  AdminSessionUser
 } from './types';
 import { 
   fetchTemplates, 
@@ -30,8 +32,13 @@ import {
   fetchCategorizedCompany,
   saveCategorizedCompany,
   fetchEmployerProfiles,
-  saveEmployerProfiles
+  saveEmployerProfiles,
+  fetchPublicCommercialProfiles,
+  fetchCurrentAuthUser,
+  adminCheck,
+  adminLogout
 } from './api';
+import { supabase } from './supabaseClient';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
 import { Sidebar } from './components/Sidebar';
@@ -39,6 +46,9 @@ import { PDFCanvas } from './components/PDFCanvas';
 import { DataManagerModal } from './components/data-manager/DataManagerModal';
 import { ResultModal } from './components/ResultModal';
 import { ConfirmModal } from './components/ConfirmModal';
+import { CommercialProfileAdminModal } from './components/CommercialProfileAdminModal';
+import { AuthPortal } from './components/auth/AuthPortal';
+import { ResetPasswordView } from './components/auth/ResetPasswordView';
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -74,8 +84,21 @@ export const App: React.FC = () => {
   // Custom Confirm Dialog State
   const [confirmModalData, setConfirmModalData] = useState<ConfirmModalState | null>(null);
   
+  // User Authentication & Auth Gate State
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<AdminSessionUser | null>(null);
+  const [isPasswordRecoveryMode, setIsPasswordRecoveryMode] = useState<boolean>(false);
+
   // Global Signature State (Strictly Backend Authoritative, no localStorage)
   const [globalSignature, setGlobalSignature] = useState<GlobalSignature | null>(null);
+
+  // Commercial Profile State (ADR-0008)
+  const [commercialProfiles, setCommercialProfiles] = useState<CommercialProfilePublic[]>([]);
+  const [isLoadingCommercialProfiles, setIsLoadingCommercialProfiles] = useState<boolean>(false);
+  const [activeCommercialProfileId, setActiveCommercialProfileId] = useState<string>(() => {
+    return sessionStorage.getItem('active_commercial_profile_id') || '';
+  });
+  const [isCommercialAdminModalOpen, setIsCommercialAdminModalOpen] = useState<boolean>(false);
 
   // Style and editing states
   const [currentStyle, setCurrentStyle] = useState<ItemStyle>({
@@ -104,9 +127,160 @@ export const App: React.FC = () => {
     }, 3500);
   };
 
-  // Initial load - Strictly Backend Authoritative
+  const loadCommercialProfiles = async () => {
+    try {
+      setIsLoadingCommercialProfiles(true);
+      const profiles = await fetchPublicCommercialProfiles();
+      setCommercialProfiles(profiles);
+
+      // Validate conscious selection
+      setActiveCommercialProfileId((current) => {
+        if (!current) return '';
+        if (current === 'legal_rep_only') return current;
+        const exists = profiles.some((p) => p.id === current && p.is_active);
+        if (!exists) {
+          sessionStorage.removeItem('active_commercial_profile_id');
+          return '';
+        }
+        return current;
+      });
+    } catch (err: any) {
+      console.error('Error fetching public commercial profiles:', err);
+    } finally {
+      setIsLoadingCommercialProfiles(false);
+    }
+  };
+
+  const handleSelectCommercialProfile = (id: string) => {
+    setActiveCommercialProfileId(id);
+    if (id) {
+      sessionStorage.setItem('active_commercial_profile_id', id);
+    } else {
+      sessionStorage.removeItem('active_commercial_profile_id');
+    }
+  };
+
+  // Filter commercial profiles based on role:
+  // Non-admin (commercial) ONLY sees their own profile ("el perfil de uno y no de los demás")
+  // Admin sees all active commercial profiles
+  const visibleCommercialProfiles: CommercialProfilePublic[] = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.role === 'admin') {
+      return commercialProfiles.filter((p: CommercialProfilePublic) => p.role !== 'admin');
+    }
+    return commercialProfiles.filter(
+      (p: CommercialProfilePublic) => p.id === currentUser.id || (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
+    );
+  }, [commercialProfiles, currentUser]);
+
+  // Auto-select commercial's own profile upon login/loading
   useEffect(() => {
-    async function init() {
+    if (currentUser && currentUser.role !== 'admin' && visibleCommercialProfiles.length > 0) {
+      const myProfile = visibleCommercialProfiles.find(
+        (p: CommercialProfilePublic) => p.id === currentUser.id || (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
+      );
+      if (myProfile && (!activeCommercialProfileId || activeCommercialProfileId !== myProfile.id)) {
+        setActiveCommercialProfileId(myProfile.id);
+        sessionStorage.setItem('active_commercial_profile_id', myProfile.id);
+      }
+    }
+  }, [currentUser, visibleCommercialProfiles, activeCommercialProfileId]);
+
+  // Check active session and synchronize Supabase Auth state changes
+  useEffect(() => {
+    let isMounted = true;
+
+    async function checkInitialAuth() {
+      if (typeof window !== 'undefined') {
+        const path = window.location.pathname;
+        const hash = window.location.hash || '';
+        if (path === '/auth/reset-password' || hash.includes('type=recovery') || hash.includes('type=invite')) {
+          if (isMounted) setIsPasswordRecoveryMode(true);
+        }
+      }
+
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (data.session && isMounted) {
+          try {
+            const user = await fetchCurrentAuthUser();
+            if (user.authenticated && isMounted) {
+              setCurrentUser(user);
+              if (user.id) {
+                setActiveCommercialProfileId(user.id);
+                sessionStorage.setItem('active_commercial_profile_id', user.id);
+              }
+              setAuthChecked(true);
+              return;
+            }
+          } catch (e) {
+            console.warn('[App] Supabase session present but fetchCurrentAuthUser failed:', e);
+          }
+        }
+
+        const legacyUser = await adminCheck();
+        if (isMounted) {
+          if (legacyUser.authenticated) {
+            setCurrentUser(legacyUser);
+            if (legacyUser.id) {
+              setActiveCommercialProfileId(legacyUser.id);
+              sessionStorage.setItem('active_commercial_profile_id', legacyUser.id);
+            }
+          } else {
+            setCurrentUser(null);
+          }
+        }
+      } catch {
+        if (isMounted) setCurrentUser(null);
+      } finally {
+        if (isMounted) setAuthChecked(true);
+      }
+    }
+
+    checkInitialAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      if (event === 'PASSWORD_RECOVERY') {
+        if (isMounted) {
+          setIsPasswordRecoveryMode(true);
+        }
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        if (session) {
+          try {
+            const user = await fetchCurrentAuthUser();
+            if (isMounted) {
+              setCurrentUser(user);
+              if (user.id) {
+                setActiveCommercialProfileId(user.id);
+                sessionStorage.setItem('active_commercial_profile_id', user.id);
+              }
+            }
+          } catch (err) {
+            console.error('[App] Error refreshing auth user on auth change:', err);
+          }
+        }
+      } else if (event === 'SIGNED_OUT') {
+        if (isMounted) {
+          setCurrentUser(null);
+          setActiveCommercialProfileId('');
+          sessionStorage.removeItem('active_commercial_profile_id');
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+
+  // When user is authenticated, load workspace data
+  useEffect(() => {
+    if (!currentUser) return;
+
+    async function initWorkspace() {
       try {
         setIsLoading(true);
         const [tplList, compData, catCompany, profiles, sig] = await Promise.all([
@@ -126,14 +300,37 @@ export const App: React.FC = () => {
         if (tplList.length > 0) {
           setSelectedTemplate(tplList[0].id);
         }
+
+        await loadCommercialProfiles();
       } catch (err: any) {
-        showToast(`Error al inicializar: ${err.message}`, 'error');
+        showToast(`Error al inicializar espacio de trabajo: ${err.message}`, 'error');
       } finally {
         setIsLoading(false);
       }
     }
-    init();
-  }, []);
+    initWorkspace();
+  }, [currentUser]);
+
+  const handleLogout = async () => {
+    try {
+      await adminLogout();
+    } catch (err) {
+      console.error(err);
+    }
+    setCurrentUser(null);
+    setActiveCommercialProfileId('');
+    sessionStorage.removeItem('active_commercial_profile_id');
+    showToast('Has cerrado sesión correctamente', 'info');
+  };
+
+  const handleAuthenticated = (user: AdminSessionUser) => {
+    setCurrentUser(user);
+    if (user.id) {
+      setActiveCommercialProfileId(user.id);
+      sessionStorage.setItem('active_commercial_profile_id', user.id);
+    }
+    showToast(`¡Bienvenido, ${user.nombre || user.profile_name || 'Comercial'}!`, 'success');
+  };
 
   // When selected template changes
   useEffect(() => {
@@ -405,6 +602,10 @@ export const App: React.FC = () => {
 
   const handleGeneratePdf = async (isTemp: boolean = false) => {
     if (!selectedTemplate) return;
+    if (!activeCommercialProfileId) {
+      showToast('⚠️ Por favor selecciona un responsable comercial o elige "Solo Representante Legal"', 'error');
+      return;
+    }
     try {
       setIsGenerating(true);
       if (pages.length > 0 && !isTemp) {
@@ -418,7 +619,7 @@ export const App: React.FC = () => {
         await saveTemplateMapping(payload).catch(() => {});
       }
 
-      const res = await generateFilledPdf(selectedTemplate, mappings, isTemp);
+      const res = await generateFilledPdf(selectedTemplate, mappings, isTemp, activeCommercialProfileId);
       
       setResultModalData({
         filename: res.filename,
@@ -446,11 +647,15 @@ export const App: React.FC = () => {
       showToast('Por favor selecciona o sube un PDF primero', 'info');
       return;
     }
+    if (!activeCommercialProfileId) {
+      showToast('⚠️ Por favor selecciona un responsable comercial o elige "Solo Representante Legal"', 'error');
+      return;
+    }
     try {
       setIsAiFilling(true);
       showToast('✨ Procesando Autollenado IA con OpenAI / LLM...', 'info');
 
-      const res = await aiFillPdf(selectedTemplate);
+      const res = await aiFillPdf(selectedTemplate, activeCommercialProfileId);
 
       setResultModalData({
         filename: res.filename,
@@ -521,6 +726,46 @@ export const App: React.FC = () => {
     activeImage.filename === globalSignature.filename
   );
 
+  if (!authChecked) {
+    return (
+      <div 
+        style={{ 
+          minHeight: '100vh', 
+          width: '100vw', 
+          backgroundColor: '#0b0f17', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          gap: '16px' 
+        }}
+      >
+        <div className="spinner-large" style={{ borderColor: 'rgba(248, 177, 38, 0.2)', borderTopColor: '#f8b126' }} />
+        <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontFamily: 'Inter, sans-serif' }}>
+          Verificando credenciales de acceso...
+        </span>
+      </div>
+    );
+  }
+
+  if (isPasswordRecoveryMode) {
+    return (
+      <ResetPasswordView
+        onComplete={() => {
+          setIsPasswordRecoveryMode(false);
+          showToast('Contraseña actualizada exitosamente. Inicia sesión con tus nuevas credenciales.', 'success');
+        }}
+        onCancel={() => {
+          setIsPasswordRecoveryMode(false);
+        }}
+      />
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthPortal onAuthenticated={handleAuthenticated} />;
+  }
+
   return (
     <div className="app-container">
       {/* Top Navbar */}
@@ -543,6 +788,17 @@ export const App: React.FC = () => {
         isAiFilling={isAiFilling}
         mappingsCount={mappings.length}
         isTemporarySession={isTemporarySession}
+        commercialProfiles={visibleCommercialProfiles}
+        activeCommercialProfileId={activeCommercialProfileId}
+        onSelectCommercialProfile={handleSelectCommercialProfile}
+        onOpenCommercialProfileAdmin={() => {
+          if (currentUser?.role === 'admin') {
+            setIsCommercialAdminModalOpen(true);
+          }
+        }}
+        isLoadingCommercialProfiles={isLoadingCommercialProfiles}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* Secondary Toolbar (Font, Size, Bold, Color, Text Edit, Add Text, Add Image) */}
@@ -631,6 +887,13 @@ export const App: React.FC = () => {
         initialEmployerProfiles={employerProfiles}
         globalSignature={globalSignature}
         onSaveData={handleSaveCompanyData}
+      />
+
+      {/* Commercial Profile Admin Modal (ADR-0008) */}
+      <CommercialProfileAdminModal
+        isOpen={isCommercialAdminModalOpen}
+        onClose={() => setIsCommercialAdminModalOpen(false)}
+        onProfilesUpdated={loadCommercialProfiles}
       />
 
       {/* Generation Result Modal */}

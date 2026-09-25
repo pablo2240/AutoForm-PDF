@@ -55,12 +55,22 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **`financiero` Category**: Dedicated domain category separating corporate statutory balance sheets from operational payment accounts (`banco`).
 - **Accounting Invariant**: Corporate balance sheet rule enforced in canonical data: $\text{Activos} - \text{Pasivos} = \text{Patrimonio}$.
 
+### Commercial Profiles & Secure Relational Persistence (ADR-0008)
+- **`CommercialProfile` (Responsable Comercial)**: Designated corporate sales representative or contact liaison. Contains `profile_name`, `nombre`, `apellido`, `cargo`, `email`, `celular`, and optional sensitive identity `documento_identidad`.
+- **Three-Zone Form Demarcation**: Strict separation of target form domains:
+  1. *Zona Legal / Corporativa / Declaraciones*: Strictly Legal Representative (`Guillermo Cañón Sarria`).
+  2. *Zona Bancaria / Financiera*: Corporate accounts & balance sheets.
+  3. *Zona Comercial / Contacto Proveedor*: Active `CommercialProfile` (or fallback to Legal Representative when explicitly `"legal_rep_only"`).
+- **Conscious Selection Context**: Header-level workflow enforcing an active choice (`commercial_profile_id` or `"legal_rep_only"`). Unselected states are blocked in the UI and rejected with HTTP 422 in `/api/generate`.
+- **Privacy-Preserving DTO Separation (Ley 1581 / Habeas Data)**: Public selector endpoint `GET /api/commercial-profiles` projects strictly public liaison data, excluding `documento_identidad`. Identification numbers are resolved exclusively server-side during PDF stamping or through HttpOnly administrative sessions.
+- **Durable Relational Persistence (Neon PostgreSQL)**: Dedicated PostgreSQL persistence decoupling commercial contact data from Render's ephemeral filesystem, managed via Alembic migrations (`preDeployCommand`).
+
 ---
 
 ## 2. Shared Data Entities
 - **`company_profile` (`company_data.json`)**: Single source of truth containing official corporate data (NIT, Razón Social, Representante Legal, Cédula, Bancos, Activos, Pasivos, Patrimonio, Ingresos, Egresos). Grounding rule: if not present in this file, it must never be written. Nationality is strictly standardized to `"Colombia"`.
+- **`commercial_profiles` (Neon PostgreSQL Table)**: Authoritative relational entity storing commercial representatives with audit columns (`created_at`, `updated_at`, `last_modified_by_ip`) and soft-delete (`is_active`). Replaces legacy ephemeral `employer_profiles.json`.
 - **`categorized_company.json`**: UI accordion categorizations (`id`, `contacto`, `banco`, `financiero`, `otros`) persisted independently in the backend.
-- **`employer_profiles.json`**: Secondary signatory and contact profiles (e.g. Kelly Delgado) persisted independently in the backend.
 - **`field_dictionary.py`**: Semantic synonyms mapping real corporate profile keys to common Colombian form variations, alongside exclusion rules.
 - **`KnowledgeBase` (`knowledge_base.py`)**: CEO persona prompt builder embodying Guillermo Cañón Sarria (CEO of IAC) with Red/Green zone compliance boundaries.
 

@@ -9,11 +9,12 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     "razon_social": [
         "Nombre empresa", "Nombre / Razon social", "Nombre / Razón Social", 
         "Nombre Entidad", "Razon social", "Razón Social", "Denominación Social",
-        "Empresa", "Organización"
+        "Empresa", "Organización", "Nombre Persona Jurídica", "Nombre Persona Juridica"
     ],
     "nit": [
         "nit", "NIT", "Numero Nit", "Número NIT", "Nro nit", "Nro. NIT", 
-        "cc/ce/pas/nit", "rut", "RUT", "Identificación Tributaria", "Número de Identificación Tributaria"
+        "cc/ce/pas/nit", "rut", "RUT", "Identificación Tributaria", "Número de Identificación Tributaria",
+        "N.I.T. o TAX ID", "N.I.T. o TAX ID *", "TAX ID", "N.I.T."
     ],
     "numero_cedula": [
         "cedula", "cédula", "c.c", "C.C.", "c.c", "identificacion", "identificación", 
@@ -57,6 +58,19 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     "contacto_cargo": [
         "Cargo del Contacto", "Cargo Contacto", "Cargo"
     ],
+    "contacto_pagos_nombre": [
+        "Contacto para notificar pagos o abonos", "Contacto para notificar pagos y abonos",
+        "Contacto para notificar pagos", "Contacto pagos o abonos", "Contacto pagos/abonos",
+        "Contacto Notificación Pagos", "Contacto Pagos"
+    ],
+    "contacto_pagos_correo": [
+        "Correo contacto para notificar pagos o abonos", "Email notificar pagos",
+        "Correo notificación pagos", "Correo electrónico contacto para notificar pagos o abonos"
+    ],
+    "contacto_pagos_celular": [
+        "Teléfono contacto para notificar pagos o abonos", "Celular notificar pagos",
+        "Teléfono celular contacto para notificar pagos o abonos"
+    ],
     "direccion_principal": [
         "direccion", "dirección", "residencia", "sede", "ubicacion principal", "ubicación principal",
         "Dirección Domicilio", "Dirección Principal", "Domicilio Principal", "Dirección de Notificación"
@@ -92,20 +106,22 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "entidad_bancaria": [
         "Banco", "Entidad Bancaria", "Entidad Bancaria / Financiera", "Nombre del Banco", 
-        "Institución Financiera", "Entidad Financiera", "Banco Principal"
+        "Institución Financiera", "Entidad Financiera", "Banco Principal", "Entidad", "Referencias Bancarias"
     ],
     "numero_cuenta": [
         "Número de Cuenta", "Numero de Cuenta", "No. Cuenta / Cta. No.", "No. Cuenta", 
-        "Cuenta Bancaria No.", "Cuenta No.", "No. de Cuenta", "No. Cuenta Bancaria"
+        "Cuenta Bancaria No.", "Cuenta No.", "No. de Cuenta", "No. Cuenta Bancaria",
+        "Número de cuenta", "Numero de cuenta", "N° Cuenta", "Cuenta"
     ],
     "tipo_cuenta": [
-        "Tipo de Cuenta", "Tipo Cuenta", "Modalidad de Cuenta", "Tipo de Producto", "Clase de Cuenta"
+        "Tipo de Cuenta", "Tipo Cuenta", "Modalidad de Cuenta", "Tipo de Producto", "Clase de Cuenta", "Producto", "Producto *"
     ],
     "sucursal": [
         "Sucursal / Agencia", "Sucursal", "Sucursal del Banco", "Agencia"
     ],
     "total_activos": [
-        "Total Activos", "Activos", "Activos (Pesos)", "Valor Activos", "Total de Activos"
+        "Total Activos", "Activos", "Activos (Pesos)", "Valor Activos", "Total de Activos",
+        "Activo Totales", "Activo Totales (Último balance)", "Activo Total", "Activos Totales"
     ],
     "total_pasivos": [
         "Total Pasivos", "Pasivos", "Pasivos (Pesos)", "Valor Pasivos", "Total de Pasivos"
@@ -118,6 +134,18 @@ FIELD_SYNONYMS: Dict[str, List[str]] = {
     ],
     "total_egresos_mensuales": [
         "Total Egresos Mensuales", "Egresos Mensuales", "Gastos Mensuales", "Egresos Mensuales (Pesos)", "Total Egresos", "Egresos"
+    ],
+    "ariba_rep_nombre": [
+        "Nombres y apellidos persona autorizada", "Persona autorizada ARIBA", "Nombres y apellidos autorizada"
+    ],
+    "ariba_rep_correo": [
+        "Correo electrónico persona autorizada", "Correo ARIBA", "Correo electrónico ARIBA"
+    ],
+    "rep_lugar_fecha_exp": [
+        "Lugar y Fecha de Expedición", "Lugar y Fecha de Expedicion",
+        "Lugar y fecha de expedición", "Lugar y fecha de expedicion",
+        "Ciudad y Fecha de Expedición", "Ciudad y fecha de expedición",
+        "Lugar y fecha de expedición del representante"
     ]
 }
 
@@ -131,12 +159,19 @@ IGNORE_RULES: List[str] = [
     "7. APELLIDOS Y NOMBRES COMPLETOS: Cuando un campo pida 'Apellidos y Nombres' o 'Nombres y Apellidos' en una sola casilla, escribe el nombre completo: 'Guillermo Humberto Cañón Sarria'.",
     "8. NÚMERO ID Y LUGAR DE EXPEDICIÓN ('DE'): Cuando un campo indique 'NÚMERO ID', 'NUMERO ID', 'NO. ID' o 'CÉDULA', llénalo con '98555384'. Si al lado hay una casilla 'de' (ej. C.C. No. _____ de _____), pon: 'Envigado'.",
     "9. NACIONALIDAD: Cuando un campo pida EXACTAMENTE 'Nacionalidad' o 'Nacionalidad 1', escribe 'Colombia'. No pongas 'Colombiana', ni fecha, ni expedición. Si hay 'Nacionalidad 2' o campo de segunda nacionalidad, déjala completamente vacía.",
-    "10. CONTACTO PRINCIPAL (SOLO SI LA SECCIÓN NO ES EXCLUSIVA PARA CLIENTES): Cuando una sección solicite 'Contacto Principal', llena: Nombre: Guillermo Humberto Cañón Sarria, Celular: 3104120217, Correo: guillermo.canon@iaclatam.com, Cargo: Representante Legal.",
+    "10. REGLA DE CAMPOS DE CONTACTO: Si en el formulario coexisten 'Contacto Principal' y 'Contacto para notificar pagos o abonos': 'Contacto Principal' se completa con los datos del Representante Legal (Nombre: Guillermo Humberto Cañón Sarria, Celular: 3104120217, Correo: guillermo.canon@iaclatam.com, Cargo: Representante Legal) y 'Contacto para notificar pagos o abonos' se completa con los datos del Comercial responsable. Si en el formulario SOLO existe el campo 'Contacto Principal', se asigna siempre al Comercial responsable.",
     "11. TABLAS CON MÚLTIPLES FILAS: Llena ÚNICAMENTE la primera fila (Fila 1). Las filas 2, 3, 4, 5 deben quedar vacías.",
     "12. CAMPOS 'OTRA' / 'OTRO': Dejar completamente vacíos.",
     "13. OPCIONES MÚLTIPLES: Ignorar bloques de opciones múltiples genéricas.",
     "14. NO DUPLICACIÓN EN CAMPOS CONTIGUOS: No repitas el mismo dato en campos contiguos con finalidades distintas.",
-    "15. DOBLE NACIONALIDAD / NACIONALIDAD 2: Solo se reporta la nacionalidad principal ('Colombia'). Cualquier campo de segunda nacionalidad debe quedar vacío."
+    "15. DOBLE NACIONALIDAD / NACIONALIDAD 2: Solo se reporta la nacionalidad principal ('Colombia'). Cualquier campo de segunda nacionalidad debe quedar vacío.",
+    "16. NO LLENAR SECCIÓN 9 (VÍNCULO / VÍNCULOS): La sección '9. VÍNCULO' o '9. VÍNCULOS' no aplica y debe permanecer completamente vacía.",
+    "17. DECLARACIÓN DE ORIGEN DE FONDOS: En la sección 11 de Declaración de Origen de Fondos, diligenciar los datos de identificación solicitados del Representante Legal (Yo, número de documento, expedido en).",
+    "18. CONTACTO PARA ARIBA: Completar ÚNICAMENTE la Fila 1 con el Representante Legal (Nombres y apellidos persona autorizada: Guillermo Humberto Cañón Sarria, Correo electrónico: guillermo.canon@iaclatam.com). Las filas secundarias (2, 3 y 4) deben permanecer completamente vacías.",
+    "19. SUPRESIÓN DE LUGAR Y FECHA DE EXPEDICIÓN EN PERSONA JURÍDICA: Las empresas con NIT no poseen lugar ni fecha de expedición personal. Si tras el número de identificación de la empresa o en la sección de información general/persona jurídica aparece un campo de 'LUGAR Y FECHA DE EXPEDICIÓN', este debe permanecer estrictamente VACÍO. Únicamente se diligencia lugar y fecha de expedición cuando corresponda expresamente a una persona natural o al Representante Legal ('Envigado 26-06-1989').",
+    "20. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: En encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...', diligenciar siempre los datos del Contacto Comercial responsable en sesión (Kelly Yohana Delgado Macea, kelly.delgado@iaclatam.com, 3014750760, Especialista Comercial / Licitaciones), evitando asignar por defecto los datos del Representante Legal.",
+    "21. CAMPOS DE PERSONA NATURAL (PN): Ignorar y dejar completamente vacíos los campos etiquetados con 'Nombres y apellidos PN' o que contengan la sigla 'PN'. No escribir información allí cuando la entidad diligenciada es Persona Jurídica.",
+    "22. REGLA DE CONSISTENCIA CONTEXTUAL DE IDENTIFICACIÓN: En cuadrículas o bloques donde se diligencie el nombre del Representante Legal (Guillermo), el campo subsiguiente de 'Identificación (NIT/CC)' asocia su cédula de ciudadanía ('98555384'). Si el bloque o fila corresponde a Persona Jurídica ('Ingeniería Asistida Por Computador S.A.S'), el campo subsiguiente de 'Identificación (NIT/CC)' asocia estrictamente el NIT ('8110047212'). Las filas secundarias de la tabla deben permanecer 100% vacías."
 ]
 
 def get_dictionary_context() -> str:

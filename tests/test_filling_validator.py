@@ -294,3 +294,121 @@ def test_audit_reporting_categorizes_filled_unfilled_and_blocked(validator):
     assert "txt_fax_sec" in unfilled_names
     assert audit["unfilled"][0]["reason"] == "NO_DATA_IN_JSON"
     assert "suggestion" in audit["unfilled"][0]
+
+
+def test_pn_field_force_blanked_in_accionaria(validator):
+    """Field 01 'Nombres y apellidos PN' is left empty — the name goes into field 02 (PJ).
+    The validator accepts person names in PJ fields; the force-blank is enforced at agent level."""
+    # The validator itself does not block this — the agent's force_blank_fields handles it.
+    # We just confirm the PJ field correctly accepts the name.
+    res_pj = validator.validate(
+        label="Nombre Persona Jurídica",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="02",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res_pj.is_valid, f"Expected valid but got: {res_pj.reason}"
+
+
+def test_single_row_rejects_is_secondary_row(validator):
+    res = validator.validate(
+        label="Nombre Persona Jurídica",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="03",
+        proposed_value="Ingeniería Asistida Por Computador S.A.S",
+        is_secondary_row=True
+    )
+    assert not res.is_valid
+    assert "Single-Row" in res.reason
+
+
+def test_type_aware_rejects_percentage_in_identificacion(validator):
+    res = validator.validate(
+        label="Identificación (NIT/CC)",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="39",
+        proposed_value="100%"
+    )
+    assert not res.is_valid
+    assert "Percentage" in res.reason
+
+
+def test_row_1_shareholder_mappings_valid(validator):
+    """Row 1: name in PJ field (02) and cédula in identification field (38) must both be valid."""
+    res_pj = validator.validate(
+        label="Nombre Persona Jurídica",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="02",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res_pj.is_valid, f"Expected valid but got: {res_pj.reason}"
+
+    res_cedula = validator.validate(
+        label="Identificación (NIT/CC)",
+        section="ANEXO DE COMPOSICIÓN ACCIONARIA",
+        field_name="38",
+        proposed_value="98555384"
+    )
+    assert res_cedula.is_valid, f"Expected valid but got: {res_cedula.reason}"
+
+
+def test_beneficiarios_finales_row_1_valid(validator):
+    """Row 1 of Beneficiarios Finales: person name and cédula must both be valid."""
+    res_name = validator.validate(
+        label="Clic para escribir el nombre del beneficiario final",
+        section="ANEXO – Información de Beneficiarios Finales",
+        field_name="Indique el nombre del beneficiario final 1",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res_name.is_valid, f"Expected valid but got: {res_name.reason}"
+
+    res_cedula = validator.validate(
+        label="Clic para escribir el No. De Identificación",
+        section="ANEXO – Información de Beneficiarios Finales",
+        field_name="Indique el número de identificación 1",
+        proposed_value="98555384"
+    )
+    assert res_cedula.is_valid, f"Expected valid but got: {res_cedula.reason}"
+
+
+def test_beneficiarios_finales_secondary_rows_blocked(validator):
+    """Rows 2+ of Beneficiarios Finales must be blocked under single-row table policy."""
+    res_sec_name = validator.validate(
+        label="Clic para escribir el nombre del beneficiario final",
+        section="ANEXO – Información de Beneficiarios Finales",
+        field_name="Indique el nombre del beneficiario final 2",
+        proposed_value="Guillermo Humberto Cañón Sarria",
+        is_secondary_row=True
+    )
+    assert not res_sec_name.is_valid
+    assert "Single-Row" in res_sec_name.reason
+
+
+def test_isagen_ariba_persona_autorizada_person_name_allowed(validator):
+    """Person name must be allowed in ARIBA Text1 even if incidental text mentions 'correo'."""
+    label = (
+        "constituyen manifestacion valida de su voluntad tenga en cuenta que el los correo s "
+        "reportado s seran los unicos a traves de los cuales nombres y apellidos persona autorizada"
+    )
+    res = validator.validate(
+        label=label,
+        section="DATOS CONTACTO PARA ARIBA *",
+        field_name="Text1",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert res.is_valid, f"Expected valid but got: {res.reason}"
+
+
+def test_ariba_persona_autorizada_email_blocks_person_name(validator):
+    """Person name must be rejected for actual email fields (Text5 / correo electronico)."""
+    label_email = "voluntad * los cuales podra recibir invitaciones o presentar ofertas. Correo electronico"
+    res = validator.validate(
+        label=label_email,
+        section="DATOS CONTACTO PARA ARIBA *",
+        field_name="Text5",
+        proposed_value="Guillermo Humberto Cañón Sarria"
+    )
+    assert not res.is_valid
+    assert "Person name" in res.reason and "cannot be assigned" in res.reason
+
+
