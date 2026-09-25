@@ -10,8 +10,11 @@ import type {
   CommercialRegisterPayload
 } from './types';
 import { supabase } from './supabaseClient';
+import { validateProductionApiUrl, validateDevApiUrl } from './apiConfig';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+const API_BASE: string = import.meta.env.PROD
+  ? validateProductionApiUrl(import.meta.env.VITE_API_URL)
+  : validateDevApiUrl(import.meta.env.VITE_API_URL);
 
 /**
  * Obtiene los headers de autorización inyectando el token JWT activo de Supabase.
