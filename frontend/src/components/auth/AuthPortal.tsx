@@ -172,6 +172,13 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
         password: regPassword.trim(),
         tipo_documento: 'CC'
       });
+
+      // ← AGREGA ESTAS LÍNEAS AQUÍ:
+      await supabase.auth.signInWithPassword({
+        email: regEmail.trim().toLowerCase(),
+        password: regPassword.trim(),
+      });
+
       // Direct session issuance - enters workspace immediately
       onAuthenticated(res);
     } catch (err: any) {
