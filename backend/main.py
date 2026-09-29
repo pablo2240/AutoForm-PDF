@@ -1764,7 +1764,8 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
     if token:
         try:
             supabase_user = decode_supabase_jwt(token)
-        except Exception:
+        except Exception as e:
+            print(f"[AUTH ERROR] Error validando JWT: {type(e).__name__}: {e}")
             supabase_user = None
 
     if APP_ENVIRONMENT == "production":
