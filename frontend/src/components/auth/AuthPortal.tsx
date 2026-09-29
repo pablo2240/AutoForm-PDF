@@ -84,11 +84,11 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
     try {
       setIsLoggingIn(true);
       const res = await adminLogin(emailTrim, loginPassword);
-      // ← AGREGA ESTAS LÍNEAS AQUÍ:
-      await supabase.auth.signInWithPassword({
+      const { data: supaData, error: supaError } = await supabase.auth.signInWithPassword({
         email: emailTrim.toLowerCase(),
         password: loginPassword,
       });
+      console.log('[Supabase Auth]', supaData?.session?.access_token ? 'OK' : 'SIN TOKEN', supaError?.message);
       onAuthenticated(res);
     } catch (err: any) {
       setLoginError(err.message || 'Credenciales incorrectas o usuario inactivo.');
