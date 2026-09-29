@@ -1765,8 +1765,17 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
         try:
             supabase_user = decode_supabase_jwt(token)
         except Exception as e:
-            print(f"[AUTH ERROR] Error validando JWT: {type(e).__name__}: {e}")
+            print(f"[AUTH ERROR] decode_supabase_jwt: {type(e).__name__}: {e}")
             supabase_user = None
+
+    print("========== AI-FILL AUTH DEBUG ==========")
+    print("Environment:", APP_ENVIRONMENT)
+    print("Authorization header presente:", bool(auth_header))
+    print("Authorization es Bearer:", auth_header.startswith("Bearer "))
+    print("Token presente:", bool(token))
+    print("Cookie admin_session presente:", "admin_session" in request.cookies)
+    print("Supabase user válido:", bool(supabase_user))
+    print("========================================")
 
     if APP_ENVIRONMENT == "production":
         if not token or not supabase_user:
