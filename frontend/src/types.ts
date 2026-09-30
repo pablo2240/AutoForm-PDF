@@ -99,6 +99,11 @@ export interface TemplateInfo {
   id: string;
   filename: string;
   size_kb: number;
+
+  // IDs reales de Supabase
+  template_id?: string;
+  template_version_id?: string;
+  version?: number;
 }
 
 export interface PDFPage {

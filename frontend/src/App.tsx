@@ -671,7 +671,23 @@ export const App: React.FC = () => {
         await saveTemplateMapping(payload).catch(() => {});
       }
 
-      const res = await generateFilledPdf(selectedTemplate, mappings, isTemp, activeCommercialProfileId);
+      const selectedTemplateInfo = templates.find(
+          (t: TemplateInfo) => t.id === selectedTemplate
+      );
+
+      if (!selectedTemplateInfo?.template_version_id) {
+          throw new Error(
+              'La plantilla seleccionada no tiene una versión registrada en Supabase.'
+          );
+      }
+
+      const res = await generateFilledPdf(
+          selectedTemplate,
+          mappings,
+          isTemp,
+          activeCommercialProfileId,
+          selectedTemplateInfo.template_version_id
+      );
       
       setResultModalData({
         filename: res.filename,
@@ -707,7 +723,21 @@ export const App: React.FC = () => {
       setIsAiFilling(true);
       showToast('✨ Procesando Autollenado IA con OpenAI / LLM...', 'info');
 
-      const res = await aiFillPdf(selectedTemplate, activeCommercialProfileId);
+      const selectedTemplateInfo = templates.find(
+          (t) => t.id === selectedTemplate
+      );
+
+      if (!selectedTemplateInfo?.template_version_id) {
+          throw new Error(
+              'La plantilla seleccionada no tiene una versión registrada en Supabase.'
+          );
+      }
+
+      const res = await aiFillPdf(
+          selectedTemplate,
+          activeCommercialProfileId,
+          selectedTemplateInfo.template_version_id
+      );
 
       setResultModalData({
         filename: res.filename,
