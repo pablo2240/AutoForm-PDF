@@ -1342,19 +1342,67 @@ def list_templates():
     return {"templates": templates, "active_slot": None}
 
 @app.post("/api/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Solo se admiten archivos PDF")
+async def upload_pdf(file: UploadFile = File(...), request: Request = None):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se admiten archivos PDF"
+        )
 
+    # ---------------------------------------------------------
+    # 1. Autenticación Supabase
+    # ---------------------------------------------------------
+    auth_header = request.headers.get("Authorization", "") if request else ""
+
+    token = None
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+
+    supabase_user = None
+    user_client = None
+
+    if token:
+        try:
+            supabase_user = decode_supabase_jwt(token)
+            user_client = get_supabase_user_client(token)
+        except Exception as e:
+            print(f"[AUTH ERROR] upload_pdf: {type(e).__name__}: {e}")
+
+    if APP_ENVIRONMENT == "production":
+        if not token or not supabase_user or not user_client:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Se requiere autenticación válida para subir plantillas."
+            )
+
+    # ---------------------------------------------------------
+    # 2. Datos básicos de la plantilla
+    # ---------------------------------------------------------
     new_template_id = os.path.splitext(file.filename)[0]
 
-    # Gestión de ranura única (Single-file Slot):
-    # 1. Limpieza automática del documento previo del slot para evitar acumulación
+    company_id = None
+    user_id = None
+
+    if supabase_user:
+        company_id = supabase_user.get("app_metadata", {}).get("company_id")
+        user_id = supabase_user.get("sub")
+
+    if APP_ENVIRONMENT == "production" and not company_id:
+        raise HTTPException(
+            status_code=403,
+            detail="El usuario autenticado no tiene company_id."
+        )
+
+    # ---------------------------------------------------------
+    # 3. Gestión del slot local actual
+    # ---------------------------------------------------------
     prev_slot = get_active_slot()
+
     if prev_slot:
         prev_id = prev_slot.get("template_id")
+
         if prev_id and prev_id != new_template_id:
-            # Eliminar PDF previo de input/
+
             for candidate in [
                 os.path.join(INPUT_DIR, f"{prev_id}.pdf"),
                 os.path.join(INPUT_DIR, prev_slot.get("filename", ""))
@@ -1363,27 +1411,200 @@ async def upload_pdf(file: UploadFile = File(...)):
                     try:
                         os.remove(candidate)
                     except Exception as e:
-                        print(f"[WARN] Error al eliminar PDF previo del slot {candidate}: {e}")
-            # Eliminar mapping previo de backend/data/
-            prev_map = os.path.join(DATA_DIR, f"{prev_id}_mapping.json")
+                        print(
+                            f"[WARN] Error al eliminar PDF previo "
+                            f"{candidate}: {e}"
+                        )
+
+            prev_map = os.path.join(
+                DATA_DIR,
+                f"{prev_id}_mapping.json"
+            )
+
             if os.path.exists(prev_map):
                 try:
                     os.remove(prev_map)
                 except Exception as e:
-                    print(f"[WARN] Error al eliminar mapeo previo {prev_map}: {e}")
+                    print(
+                        f"[WARN] Error al eliminar mapeo previo "
+                        f"{prev_map}: {e}"
+                    )
 
-    # 2. Guardar el nuevo archivo en input/
+    # ---------------------------------------------------------
+    # 4. Guardar PDF localmente
+    # ---------------------------------------------------------
     dest_path = os.path.join(INPUT_DIR, file.filename)
-    with open(dest_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
 
-    # 3. Registrar el nuevo archivo como el slot activo
-    set_active_slot(new_template_id, file.filename)
+    try:
+        with open(dest_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No fue posible guardar el PDF: {str(e)}"
+        )
 
+    # ---------------------------------------------------------
+    # 5. Detectar información del PDF
+    # ---------------------------------------------------------
+    try:
+        import fitz
+
+        pdf_doc = fitz.open(dest_path)
+        page_count = len(pdf_doc)
+
+        is_acroform = False
+
+        for page in pdf_doc:
+            widgets = page.widgets()
+            if widgets:
+                is_acroform = True
+                break
+
+        pdf_doc.close()
+
+    except Exception as e:
+        print(f"[WARN] No se pudo inspeccionar el PDF: {e}")
+        page_count = 0
+        is_acroform = False
+
+    # ---------------------------------------------------------
+    # 6. Registrar plantilla y versión en Supabase
+    # ---------------------------------------------------------
+    db_template_id = None
+    template_version_id = None
+    version_number = 1
+
+    if user_client and company_id:
+
+        try:
+            # Buscar si esta plantilla ya existe para la empresa
+            existing = (
+                user_client
+                .table("pdf_templates")
+                .select("id,codigo,nombre")
+                .eq("company_id", company_id)
+                .eq("codigo", new_template_id)
+                .execute()
+            )
+
+            if existing.data:
+                db_template_id = existing.data[0]["id"]
+
+            else:
+                template_insert = (
+                    user_client
+                    .table("pdf_templates")
+                    .insert({
+                        "company_id": company_id,
+                        "codigo": new_template_id,
+                        "nombre": new_template_id,
+                        "descripcion": None,
+                        "is_active": True
+                    })
+                    .execute()
+                )
+
+                if not template_insert.data:
+                    raise Exception(
+                        "Supabase no devolvió el registro de pdf_templates."
+                    )
+
+                db_template_id = template_insert.data[0]["id"]
+
+            # -------------------------------------------------
+            # Calcular siguiente versión
+            # -------------------------------------------------
+            previous_versions = (
+                user_client
+                .table("pdf_template_versions")
+                .select("id,version")
+                .eq("template_id", db_template_id)
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+            )
+
+            if previous_versions.data:
+                version_number = (
+                    int(previous_versions.data[0]["version"]) + 1
+                )
+
+            # Desactivar versiones anteriores
+            (
+                user_client
+                .table("pdf_template_versions")
+                .update({"is_active": False})
+                .eq("template_id", db_template_id)
+                .eq("is_active", True)
+                .execute()
+            )
+
+            # -------------------------------------------------
+            # Crear nueva versión
+            # -------------------------------------------------
+            version_insert = (
+                user_client
+                .table("pdf_template_versions")
+                .insert({
+                    "template_id": db_template_id,
+                    "version": version_number,
+                    "filename": file.filename,
+                    "storage_path": None,
+                    "page_count": page_count,
+                    "is_acroform": is_acroform,
+                    "is_active": True,
+                    "created_by": user_id,
+                    "status": "active"
+                })
+                .execute()
+            )
+
+            if not version_insert.data:
+                raise Exception(
+                    "Supabase no devolvió la versión creada."
+                )
+
+            template_version_id = version_insert.data[0]["id"]
+
+        except Exception as e:
+
+            # Si Supabase falla, eliminar el PDF local para evitar
+            # que quede una plantilla sin registro de versión.
+            try:
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+            except Exception:
+                pass
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "No fue posible registrar la plantilla "
+                    f"en Supabase: {str(e)}"
+                )
+            )
+
+    # ---------------------------------------------------------
+    # 7. Actualizar slot local
+    # ---------------------------------------------------------
+    set_active_slot(
+        new_template_id,
+        file.filename
+    )
+
+    # ---------------------------------------------------------
+    # 8. Respuesta al frontend
+    # ---------------------------------------------------------
     return {
         "status": "success",
         "template_id": new_template_id,
-        "filename": file.filename
+        "pdf_template_id": db_template_id,
+        "template_version_id": template_version_id,
+        "version": version_number,
+        "filename": file.filename,
+        "page_count": page_count,
+        "is_acroform": is_acroform
     }
 
 @app.delete("/api/templates/{template_id}")
