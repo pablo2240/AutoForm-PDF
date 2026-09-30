@@ -1308,38 +1308,207 @@ def delete_commercial_profile(
 
 
 @app.get("/api/templates")
-def list_templates():
-    active_slot = get_active_slot()
+def list_templates(request: Request):
+    # ---------------------------------------------------------
+    # 1. Obtener usuario Supabase
+    # ---------------------------------------------------------
+    auth_header = request.headers.get("Authorization", "")
+
+    token = None
+
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+    elif "admin_session" in request.cookies:
+        token = request.cookies.get("admin_session")
+
+    supabase_user = None
+    user_client = None
+
+    if token:
+        try:
+            supabase_user = decode_supabase_jwt(token)
+            user_client = get_supabase_user_client(token)
+        except Exception as e:
+            print(
+                f"[AUTH ERROR] list_templates: "
+                f"{type(e).__name__}: {e}"
+            )
+
+    if APP_ENVIRONMENT == "production":
+        if not token or not supabase_user or not user_client:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Se requiere autenticación válida para consultar plantillas."
+            )
+
     templates = []
+    active_slot = get_active_slot()
 
-    # Si hay un slot activo configurado y su PDF existe, se retorna únicamente este documento
+    # ---------------------------------------------------------
+    # 2. Buscar plantilla activa local
+    # ---------------------------------------------------------
     if active_slot:
-        tid = active_slot.get("template_id")
-        fn = active_slot.get("filename", f"{tid}.pdf")
-        pdf_path = os.path.join(INPUT_DIR, f"{tid}.pdf")
-        if not os.path.exists(pdf_path):
-            pdf_path = os.path.join(INPUT_DIR, fn)
-        if os.path.exists(pdf_path):
-            size_kb = round(os.path.getsize(pdf_path) / 1024, 1)
-            templates.append({
-                "id": tid,
-                "filename": fn,
-                "size_kb": size_kb
-            })
-            return {"templates": templates, "active_slot": active_slot}
+        local_template_id = active_slot.get("template_id")
+        filename = active_slot.get(
+            "filename",
+            f"{local_template_id}.pdf"
+        )
 
-    # Fallback si no hay slot activo: devolver archivos disponibles en input/
-    if os.path.exists(INPUT_DIR):
-        for f in os.listdir(INPUT_DIR):
-            if f.lower().endswith(".pdf"):
-                template_id = os.path.splitext(f)[0]
-                size_kb = round(os.path.getsize(os.path.join(INPUT_DIR, f)) / 1024, 1)
-                templates.append({
-                    "id": template_id,
-                    "filename": f,
-                    "size_kb": size_kb
-                })
-    return {"templates": templates, "active_slot": None}
+        pdf_path = os.path.join(
+            INPUT_DIR,
+            f"{local_template_id}.pdf"
+        )
+
+        if not os.path.exists(pdf_path):
+            pdf_path = os.path.join(INPUT_DIR, filename)
+
+        if os.path.exists(pdf_path):
+
+            size_kb = round(
+                os.path.getsize(pdf_path) / 1024,
+                1
+            )
+
+            db_template_id = None
+            template_version_id = None
+            version_number = None
+
+            # -------------------------------------------------
+            # 3. Resolver IDs reales desde Supabase
+            # -------------------------------------------------
+            if user_client and supabase_user:
+
+                company_id = (
+                    supabase_user
+                    .get("app_metadata", {})
+                    .get("company_id")
+                )
+
+                if company_id:
+                    try:
+                        template_result = (
+                            user_client
+                            .table("pdf_templates")
+                            .select("id")
+                            .eq("company_id", company_id)
+                            .eq("codigo", local_template_id)
+                            .eq("is_active", True)
+                            .limit(1)
+                            .execute()
+                        )
+
+                        if template_result.data:
+
+                            db_template_id = (
+                                template_result.data[0]["id"]
+                            )
+
+                            version_result = (
+                                user_client
+                                .table("pdf_template_versions")
+                                .select(
+                                    "id,version,filename,status,is_active"
+                                )
+                                .eq(
+                                    "template_id",
+                                    db_template_id
+                                )
+                                .eq("is_active", True)
+                                .eq("status", "published")
+                                .order(
+                                    "version",
+                                    desc=True
+                                )
+                                .limit(1)
+                                .execute()
+                            )
+
+                            if version_result.data:
+                                version_row = (
+                                    version_result.data[0]
+                                )
+
+                                template_version_id = (
+                                    version_row["id"]
+                                )
+
+                                version_number = (
+                                    version_row["version"]
+                                )
+
+                    except Exception as e:
+                        print(
+                            "[WARN] No se pudo resolver "
+                            f"template_version_id: {e}"
+                        )
+
+            # -------------------------------------------------
+            # 4. En producción no ocultar inconsistencia
+            # -------------------------------------------------
+            if (
+                APP_ENVIRONMENT == "production"
+                and not template_version_id
+            ):
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "La plantilla activa no tiene una "
+                        "versión publicada asociada en Supabase."
+                    )
+                )
+
+            templates.append({
+                # Este ID se conserva porque el resto de la
+                # aplicación lo utiliza para localizar el PDF.
+                "id": local_template_id,
+
+                "filename": filename,
+                "size_kb": size_kb,
+
+                # IDs reales de Supabase
+                "template_id": db_template_id,
+                "template_version_id": template_version_id,
+                "version": version_number
+            })
+
+            return {
+                "templates": templates,
+                "active_slot": active_slot
+            }
+
+    # ---------------------------------------------------------
+    # 5. Fallback local para desarrollo
+    # ---------------------------------------------------------
+    if APP_ENVIRONMENT != "production":
+
+        if os.path.exists(INPUT_DIR):
+
+            for f in os.listdir(INPUT_DIR):
+
+                if f.lower().endswith(".pdf"):
+
+                    local_template_id = os.path.splitext(f)[0]
+
+                    size_kb = round(
+                        os.path.getsize(
+                            os.path.join(INPUT_DIR, f)
+                        ) / 1024,
+                        1
+                    )
+
+                    templates.append({
+                        "id": local_template_id,
+                        "filename": f,
+                        "size_kb": size_kb,
+                        "template_id": None,
+                        "template_version_id": None,
+                        "version": None
+                    })
+
+    return {
+        "templates": templates,
+        "active_slot": active_slot
+    }
 
 @app.post("/api/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...), request: Request = None):
