@@ -1550,7 +1550,7 @@ async def upload_pdf(file: UploadFile = File(...), request: Request = None):
                     "template_id": db_template_id,
                     "version": version_number,
                     "filename": file.filename,
-                    "storage_path": None,
+                    "storage_path": f"local/{company_id}/{file.filename}",
                     "page_count": page_count,
                     "is_acroform": is_acroform,
                     "is_active": True,
