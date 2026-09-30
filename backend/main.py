@@ -1555,7 +1555,7 @@ async def upload_pdf(file: UploadFile = File(...), request: Request = None):
                     "is_acroform": is_acroform,
                     "is_active": True,
                     "created_by": user_id,
-                    "status": "active"
+                    "status": "published"
                 })
                 .execute()
             )
