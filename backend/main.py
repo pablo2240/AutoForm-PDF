@@ -1881,7 +1881,16 @@ def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], us
             if not comp_res.data:
                 raise HTTPException(status_code=404, detail="Empresa no encontrada en Supabase.")
             c_row = comp_res.data
-            leg_res = user_client.table("legal_representatives").select("*").eq("company_id", company_id).eq("is_principal", True).execute()
+            leg_res = (
+                user_client
+                .table("legal_representatives")
+                .select("*")
+                .eq("company_id", company_id)
+                .eq("es_principal", True)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
             l_row = leg_res.data[0] if (leg_res.data and len(leg_res.data) > 0) else {}
             return {
                 "razon_social": c_row.get("razon_social", ""),
