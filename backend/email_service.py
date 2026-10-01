@@ -94,16 +94,20 @@ def render_reset_email_html(recipient_name: str, reset_link: str) -> str:
       text-align: center;
       margin: 32px 0;
     }}
-    .btn-reset {{
+    .btn-reset, a.btn-reset, a.btn-reset:visited, a.btn-reset:hover, a.btn-reset:active {{
       display: inline-block;
       background-color: #2563eb;
       color: #ffffff !important;
-      text-decoration: none;
+      text-decoration: none !important;
       font-weight: 600;
       font-size: 15px;
       padding: 14px 32px;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+    }}
+    .btn-reset span {{
+      color: #ffffff !important;
+      text-decoration: none !important;
     }}
     .alert-box {{
       background-color: #f0fdf4;
@@ -153,9 +157,9 @@ def render_reset_email_html(recipient_name: str, reset_link: str) -> str:
         Hemos recibido una solicitud para restablecer la contraseña de tu cuenta de acceso a la plataforma comercial <strong>AutoForm PDF</strong>.
       </p>
 
-      <div class="button-container">
-        <a href="{reset_link}" class="btn-reset" target="_blank" rel="noopener noreferrer">
-          Restablecer Contraseña
+      <div class="button-container" style="text-align: center; margin: 32px 0;">
+        <a href="{reset_link}" class="btn-reset" target="_blank" rel="noopener noreferrer" style="display: inline-block; background-color: #2563eb; color: #ffffff !important; text-decoration: none !important; font-weight: 600; font-size: 15px; padding: 14px 32px; border-radius: 8px; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">
+          <span style="color: #ffffff !important; text-decoration: none !important; font-weight: 600; font-size: 15px;">Restablecer Contraseña</span>
         </a>
       </div>
 
