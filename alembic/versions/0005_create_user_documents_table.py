@@ -66,13 +66,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
-    if inspector.has_table('user_documents'):
-        existing_indexes = {idx['name'] for idx in inspector.get_indexes('user_documents')}
-        if 'idx_user_documents_company' in existing_indexes:
-            op.drop_index('idx_user_documents_company', table_name='user_documents')
-        if 'idx_user_documents_user_active' in existing_indexes:
-            op.drop_index('idx_user_documents_user_active', table_name='user_documents')
-        op.drop_table('user_documents')
+    # No-op intencional.
+    # user_documents puede existir antes de esta migración en entornos heredados;
+    # nunca debe borrarse ni eliminar sus índices durante un downgrade.
+    pass
 
