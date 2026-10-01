@@ -43,7 +43,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 import sys
 
-if database_url.startswith("sqlite") and not any("alembic" in arg.lower() for arg in sys.argv):
+app_env = os.getenv("APP_ENVIRONMENT", os.getenv("ENVIRONMENT", "local")).lower()
+is_alembic = any("alembic" in arg.lower() for arg in sys.argv)
+
+if database_url.startswith("sqlite") and app_env == "local" and not is_alembic:
     from backend.db.models import Base
     from sqlalchemy import text
     Base.metadata.create_all(bind=engine)

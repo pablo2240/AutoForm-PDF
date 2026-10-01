@@ -17,35 +17,62 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'user_documents',
-        sa.Column('id', sa.String(length=36), primary_key=True, nullable=False),
-        sa.Column('company_id', sa.String(length=36), nullable=False),
-        sa.Column('user_id', sa.String(length=36), nullable=False),
-        sa.Column('template_code', sa.String(length=100), nullable=True),
-        sa.Column('filename', sa.String(length=255), nullable=False),
-        sa.Column('storage_path', sa.String(length=500), nullable=False),
-        sa.Column('size_kb', sa.Float(), nullable=True),
-        sa.Column('is_active', sa.Boolean(), server_default=sa.true(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
 
-    op.create_index(
-        'idx_user_documents_user_active',
-        'user_documents',
-        ['user_id', 'is_active'],
-        unique=False
-    )
-    op.create_index(
-        'idx_user_documents_company',
-        'user_documents',
-        ['company_id'],
-        unique=False
-    )
+    if not inspector.has_table('user_documents'):
+        op.create_table(
+            'user_documents',
+            sa.Column('id', sa.String(length=36), primary_key=True, nullable=False),
+            sa.Column('company_id', sa.String(length=36), nullable=False),
+            sa.Column('user_id', sa.String(length=36), nullable=False),
+            sa.Column('template_code', sa.String(length=100), nullable=True),
+            sa.Column('filename', sa.String(length=255), nullable=False),
+            sa.Column('storage_path', sa.String(length=500), nullable=False),
+            sa.Column('size_kb', sa.Float(), nullable=True),
+            sa.Column('is_active', sa.Boolean(), server_default=sa.true(), nullable=False),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+        )
+        op.create_index(
+            'idx_user_documents_user_active',
+            'user_documents',
+            ['user_id', 'is_active'],
+            unique=False
+        )
+        op.create_index(
+            'idx_user_documents_company',
+            'user_documents',
+            ['company_id'],
+            unique=False
+        )
+    else:
+        # Table already exists in Neon/Postgres; check and create only missing indexes
+        existing_indexes = {idx['name'] for idx in inspector.get_indexes('user_documents')}
+        if 'idx_user_documents_user_active' not in existing_indexes:
+            op.create_index(
+                'idx_user_documents_user_active',
+                'user_documents',
+                ['user_id', 'is_active'],
+                unique=False
+            )
+        if 'idx_user_documents_company' not in existing_indexes:
+            op.create_index(
+                'idx_user_documents_company',
+                'user_documents',
+                ['company_id'],
+                unique=False
+            )
 
 
 def downgrade() -> None:
-    op.drop_index('idx_user_documents_company', table_name='user_documents')
-    op.drop_index('idx_user_documents_user_active', table_name='user_documents')
-    op.drop_table('user_documents')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if inspector.has_table('user_documents'):
+        existing_indexes = {idx['name'] for idx in inspector.get_indexes('user_documents')}
+        if 'idx_user_documents_company' in existing_indexes:
+            op.drop_index('idx_user_documents_company', table_name='user_documents')
+        if 'idx_user_documents_user_active' in existing_indexes:
+            op.drop_index('idx_user_documents_user_active', table_name='user_documents')
+        op.drop_table('user_documents')
+
