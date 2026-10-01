@@ -198,7 +198,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
     setRecoveryError(null);
     setRecoverySuccess(null);
 
-    const emailClean = recoveryEmail.trim().toLowerCase();
+    const emailClean = recoveryEmail.trim();
     if (!emailClean || !emailClean.includes('@')) {
       setRecoveryError('Por favor ingresa un correo corporativo válido.');
       return;
@@ -212,16 +212,16 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
 
     try {
       setIsSendingRecovery(true);
-      const res = await requestPasswordReset(emailClean);
+      await requestPasswordReset(emailClean);
       setRecoverySuccess(
-        res.message || 'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
+        'Si el correo está registrado, recibirás las instrucciones para restablecer tu contraseña.'
       );
     } catch (err: any) {
       if (err.message && err.message.includes('429')) {
         setRecoveryError('Has excedido el límite de solicitudes. Por favor espera 15 minutos.');
       } else {
         setRecoverySuccess(
-          'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
+          'Si el correo está registrado, recibirás las instrucciones para restablecer tu contraseña.'
         );
       }
     } finally {

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ArrowLeft, KeyRound, Mail } from 'lucide-react';
 import { verifyResetToken, resetPasswordWithToken } from '../../api';
-import { supabase } from '../../supabaseClient';
 import logoIac from '../../assets/logo_iac.png';
 import './AuthPortal.css';
 
@@ -40,15 +39,6 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({ onComplete
       }
 
       if (!resolvedToken) {
-        // Fallback check: if URL contains Supabase recovery access_token in hash
-        if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
-          if (isMounted) {
-            setIsVerifying(false);
-            setToken('');
-          }
-          return;
-        }
-
         if (isMounted) {
           setTokenError('No se encontró un token de recuperación válido en el enlace proporcionado.');
           setIsVerifying(false);
@@ -118,38 +108,23 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({ onComplete
     try {
       setIsLoading(true);
 
-      if (token) {
-        // Backend-Authoritative flow: updates Supabase Auth & CommercialProfile.password_hash atomically
-        const res = await resetPasswordWithToken(token, password);
-
-        // Clean tokens from browser address bar immediately without page reload
-        if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-
-        setSuccess(res.message || 'Tu contraseña corporativa ha sido actualizada exitosamente.');
-        setTimeout(() => {
-          onComplete();
-        }, 1800);
-      } else {
-        // Legacy fallback to direct Supabase Auth updateUser if no backend token is present
-        const { error: updateError } = await supabase.auth.updateUser({
-          password: password
-        });
-
-        if (updateError) {
-          throw updateError;
-        }
-
-        if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-
-        setSuccess('Tu contraseña corporativa ha sido actualizada exitosamente.');
-        setTimeout(() => {
-          onComplete();
-        }, 1800);
+      if (!token) {
+        setError('No se encontró un token válido para restablecer la contraseña.');
+        return;
       }
+
+      // Backend-Authoritative flow: updates Supabase Auth & CommercialProfile.password_hash atomically
+      const res = await resetPasswordWithToken(token, password);
+
+      // Clean tokens from browser address bar immediately without page reload
+      if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      setSuccess(res.message || 'Tu contraseña corporativa ha sido actualizada exitosamente.');
+      setTimeout(() => {
+        onComplete();
+      }, 1800);
     } catch (err: any) {
       setError(err.message || 'Error al actualizar la contraseña. El enlace puede haber expirado.');
     } finally {

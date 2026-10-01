@@ -419,7 +419,7 @@ export async function requestPasswordReset(email: string): Promise<{ status: str
   const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    body: JSON.stringify({ email: email.trim() }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
