@@ -61,6 +61,8 @@ interface ConfirmModalState {
   onConfirm: () => void;
 }
 
+const getActiveTemplateStorageKey = (userId?: string) => `autoform_active_template_${userId || 'default'}`;
+
 export const App: React.FC = () => {
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
@@ -217,7 +219,16 @@ export const App: React.FC = () => {
         const path = window.location.pathname;
         const hash = window.location.hash || '';
         const search = window.location.search || '';
-        if (path === '/auth/reset-password' || search.includes('token=') || hash.includes('type=recovery') || hash.includes('type=invite')) {
+        if (
+          path === '/auth/reset-password' ||
+          path === '/reset-password' ||
+          path.includes('reset-password') ||
+          search.includes('token=') ||
+          hash.includes('token=') ||
+          hash.includes('reset-password') ||
+          hash.includes('type=recovery') ||
+          hash.includes('type=invite')
+        ) {
           if (isMounted) setIsPasswordRecoveryMode(true);
         }
       }
@@ -329,19 +340,20 @@ export const App: React.FC = () => {
         setEmployerProfiles(profiles || []);
         setGlobalSignature(sig || null);
 
-        // Selección de ranura única persistente:
-        // Prioridad 1: ID guardado en localStorage si coincide con la lista activa
+        // Selección de ranura única persistente aislada por usuario:
+        // Prioridad 1: ID guardado en localStorage para este usuario si coincide con la lista activa
         // Prioridad 2: Primer/único documento retornado por el backend
-        const savedActiveId = localStorage.getItem('autoform_active_template_id');
+        const storageKey = getActiveTemplateStorageKey(currentUser?.id);
+        const savedActiveId = localStorage.getItem(storageKey);
         const activeTpl = (savedActiveId && tplList.find((t) => t.id === savedActiveId)) || (tplList.length > 0 ? tplList[0] : null);
         if (activeTpl) {
           setSelectedTemplate(activeTpl.id);
-          localStorage.setItem('autoform_active_template_id', activeTpl.id);
+          localStorage.setItem(storageKey, activeTpl.id);
         } else {
           setSelectedTemplate('');
           setPages([]);
           setMappings([]);
-          localStorage.removeItem('autoform_active_template_id');
+          localStorage.removeItem(storageKey);
         }
 
         await loadCommercialProfiles();
@@ -445,7 +457,8 @@ export const App: React.FC = () => {
       const updatedTemplates = await fetchTemplates();
       setTemplates(updatedTemplates);
       setSelectedTemplate(res.template_id);
-      localStorage.setItem('autoform_active_template_id', res.template_id);
+      const storageKey = getActiveTemplateStorageKey(currentUser?.id);
+      localStorage.setItem(storageKey, res.template_id);
 
       if (isTemp) {
         showToast(`⚡ Llenado Rápido: "${res.filename}" listo para estampar`, 'info');
@@ -466,15 +479,16 @@ export const App: React.FC = () => {
       const remaining = templates.filter((t) => t.id !== templateId);
       setTemplates(remaining);
 
+      const storageKey = getActiveTemplateStorageKey(currentUser?.id);
       if (selectedTemplate === templateId) {
         if (remaining.length > 0) {
           setSelectedTemplate(remaining[0].id);
-          localStorage.setItem('autoform_active_template_id', remaining[0].id);
+          localStorage.setItem(storageKey, remaining[0].id);
         } else {
           setSelectedTemplate('');
           setPages([]);
           setMappings([]);
-          localStorage.removeItem('autoform_active_template_id');
+          localStorage.removeItem(storageKey);
         }
       }
       setIsTemporarySession(false);
@@ -693,6 +707,7 @@ export const App: React.FC = () => {
       setResultModalData({
         filename: res.filename,
         total_placed: res.total_placed,
+        download_url: res.download_url,
         is_temporary: isTemp,
       });
 
@@ -743,6 +758,7 @@ export const App: React.FC = () => {
       setResultModalData({
         filename: res.filename,
         total_placed: res.total_placed ?? 0,
+        download_url: res.download_url,
         is_temporary: false,
         audit_report: res.audit_report || null,
       });
