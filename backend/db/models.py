@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Index
+from sqlalchemy import Column, String, Boolean, DateTime, Index, Float
 from sqlalchemy.sql import func
 from sqlalchemy.orm import declarative_base
 
@@ -83,4 +83,38 @@ class PasswordResetToken(Base):
     used_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     request_ip = Column(String(45), nullable=True)
+
+
+class UserDocument(Base):
+    __tablename__ = "user_documents"
+    __table_args__ = (
+        Index("idx_user_documents_user_active", "user_id", "is_active"),
+        Index("idx_user_documents_company", "company_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(String(36), nullable=False)
+    user_id = Column(String(36), nullable=False)
+    template_code = Column(String(100), nullable=True)
+    filename = Column(String(255), nullable=False)
+    storage_path = Column(String(500), nullable=False)
+    size_kb = Column(Float, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "company_id": self.company_id,
+            "user_id": self.user_id,
+            "template_code": self.template_code,
+            "filename": self.filename,
+            "storage_path": self.storage_path,
+            "size_kb": self.size_kb,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 

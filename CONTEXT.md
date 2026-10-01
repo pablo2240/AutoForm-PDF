@@ -73,9 +73,25 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Consistent Dual-Auth Synchronization with Error Logging and Retry**: Orchestration pattern where Supabase Auth is updated first as primary source of truth. If updating local `password_hash` in PostgreSQL encounters a transient failure, it is recorded as pending synchronization with high-severity logging, ensuring legacy logins do not accept stale passwords.
 - **Blind Anti-Enumeration Response**: API design standard returning identical confirmation messages regardless of whether the requested email address exists in the system, preventing external user enumeration.
 
+### Cross-Account Data Isolation & User Workspace Storage (ADR-0011)
+- **User Workspace (Espacio de Trabajo de Usuario)**: The strictly isolated, session-scoped execution environment belonging to a single authenticated operator (`auth.uid()`). Completely eliminates global server filesystem state (`/input`, `active_slot.json`).
+  _Avoid_: Global workspace, shared slot, public templates directory.
+- **User Document (`public.user_documents`)**: Authoritative relational record tracking a PDF file uploaded by an operator, strictly constrained to `(company_id, user_id)` and backed by Supabase Storage (`templates/{company_id}/{user_id}/{filename}.pdf`).
+  _Avoid_: Global input file, local server PDF.
+- **Single-File Slot (Ranura Única de Usuario)**: The operational guarantee that each operator possesses at most one active working document at any given time, enforced at the database layer via partial unique index (`UNIQUE (user_id) WHERE is_active = true`).
+  _Avoid_: Multi-document accumulator, server-side `active_slot.json`.
+- **Institutional Template (Plantilla Institucional)**: Company-wide canonical form definition (`pdf_templates`) containing published visual mapping annotations (`pdf_mappings`), cleanly decoupled from private user document instances.
+  _Avoid_: User-uploaded raw template.
+- **Conditional Hard-Delete (`can_hard_delete`)**: Referential integrity safeguard that verifies all dependent tables (including `form_fill_history`, mappings, and active jobs) before permanently deleting physical storage objects, deactivating superseded records (`is_active = false`) if referenced.
+  _Avoid_: Unconditional physical purge, orphaned file deletion.
+- **Cross-Account Isolation Guard**: Security barrier enforcing `auth.uid() = user_id OR es_admin(auth.uid())` across all ingestion, listing, rendering, and download pipelines, guaranteeing zero cross-user data leakage.
+- **Stateless In-Memory Rendering**: RAM-only PyMuPDF stream processing (`fitz.open(stream=bytes, filetype="pdf")`) that renders pages on-demand without writing temporary files to server disk, coupled with browser-side `ETag` and private caching.
+- **Anti-Enumeration Signed Download**: Protected output retrieval pattern (`GET /api/download/{history_id}`) that verifies execution ownership before emitting time-bounded Supabase Storage signed URLs, rejecting unauthorized requests with uniform blind errors.
+
 ---
 
 ## 2. Shared Data Entities
+- **`user_documents` (Supabase PostgreSQL Table)**: Authoritative relational entity managing private user PDF uploads with single-active-slot enforcement and tenant isolation.
 - **`company_profile` (`company_data.json`)**: Single source of truth containing official corporate data (NIT, Razón Social, Representante Legal, Cédula, Bancos, Activos, Pasivos, Patrimonio, Ingresos, Egresos). Grounding rule: if not present in this file, it must never be written. Nationality is strictly standardized to `"Colombia"`.
 - **`commercial_profiles` (Neon PostgreSQL Table)**: Authoritative relational entity storing commercial representatives with audit columns (`created_at`, `updated_at`, `last_modified_by_ip`) and soft-delete (`is_active`). Replaces legacy ephemeral `employer_profiles.json`.
 - **`password_reset_tokens` (Neon PostgreSQL Table)**: Relational audit entity storing SHA-256 hashed recovery tokens with expiration, single-use timestamp (`used_at`), and request IP telemetry.

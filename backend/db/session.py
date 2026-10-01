@@ -41,7 +41,9 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-if database_url.startswith("sqlite"):
+import sys
+
+if database_url.startswith("sqlite") and not any("alembic" in arg.lower() for arg in sys.argv):
     from backend.db.models import Base
     from sqlalchemy import text
     Base.metadata.create_all(bind=engine)

@@ -1,6 +1,6 @@
 """create password_reset_tokens table and add needs_password_hash_sync
 
-Revision ID: 0004_create_password_reset_tokens
+Revision ID: 0004_password_reset_tokens
 Revises: 0003_case_insensitive_email
 Create Date: 2026-10-01 13:10:00.000000
 
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = '0004_create_password_reset_tokens'
+revision: str = '0004_password_reset_tokens'
 down_revision: Union[str, None] = '0003_case_insensitive_email'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
