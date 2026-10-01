@@ -217,7 +217,10 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
         'Si el correo está registrado, recibirás las instrucciones para restablecer tu contraseña.'
       );
     } catch (err: any) {
-      if (err.message && err.message.includes('429')) {
+      if (
+        err.status === 429 ||
+        (err.message && (err.message.includes('429') || err.message.toLowerCase().includes('límite')))
+      ) {
         setRecoveryError('Has excedido el límite de solicitudes. Por favor espera 15 minutos.');
       } else {
         setRecoverySuccess(

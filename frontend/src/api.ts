@@ -423,7 +423,9 @@ export async function requestPasswordReset(email: string): Promise<{ status: str
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Error al solicitar recuperación de contraseña');
+    const error: any = new Error(err.detail || 'Error al solicitar recuperación de contraseña');
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }
