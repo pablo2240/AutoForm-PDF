@@ -216,7 +216,8 @@ export const App: React.FC = () => {
       if (typeof window !== 'undefined') {
         const path = window.location.pathname;
         const hash = window.location.hash || '';
-        if (path === '/auth/reset-password' || hash.includes('type=recovery') || hash.includes('type=invite')) {
+        const search = window.location.search || '';
+        if (path === '/auth/reset-password' || search.includes('token=') || hash.includes('type=recovery') || hash.includes('type=invite')) {
           if (isMounted) setIsPasswordRecoveryMode(true);
         }
       }

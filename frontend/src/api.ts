@@ -414,3 +414,39 @@ export async function deleteCommercialProfile(id: string): Promise<void> {
     throw new Error(err.detail || 'Error al eliminar perfil comercial');
   }
 }
+
+export async function requestPasswordReset(email: string): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.trim().toLowerCase() }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al solicitar recuperación de contraseña');
+  }
+  return res.json();
+}
+
+export async function verifyResetToken(token: string): Promise<{ valid: boolean; masked_email?: string; message?: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/verify-reset-token?token=${encodeURIComponent(token.trim())}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'El enlace de recuperación es inválido o ha expirado.');
+  }
+  return res.json();
+}
+
+export async function resetPasswordWithToken(token: string, password: string): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: token.trim(), password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al restablecer la contraseña');
+  }
+  return res.json();
+}
+

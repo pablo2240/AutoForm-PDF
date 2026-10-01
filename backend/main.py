@@ -5,7 +5,9 @@ import shutil
 import re
 import time
 import uuid
-from datetime import datetime
+import secrets
+import hashlib
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from sqlalchemy import func
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response, Depends, status
@@ -28,8 +30,9 @@ else:
 
 from backend.pdf_filling_agent.visual_processor import VisualPDFProcessor, VisualPlacement
 from backend.db.session import get_db, SessionLocal
-from backend.db.models import CommercialProfile
+from backend.db.models import CommercialProfile, PasswordResetToken
 from backend.db.auth import hash_password, verify_password, create_session_token, verify_session_token, SESSION_MAX_AGE_SECONDS
+from backend.email_service import send_password_reset_email
 from backend.auth_supabase import (
     get_current_user,
     require_admin,
@@ -254,6 +257,18 @@ class CommercialRegisterDTO(BaseModel):
     ciudad: str
     tipo_documento: Optional[str] = "CC"
     documento_identidad: str
+    password: str
+
+class ForgotPasswordRequestDTO(BaseModel):
+    email: str
+
+class VerifyResetTokenResponseDTO(BaseModel):
+    valid: bool
+    masked_email: Optional[str] = None
+    message: Optional[str] = None
+
+class ResetPasswordRequestDTO(BaseModel):
+    token: str
     password: str
 
 class TemplateMapping(BaseModel):
@@ -1191,6 +1206,239 @@ def auth_register(dto: CommercialRegisterDTO, request: Request, response: Respon
     }
 
 
+forgot_password_rate_limiter = RegistrationRateLimiter(max_requests=3, window_seconds=900)
+
+def mask_email(email: str) -> str:
+    if not email or "@" not in email:
+        return ""
+    parts = email.split("@", 1)
+    name = parts[0]
+    domain = parts[1]
+    if len(name) <= 2:
+        masked_name = name[0] + "*"
+    else:
+        masked_name = name[0] + ("*" * (len(name) - 2)) + name[-1]
+    return f"{masked_name}@{domain}"
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(dto: ForgotPasswordRequestDTO, request: Request, db = Depends(get_db)):
+    """
+    Solicitud de recuperación de contraseña con respuesta ciega anti-enumeración,
+    generación de token SHA-256 de un solo uso y despacho síncrono vía SMTP corporativo.
+    """
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if not forgot_password_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Límite de solicitudes de recuperación excedido. Por favor intenta de nuevo en 15 minutos."
+        )
+
+    email_clean = dto.email.strip().lower()
+    if not email_clean or "@" not in email_clean:
+        return {
+            "status": "success",
+            "message": "Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso."
+        }
+
+    user = db.query(CommercialProfile).filter(
+        CommercialProfile.email.ilike(email_clean),
+        CommercialProfile.is_active == True
+    ).first()
+
+    if user:
+        try:
+            now_utc = datetime.now(timezone.utc)
+            # 1. Invalidar cualquier token activo previo para este usuario
+            db.query(PasswordResetToken).filter(
+                PasswordResetToken.user_id == str(user.id),
+                PasswordResetToken.used_at.is_(None)
+            ).update({"used_at": now_utc}, synchronize_session=False)
+
+            # 2. Generar token criptográfico y almacenar su hash SHA-256
+            raw_token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+            expires_at = now_utc + timedelta(minutes=15)
+
+            new_token_record = PasswordResetToken(
+                id=str(uuid.uuid4()),
+                user_id=str(user.id),
+                token_hash=token_hash,
+                expires_at=expires_at,
+                request_ip=client_ip
+            )
+            db.add(new_token_record)
+            db.commit()
+
+            # 3. Construir enlace de restablecimiento
+            site_url = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
+            reset_link = f"{site_url}/auth/reset-password?token={raw_token}"
+
+            # 4. Despacho síncrono del correo
+            display_name = user.nombre or user.profile_name or "Usuario Comercial"
+            send_password_reset_email(
+                recipient_email=user.email,
+                recipient_name=display_name,
+                reset_link=reset_link
+            )
+        except Exception as err:
+            db.rollback()
+            print(f"[FORGOT_PASSWORD_ERROR] Error procesando recuperación para {email_clean}: {err}", flush=True)
+            if os.getenv("APP_ENVIRONMENT", "").lower() in ("test", "testing"):
+                raise err
+    else:
+        # Retardo simulado para mitigar timing attacks
+        time.sleep(0.35)
+
+    return {
+        "status": "success",
+        "message": "Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso."
+    }
+
+@app.get("/api/auth/verify-reset-token", response_model=VerifyResetTokenResponseDTO)
+def verify_reset_token(token: str, db = Depends(get_db)):
+    """Verificación temprana del estado del token sin consumirlo."""
+    raw_token = token.strip() if token else ""
+    if not raw_token or len(raw_token) < 16:
+        raise HTTPException(
+            status_code=400,
+            detail="El token de recuperación proporcionado no es válido."
+        )
+
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash
+    ).first()
+
+    if not record or record.used_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="El enlace de recuperación es inválido o ya ha sido utilizado. Por favor solicita uno nuevo."
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    exp = record.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp < now_utc:
+        raise HTTPException(
+            status_code=400,
+            detail="El enlace de recuperación ha expirado (vigencia de 15 minutos). Por favor solicita uno nuevo."
+        )
+
+    user = db.query(CommercialProfile).filter(
+        CommercialProfile.id == record.user_id,
+        CommercialProfile.is_active == True
+    ).first()
+    if not user:
+        raise HTTPException(
+            status_code=400,
+            detail="El usuario asociado a este enlace ya no se encuentra activo."
+        )
+
+    return VerifyResetTokenResponseDTO(
+        valid=True,
+        masked_email=mask_email(user.email),
+        message="Token válido."
+    )
+
+@app.post("/api/auth/reset-password")
+def reset_password(dto: ResetPasswordRequestDTO, db = Depends(get_db)):
+    """
+    Restablece la contraseña corporativa invalidando el token,
+    actualizando como fuente primaria Supabase Auth y sincronizando el hash relacional.
+    """
+    # 1. Validación de fortaleza de contraseña
+    password_clean = dto.password.strip()
+    if len(password_clean) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres.")
+    if not any(c.isupper() for c in password_clean) or not any(c.islower() for c in password_clean):
+        raise HTTPException(status_code=400, detail="La contraseña debe contener al menos una mayúscula y una minúscula.")
+    if not any(c.isdigit() or c in "!@#$%^&*()_+-=[]{};':\"|,.<>/?" for c in password_clean):
+        raise HTTPException(status_code=400, detail="La contraseña debe contener al menos un número o símbolo.")
+
+    # 2. Verificación de token
+    raw_token = dto.token.strip() if dto.token else ""
+    if not raw_token or len(raw_token) < 16:
+        raise HTTPException(status_code=400, detail="Token de recuperación inválido.")
+
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash
+    ).first()
+
+    if not record or record.used_at is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="El enlace de recuperación es inválido o ya ha sido utilizado."
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    exp = record.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp < now_utc:
+        raise HTTPException(
+            status_code=400,
+            detail="El enlace de recuperación ha expirado. Por favor solicita uno nuevo."
+        )
+
+    user = db.query(CommercialProfile).filter(
+        CommercialProfile.id == record.user_id,
+        CommercialProfile.is_active == True
+    ).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado o inactivo.")
+
+    # 3. Consumir token inmediatamente (One-Time Use)
+    record.used_at = now_utc
+    db.commit()
+
+    # 4. Actualización en Supabase Auth como autoridad primaria
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception:
+        admin_client = None
+
+    if admin_client:
+        try:
+            admin_client.auth.admin.update_user_by_id(str(user.id), {"password": password_clean})
+        except Exception as supa_err:
+            print(f"[SUPABASE_AUTH_ERROR] Error al actualizar usuario {user.id} en Supabase Auth: {supa_err}", flush=True)
+            # Restaurar token para permitir reintento del usuario si Supabase Auth falla
+            record.used_at = None
+            db.commit()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al sincronizar con el proveedor de autenticación: {str(supa_err)}"
+            )
+
+    # 5. Sincronización consistente de hash en PostgreSQL/SQLite
+    try:
+        user.password_hash = hash_password(password_clean)
+        if hasattr(user, "needs_password_hash_sync"):
+            user.needs_password_hash_sync = False
+        db.commit()
+    except Exception as db_err:
+        db.rollback()
+        print(f"[CREDENTIAL_SYNC_ERROR] Fallo al sincronizar hash local para usuario {user.id} ({user.email}): {db_err}", flush=True)
+        try:
+            rec = db.query(PasswordResetToken).filter(PasswordResetToken.id == record.id).first()
+            if rec:
+                rec.used_at = now_utc
+            u = db.query(CommercialProfile).filter(CommercialProfile.id == user.id).first()
+            if u and hasattr(u, "needs_password_hash_sync"):
+                u.needs_password_hash_sync = True
+            db.commit()
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "message": "Tu contraseña corporativa ha sido actualizada exitosamente."
+    }
+
+
 @app.get("/api/admin/check")
 @app.get("/api/auth/check")
 def admin_check(request: Request, db = Depends(get_db)):
@@ -1865,20 +2113,67 @@ def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], us
     """
     Carga la información corporativa para la generación del formulario.
     En producción: EXIGE consulta autoritativa a Supabase bajo RLS y prohíbe el uso de company_data.json.
-    En local/staging: Permite uso de company_data.json si no hay sesión activa.
+    En local/staging: Intenta consulta a Supabase si hay sesión y recurre a company_data.json como fallback.
     """
+    company_id = (supabase_user or {}).get("app_metadata", {}).get("company_id")
+    
     if APP_ENVIRONMENT == "production":
         if not supabase_user or not user_client:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Se requiere sesión activa y válida en entorno productivo."
             )
-        company_id = supabase_user.get("app_metadata", {}).get("company_id")
         if not company_id:
             raise HTTPException(status_code=403, detail="Usuario carece de company_id en app_metadata.")
+
+    if user_client and company_id:
         try:
             comp_res = user_client.table("companies").select("*").eq("id", company_id).single().execute()
-            if not comp_res.data:
+            if comp_res.data:
+                c_row = comp_res.data
+                leg_res = user_client.table("legal_representatives").select("*").eq("company_id", company_id).eq("es_principal", True).execute()
+                l_row = leg_res.data[0] if (leg_res.data and len(leg_res.data) > 0) else {}
+                bank_res = user_client.table("company_bank_accounts").select("*").eq("company_id", company_id).eq("es_principal", True).execute()
+                b_row = bank_res.data[0] if (bank_res.data and len(bank_res.data) > 0) else {}
+
+                nit_val = str(c_row.get("nit", ""))
+                dv_val = str(c_row.get("dv", "")) if c_row.get("dv") is not None else ""
+                nit_formatted = f"{nit_val}-{dv_val}" if dv_val else nit_val
+
+                return {
+                    "razon_social": c_row.get("razon_social", ""),
+                    "nombre_comercial": c_row.get("nombre_comercial", ""),
+                    "nit": nit_formatted,
+                    "nit_digits": nit_val,
+                    "dv": dv_val,
+                    "ciudad": c_row.get("ciudad", ""),
+                    "departamento": c_row.get("departamento", ""),
+                    "pais": c_row.get("pais", "Colombia"),
+                    "direccion_principal": c_row.get("direccion_principal", ""),
+                    "telefono": c_row.get("telefono") or c_row.get("telefono_fijo", ""),
+                    "pagina_web": c_row.get("pagina_web", ""),
+                    "correo_institucional": c_row.get("email_contacto") or c_row.get("pagina_web", ""),
+                    "total_activos": str(c_row.get("total_activos") or ""),
+                    "total_pasivos": str(c_row.get("total_pasivos") or ""),
+                    "total_patrimonio": str(c_row.get("total_patrimonio") or ""),
+                    "total_ingresos_mensuales": str(c_row.get("total_ingresos_mensuales") or ""),
+                    "total_egresos_mensuales": str(c_row.get("total_egresos_mensuales") or ""),
+                    "representante_legal": l_row.get("nombre_completo", ""),
+                    "representante_nombre": l_row.get("nombres", ""),
+                    "representante_apellido": l_row.get("apellidos", ""),
+                    "correo_rep": l_row.get("email", ""),
+                    "celular_rep": l_row.get("celular", ""),
+                    "numero_cedula": l_row.get("numero_documento", ""),
+                    "tipo_documento": l_row.get("tipo_documento", "C.C"),
+                    "lugar_expedicion_rep": l_row.get("lugar_expedicion", ""),
+                    "fecha_expedicion": l_row.get("fecha_expedicion", ""),
+                    "fecha_expedicion_rep": l_row.get("fecha_expedicion", ""),
+                    "entidad_bancaria": b_row.get("entidad_bancaria", "BANCOLOMBIA"),
+                    "tipo_cuenta": b_row.get("tipo_cuenta", "Ahorros"),
+                    "numero_cuenta": b_row.get("numero_cuenta", "00300833888"),
+                    "firma_global": "global_signature.png"
+                }
+            elif APP_ENVIRONMENT == "production":
                 raise HTTPException(status_code=404, detail="Empresa no encontrada en Supabase.")
             c_row = comp_res.data
             leg_res = (
@@ -1912,10 +2207,12 @@ def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], us
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Servicio institucional de datos en Supabase no disponible: {str(e)}"
-            )
+            if APP_ENVIRONMENT == "production":
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Servicio institucional de datos en Supabase no disponible: {str(e)}"
+                )
+            print(f"[WARN] Error loading company data from Supabase, falling back to local json: {e}")
 
     company_data_path = os.path.join(DATA_DIR, "company_data.json")
     if not os.path.exists(company_data_path):

@@ -66,11 +66,19 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Privacy-Preserving DTO Separation (Ley 1581 / Habeas Data)**: Public selector endpoint `GET /api/commercial-profiles` projects strictly public liaison data, excluding `documento_identidad`. Identification numbers are resolved exclusively server-side during PDF stamping or through HttpOnly administrative sessions.
 - **Durable Relational Persistence (Neon PostgreSQL)**: Dedicated PostgreSQL persistence decoupling commercial contact data from Render's ephemeral filesystem, managed via Alembic migrations (`preDeployCommand`).
 
+### Password Recovery & Zero-Cost Notification Delivery (ADR-0010)
+- **Backend-Authoritative Password Reset (Restablecimiento Autoritativo)**: Centralized recovery engine hosted on FastAPI (`/api/auth/forgot-password`, `/api/auth/verify-reset-token`, and `/api/auth/reset-password`). Bypasses third-party auth limits and executes consistent dual-auth synchronization with Supabase Auth as the primary authoritative identity provider, accompanied by telemetry error logging and pending retry flags for `CommercialProfile.password_hash`.
+- **Gmail Dedicated SMTP Transport (Transporte SMTP Dedicado)**: Zero-cost transactional mail delivery utilizing a dedicated system Google account with 16-character App Password (STARTTLS/SSL), ensuring high inbox deliverability without requiring domain DNS modification or third-party paid tiers. Dispatched synchronously with guaranteed process durability against container recycling.
+- **Relational Password Reset Token (`password_reset_tokens`)**: Authoritative PostgreSQL entity tracking one-time recovery tokens via SHA-256 hash (`token_hash`), strictly bounded to a 15-minute expiration window (`expires_at`), with explicit single-use audit invalidation (`used_at`) and origin telemetry (`request_ip`). Plaintext tokens are never stored.
+- **Consistent Dual-Auth Synchronization with Error Logging and Retry**: Orchestration pattern where Supabase Auth is updated first as primary source of truth. If updating local `password_hash` in PostgreSQL encounters a transient failure, it is recorded as pending synchronization with high-severity logging, ensuring legacy logins do not accept stale passwords.
+- **Blind Anti-Enumeration Response**: API design standard returning identical confirmation messages regardless of whether the requested email address exists in the system, preventing external user enumeration.
+
 ---
 
 ## 2. Shared Data Entities
 - **`company_profile` (`company_data.json`)**: Single source of truth containing official corporate data (NIT, Razón Social, Representante Legal, Cédula, Bancos, Activos, Pasivos, Patrimonio, Ingresos, Egresos). Grounding rule: if not present in this file, it must never be written. Nationality is strictly standardized to `"Colombia"`.
 - **`commercial_profiles` (Neon PostgreSQL Table)**: Authoritative relational entity storing commercial representatives with audit columns (`created_at`, `updated_at`, `last_modified_by_ip`) and soft-delete (`is_active`). Replaces legacy ephemeral `employer_profiles.json`.
+- **`password_reset_tokens` (Neon PostgreSQL Table)**: Relational audit entity storing SHA-256 hashed recovery tokens with expiration, single-use timestamp (`used_at`), and request IP telemetry.
 - **`categorized_company.json`**: UI accordion categorizations (`id`, `contacto`, `banco`, `financiero`, `otros`) persisted independently in the backend.
 - **`field_dictionary.py`**: Semantic synonyms mapping real corporate profile keys to common Colombian form variations, alongside exclusion rules.
 - **`KnowledgeBase` (`knowledge_base.py`)**: CEO persona prompt builder embodying Guillermo Cañón Sarria (CEO of IAC) with Red/Green zone compliance boundaries.

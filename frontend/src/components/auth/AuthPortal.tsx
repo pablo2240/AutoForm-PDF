@@ -22,7 +22,7 @@ import {
   Layers,
   FileCheck2
 } from 'lucide-react';
-import { adminLogin, registerCommercial, checkEmailAvailability } from '../../api';
+import { adminLogin, registerCommercial, checkEmailAvailability, requestPasswordReset } from '../../api';
 import { supabase } from '../../supabaseClient';
 import type { AdminSessionUser } from '../../types';
 import {
@@ -212,17 +212,18 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onAuthenticated }) => {
 
     try {
       setIsSendingRecovery(true);
-      const siteOrigin = window.location.origin;
-      await supabase.auth.resetPasswordForEmail(emailClean, {
-        redirectTo: `${siteOrigin}/auth/reset-password`
-      });
+      const res = await requestPasswordReset(emailClean);
       setRecoverySuccess(
-        'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
+        res.message || 'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
       );
-    } catch {
-      setRecoverySuccess(
-        'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
-      );
+    } catch (err: any) {
+      if (err.message && err.message.includes('429')) {
+        setRecoveryError('Has excedido el límite de solicitudes. Por favor espera 15 minutos.');
+      } else {
+        setRecoverySuccess(
+          'Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso.'
+        );
+      }
     } finally {
       setIsSendingRecovery(false);
     }

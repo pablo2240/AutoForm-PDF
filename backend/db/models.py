@@ -24,6 +24,7 @@ class CommercialProfile(Base):
     ciudad = Column(String(100), nullable=True)
     role = Column(String(30), default="commercial", nullable=False) # "admin" or "commercial"
     password_hash = Column(String(200), nullable=True)
+    needs_password_hash_sync = Column(Boolean, default=False, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False) # Soft-delete flag
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -66,3 +67,20 @@ class CommercialProfile(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "last_modified_by_ip": self.last_modified_by_ip
         }
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        Index("ix_password_reset_tokens_token_hash", "token_hash", unique=True),
+        Index("ix_password_reset_tokens_user_id", "user_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), nullable=False)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    request_ip = Column(String(45), nullable=True)
+

@@ -21,7 +21,7 @@ import json
 import sqlite3
 import re
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import uuid
 from dotenv import load_dotenv
@@ -261,15 +261,21 @@ def run_migration(execute: bool, confirm_project: str | None):
         company_id = res_comp.data[0]["id"]
         print(f"[EXECUTED] Upserted company ID: {company_id}")
 
-        # 7. Upsert Bank Account
+        # 7. Upsert Bank Account (checked by company_id to support partial unique index)
         bank_payload["company_id"] = company_id
-        supabase.table("company_bank_accounts").upsert(bank_payload, on_conflict="company_id").execute()
-        print("[EXECUTED] Upserted company bank account.")
+        existing_bank = supabase.table("company_bank_accounts").select("id").eq("company_id", company_id).execute()
+        if existing_bank.data and len(existing_bank.data) > 0:
+            supabase.table("company_bank_accounts").update(bank_payload).eq("id", existing_bank.data[0]["id"]).execute()
+            print(f"[EXECUTED] Updated company bank account for company {company_id}.")
+        else:
+            supabase.table("company_bank_accounts").insert(bank_payload).execute()
+            print("[EXECUTED] Inserted company bank account.")
 
         # 8. Provision Users via Supabase Admin API with strict app_metadata separation
+        existing_users = {u.email.lower(): u for u in supabase.auth.admin.list_users()}
         user_id_map = {}
         for p in profiles:
-            email = p["email"]
+            email = p["email"].strip().lower()
             # CRITICAL SECURITY: company_id, role, migration_batch_id go into app_metadata (server-side only)
             app_meta = {
                 "company_id": company_id,
@@ -286,35 +292,63 @@ def run_migration(execute: bool, confirm_project: str | None):
                 "documento_identidad": p["documento_identidad"]
             }
 
-            try:
-                auth_user = supabase.auth.admin.create_user({
-                    "email": email,
-                    "email_confirm": True,
+            if email in existing_users:
+                user_id = existing_users[email].id
+                supabase.auth.admin.update_user_by_id(user_id, {
                     "app_metadata": app_meta,
                     "user_metadata": user_meta
                 })
-                user_id = auth_user.user.id
-                print(f"[EXECUTED] Created user: {email} -> {user_id}")
-            except Exception as e:
-                if "already registered" in str(e).lower() or "unique" in str(e).lower():
-                    users = supabase.auth.admin.list_users()
-                    target = next((u for u in users if u.email.lower() == email.lower()), None)
-                    if target:
-                        user_id = target.id
-                        # Update app_metadata to ensure company_id, role, migration_batch_id are strictly set
+                print(f"[EXECUTED] Synchronized existing user: {email} -> {user_id}")
+            else:
+                try:
+                    auth_user = supabase.auth.admin.create_user({
+                        "email": email,
+                        "email_confirm": True,
+                        "app_metadata": app_meta,
+                        "user_metadata": user_meta
+                    })
+                    user_id = auth_user.user.id
+                    print(f"[EXECUTED] Created user: {email} -> {user_id}")
+                except Exception as e:
+                    print(f"[WARN] Failed to create user {email}: {e}")
+                    # Fallback check
+                    fresh_users = {u.email.lower(): u for u in supabase.auth.admin.list_users()}
+                    if email in fresh_users:
+                        user_id = fresh_users[email].id
                         supabase.auth.admin.update_user_by_id(user_id, {
                             "app_metadata": app_meta,
                             "user_metadata": user_meta
                         })
-                        print(f"[EXECUTED] Synchronized existing user: {email} -> {user_id}")
+                        print(f"[EXECUTED] Synchronized fresh user: {email} -> {user_id}")
                     else:
                         raise e
-                else:
-                    raise e
 
-            # Explicitly ensure profile has migration_batch_id
-            supabase.table("profiles").update({"migration_batch_id": batch_id}).eq("id", user_id).execute()
+            # Explicitly ensure profile has company_id and migration_batch_id
+            supabase.table("profiles").update({
+                "company_id": company_id,
+                "migration_batch_id": batch_id
+            }).eq("id", user_id).execute()
             user_id_map[email] = user_id
+
+        # Also synchronize any existing users in Supabase Auth (e.g., Santiago Giraldo) to company_id
+        try:
+            all_auth_users = supabase.auth.admin.list_users()
+            for au in all_auth_users:
+                au_email = (au.email or "").lower()
+                current_meta = au.app_metadata or {}
+                if current_meta.get("company_id") != company_id:
+                    updated_meta = dict(current_meta)
+                    updated_meta["company_id"] = company_id
+                    updated_meta["migration_batch_id"] = batch_id
+                    supabase.auth.admin.update_user_by_id(au.id, {"app_metadata": updated_meta})
+                    supabase.table("profiles").update({
+                        "company_id": company_id,
+                        "migration_batch_id": batch_id
+                    }).eq("id", au.id).execute()
+                    print(f"[EXECUTED] Linked registered user to company: {au_email} -> {company_id}")
+                    user_id_map[au_email] = au.id
+        except Exception as e:
+            print(f"[WARN] Error synchronizing additional auth users: {e}")
 
         # 9. Legal rep linking
         rep_payload["company_id"] = company_id
@@ -322,8 +356,13 @@ def run_migration(execute: bool, confirm_project: str | None):
         if rep_email in user_id_map:
             rep_payload["user_id"] = user_id_map[rep_email]
 
-        supabase.table("legal_representatives").upsert(rep_payload, on_conflict="company_id").execute()
-        print("[EXECUTED] Upserted legal representative.")
+        existing_rep = supabase.table("legal_representatives").select("id").eq("company_id", company_id).execute()
+        if existing_rep.data and len(existing_rep.data) > 0:
+            supabase.table("legal_representatives").update(rep_payload).eq("id", existing_rep.data[0]["id"]).execute()
+            print(f"[EXECUTED] Updated legal representative for company {company_id}.")
+        else:
+            supabase.table("legal_representatives").insert(rep_payload).execute()
+            print("[EXECUTED] Inserted legal representative.")
 
         # 10. Templates and mappings
         tpl_ids = []
@@ -341,27 +380,45 @@ def run_migration(execute: bool, confirm_project: str | None):
             raw_template_id = mapping_data.get("template_id", mf.stem.replace("_mapping", ""))
             template_code = re.sub(r"[^A-Za-z0-9_-]", "_", raw_template_id)[:100].upper()
 
-            res_tpl = supabase.table("pdf_templates").upsert({
-                "company_id": company_id,
-                "codigo": template_code,
-                "nombre": raw_template_id,
-                "migration_batch_id": batch_id,
-                "is_active": True
-            }, on_conflict="company_id,codigo").execute()
-            tpl_id = res_tpl.data[0]["id"]
+            # Check or create template
+            existing_tpl = supabase.table("pdf_templates").select("id").eq("company_id", company_id).eq("codigo", template_code).execute()
+            if existing_tpl.data and len(existing_tpl.data) > 0:
+                tpl_id = existing_tpl.data[0]["id"]
+                supabase.table("pdf_templates").update({
+                    "nombre": raw_template_id,
+                    "migration_batch_id": batch_id,
+                    "is_active": True
+                }).eq("id", tpl_id).execute()
+            else:
+                res_tpl = supabase.table("pdf_templates").insert({
+                    "company_id": company_id,
+                    "codigo": template_code,
+                    "nombre": raw_template_id,
+                    "migration_batch_id": batch_id,
+                    "is_active": True
+                }).execute()
+                tpl_id = res_tpl.data[0]["id"]
             tpl_ids.append(tpl_id)
 
-            res_ver = supabase.table("pdf_template_versions").upsert({
-                "template_id": tpl_id,
-                "version": 1,
-                "filename": f"{raw_template_id}.pdf",
-                "storage_path": f"{company_id}/templates/{tpl_id}/v1/{raw_template_id}.pdf",
-                "page_count": 1,
-                "is_acroform": False,
-                "migration_batch_id": batch_id,
-                "is_active": True
-            }, on_conflict="template_id,version").execute()
-            ver_id = res_ver.data[0]["id"]
+            # Check or create version in 'draft' status (trigger check_pdf_mappings_lifecycle requires draft)
+            existing_ver = supabase.table("pdf_template_versions").select("id, status").eq("template_id", tpl_id).eq("version", 1).execute()
+            if existing_ver.data and len(existing_ver.data) > 0:
+                ver_id = existing_ver.data[0]["id"]
+                if existing_ver.data[0].get("status") != "draft":
+                    supabase.table("pdf_template_versions").update({"status": "draft"}).eq("id", ver_id).execute()
+            else:
+                res_ver = supabase.table("pdf_template_versions").insert({
+                    "template_id": tpl_id,
+                    "version": 1,
+                    "filename": f"{raw_template_id}.pdf",
+                    "storage_path": f"{company_id}/templates/{tpl_id}/v1/{raw_template_id}.pdf",
+                    "page_count": 1,
+                    "is_acroform": False,
+                    "migration_batch_id": batch_id,
+                    "is_active": True,
+                    "status": "draft"
+                }).execute()
+                ver_id = res_ver.data[0]["id"]
             ver_ids.append(ver_id)
 
             mappings_list = mapping_data.get("mappings", [])
@@ -383,6 +440,12 @@ def run_migration(execute: bool, confirm_project: str | None):
                 supabase.table("pdf_mappings").insert(db_mappings).execute()
                 total_mappings += len(db_mappings)
                 print(f"[EXECUTED] Registered template: {template_code} (v1) with {len(db_mappings)} mappings.")
+
+            # Publish the version now that mappings are committed
+            supabase.table("pdf_template_versions").update({
+                "status": "published",
+                "migration_batch_id": batch_id
+            }).eq("id", ver_id).execute()
 
         # 11. Finalize migration run with full manifest
         manifest = {
@@ -406,7 +469,7 @@ def run_migration(execute: bool, confirm_project: str | None):
 
         supabase.table("migration_runs").update({
             "status": "completed",
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "manifest": manifest
         }).eq("batch_id", batch_id).execute()
 
@@ -419,7 +482,7 @@ def run_migration(execute: bool, confirm_project: str | None):
         print(f"\n[ERROR] Migration encountered an error: {err}")
         supabase.table("migration_runs").update({
             "status": "failed",
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "error_message": str(err)
         }).eq("batch_id", batch_id).execute()
         raise
@@ -451,9 +514,13 @@ def run_rollback(batch_id: str, confirm_project: str | None):
     run_record = run_res.data[0]
     if run_record["status"] == "rolled_back":
         print(f"[ALREADY ROLLED BACK] Migration batch {batch_id} was already rolled back at {run_record.get('completed_at')}.")
-        return
-
     print(f"[1/3] Calling public.rollback_migration_batch('{batch_id}')...")
+    # Reset version status to draft so check_pdf_mappings_lifecycle doesn't block mapping deletion
+    try:
+        supabase.table("pdf_template_versions").update({"status": "draft"}).eq("migration_batch_id", batch_id).execute()
+    except Exception as e:
+        print(f"  ! Note: could not pre-set versions to draft: {e}")
+
     rpc_res = supabase.rpc("rollback_migration_batch", {"p_batch_id": batch_id}).execute()
     print(f"  [OK] Database entities rolled back: {rpc_res.data}")
 

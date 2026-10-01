@@ -41,6 +41,17 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+if database_url.startswith("sqlite"):
+    from backend.db.models import Base
+    from sqlalchemy import text
+    Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE commercial_profiles ADD COLUMN needs_password_hash_sync BOOLEAN DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            pass
+
 def get_db():
     db = SessionLocal()
     try:
