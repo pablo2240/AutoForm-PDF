@@ -42,3 +42,8 @@ Thumbs.db
 # Scratch & Private Pre-Migration Backups
 scratch/
 backend/data/storage_pre_migration_backup/
+
+# User-scoped input caches & legacy slot state (ADR-0011)
+input/*/
+backend/data/active_slot.json
+active_slot.json

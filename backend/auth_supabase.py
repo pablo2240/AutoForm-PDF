@@ -83,6 +83,7 @@ def decode_supabase_jwt(token: str) -> Dict[str, Any]:
     alg = unverified_headers.get("alg")
     key = None
 
+    effective_env = os.getenv("APP_ENVIRONMENT", APP_ENVIRONMENT).lower()
     if alg == "ES256":
         try:
             signing_key = jwks_client.get_signing_key_from_jwt(token)
@@ -92,7 +93,7 @@ def decode_supabase_jwt(token: str) -> Dict[str, Any]:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Fallo al resolver clave criptográfica ES256 desde JWKS: {str(e)}"
             )
-    elif alg == "HS256" and (APP_ENVIRONMENT in ("local", "test", "testing") or os.getenv("ALLOW_HS256_AUTH", "0") == "1"):
+    elif alg == "HS256" and (effective_env in ("local", "test", "testing") or os.getenv("ALLOW_HS256_AUTH", "0") == "1"):
         # En entorno local/test se admite HS256 con las claves secretas configuradas
         key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY
     else:

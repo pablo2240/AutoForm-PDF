@@ -174,6 +174,7 @@ export interface AuditReport {
 export interface FillResultData {
   filename: string;
   total_placed: number;
+  download_url?: string;
   is_temporary?: boolean;
   audit_report?: AuditReport | null;
 }

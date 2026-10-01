@@ -12,7 +12,7 @@ from collections import defaultdict
 from sqlalchemy import func
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -30,7 +30,7 @@ else:
 
 from backend.pdf_filling_agent.visual_processor import VisualPDFProcessor, VisualPlacement
 from backend.db.session import get_db, SessionLocal
-from backend.db.models import CommercialProfile, PasswordResetToken
+from backend.db.models import CommercialProfile, PasswordResetToken, UserDocument
 from backend.db.auth import hash_password, verify_password, create_session_token, verify_session_token, SESSION_MAX_AGE_SECONDS
 from backend.email_service import send_password_reset_email
 from backend.auth_supabase import (
@@ -114,42 +114,164 @@ os.makedirs(SIGNATURES_DIR, exist_ok=True)
 ACTIVE_SLOT_FILE = os.path.join(DATA_DIR, "active_slot.json")
 
 def get_active_slot() -> Optional[dict]:
-    """Obtiene el slot del archivo activo actualmente si existe físicamente en INPUT_DIR."""
-    if os.path.exists(ACTIVE_SLOT_FILE):
-        try:
-            with open(ACTIVE_SLOT_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                tid = data.get("template_id")
-                fn = data.get("filename")
-                pdf_path = os.path.join(INPUT_DIR, f"{tid}.pdf") if tid else None
-                if not pdf_path or not os.path.exists(pdf_path):
-                    if fn:
-                        pdf_path = os.path.join(INPUT_DIR, fn)
-                if pdf_path and os.path.exists(pdf_path):
-                    return data
-        except Exception as e:
-            print(f"[WARN] Error reading active_slot.json: {e}")
-    return None
+    """Fail-closed: All access to legacy active_slot.json is forbidden under ADR-0011."""
+    raise RuntimeError("Deprecated legacy active_slot.json access. Use user_documents under auth context (ADR-0011 fail-closed).")
 
 def set_active_slot(template_id: str, filename: str):
-    """Establece de forma atómica el archivo activo en el slot único."""
-    try:
-        with open(ACTIVE_SLOT_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "template_id": template_id,
-                "filename": filename,
-                "updated_at": datetime.now().isoformat()
-            }, f, indent=2)
-    except Exception as e:
-        print(f"[WARN] Error saving active_slot.json: {e}")
+    """Fail-closed: All writes to legacy active_slot.json are forbidden under ADR-0011."""
+    raise RuntimeError("Deprecated legacy active_slot.json write. Use user_documents under auth context (ADR-0011 fail-closed).")
 
 def clear_active_slot():
-    """Limpia el slot activo eliminando active_slot.json."""
-    if os.path.exists(ACTIVE_SLOT_FILE):
+    """Fail-closed: All clearing of legacy active_slot.json is forbidden under ADR-0011."""
+    raise RuntimeError("Deprecated legacy active_slot.json clear. Use user_documents under auth context (ADR-0011 fail-closed).")
+
+def parse_storage_path(storage_path: str) -> Tuple[str, str]:
+    """
+    Descompone una ruta canónica de Storage en tupla (bucket, key).
+    Formatos soportados:
+    - 'templates/company_id/user_id/file.pdf' -> ('templates', 'company_id/user_id/file.pdf')
+    - 'generated-pdfs/company_id/user_id/file.pdf' -> ('generated-pdfs', 'company_id/user_id/file.pdf')
+    - 'company_id/user_id/file.pdf' -> ('templates', 'company_id/user_id/file.pdf')
+    """
+    if not storage_path:
+        return ("templates", "")
+    for known_bucket in ("templates", "generated-pdfs", "signatures"):
+        if storage_path.startswith(f"{known_bucket}/"):
+            return (known_bucket, storage_path[len(known_bucket) + 1:])
+    return ("templates", storage_path)
+
+def get_user_pdf_bytes(user_id: str, doc_row: Dict[str, Any]) -> bytes:
+    """
+    Obtiene los bytes del PDF para el usuario autenticado:
+    1. Revisa caché efímera local en input/{user_id}/{filename}
+    2. Si no existe o está corrupta, descarga bajo demanda desde Supabase Storage
+    3. Almacena en caché efímera local input/{user_id}/{filename}
+    4. Retorna bytes
+    """
+    filename = doc_row.get("filename")
+    storage_path = doc_row.get("storage_path")
+    user_cache_path = os.path.join(INPUT_DIR, str(user_id), filename) if filename else None
+
+    if user_cache_path and os.path.exists(user_cache_path):
         try:
-            os.remove(ACTIVE_SLOT_FILE)
-        except Exception:
-            pass
+            with open(user_cache_path, "rb") as f:
+                content = f.read()
+            if content:
+                return content
+        except Exception as e:
+            print(f"[WARN] Error reading local user cache {user_cache_path}: {e}")
+
+    # Descarga autoritativa desde Supabase Storage
+    if storage_path:
+        bucket, key = parse_storage_path(storage_path)
+        try:
+            admin_client = get_supabase_admin_client()
+            content = admin_client.storage.from_(bucket).download(key)
+            if content:
+                if user_cache_path:
+                    try:
+                        os.makedirs(os.path.dirname(user_cache_path), exist_ok=True)
+                        with open(user_cache_path, "wb") as f:
+                            f.write(content)
+                    except Exception as e:
+                        print(f"[WARN] Error updating local user cache {user_cache_path}: {e}")
+                return content
+        except Exception as e:
+            print(f"[WARN] Error downloading from Supabase Storage {bucket}/{key}: {e}")
+
+    raise HTTPException(
+        status_code=404,
+        detail="No se encontró el contenido del documento en almacenamiento ni en caché."
+    )
+
+def resolve_user_document(
+    user_id: str,
+    template_identifier: str,
+    is_admin: bool = False,
+    company_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Busca de manera autoritativa un documento en user_documents por id (UUID) o template_code,
+    garantizando aislamiento estricto por usuario y auditoría tenant admin.
+    """
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception:
+        pass
+
+    is_valid_uuid = False
+    try:
+        uuid.UUID(str(template_identifier))
+        is_valid_uuid = True
+    except Exception:
+        pass
+
+    if admin_client:
+        try:
+            query = admin_client.table("user_documents").select("*")
+            if is_admin and company_id:
+                query = query.eq("company_id", company_id)
+            else:
+                query = query.eq("user_id", user_id)
+
+            if is_valid_uuid:
+                res = query.eq("id", template_identifier).limit(1).execute()
+                if res.data:
+                    return res.data[0]
+
+            res_code = query.eq("template_code", template_identifier).order("created_at", desc=True).limit(1).execute()
+            if res_code.data:
+                return res_code.data[0]
+        except Exception as e:
+            print(f"[WARN] Error resolving user document in Supabase: {e}")
+
+    # Fallback local SQLite en modo dev/test
+    if APP_ENVIRONMENT != "production":
+        db = SessionLocal()
+        try:
+            local_q = db.query(UserDocument)
+            if is_admin and company_id:
+                local_q = local_q.filter(UserDocument.company_id == company_id)
+            else:
+                local_q = local_q.filter(UserDocument.user_id == user_id)
+            if is_valid_uuid:
+                doc = local_q.filter(UserDocument.id == template_identifier).first()
+                if doc:
+                    return doc.to_dict()
+            doc = local_q.filter(UserDocument.template_code == template_identifier).order_by(UserDocument.created_at.desc()).first()
+            if doc:
+                return doc.to_dict()
+        finally:
+            db.close()
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Documento '{template_identifier}' no encontrado o no pertenece al usuario autenticado."
+    )
+
+def resolve_user_pdf_path(
+    user_id: str,
+    template_identifier: str,
+    is_admin: bool = False,
+    company_id: Optional[str] = None
+) -> str:
+    """
+    Retorna la ruta al archivo PDF en la caché local del usuario.
+    Si el archivo no está en caché (por ejemplo tras reinicio de contenedor en Render),
+    lo descarga bajo demanda desde Supabase Storage.
+    """
+    doc = resolve_user_document(user_id, template_identifier, is_admin=is_admin, company_id=company_id)
+    filename = doc["filename"]
+    user_cache_path = os.path.join(INPUT_DIR, str(user_id), filename)
+
+    if not os.path.exists(user_cache_path) or os.path.getsize(user_cache_path) == 0:
+        pdf_bytes = get_user_pdf_bytes(user_id, doc)
+        os.makedirs(os.path.dirname(user_cache_path), exist_ok=True)
+        with open(user_cache_path, "wb") as f:
+            f.write(pdf_bytes)
+
+    return user_cache_path
 
 class SignaturePayload(BaseModel):
     image_base64: str
@@ -1271,7 +1393,7 @@ def forgot_password(dto: ForgotPasswordRequestDTO, request: Request, db = Depend
 
             # 3. Construir enlace de restablecimiento
             site_url = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
-            reset_link = f"{site_url}/auth/reset-password?token={raw_token}"
+            reset_link = f"{site_url}/?token={raw_token}"
 
             # 4. Despacho síncrono del correo
             display_name = user.nombre or user.profile_name or "Usuario Comercial"
@@ -1556,202 +1678,72 @@ def delete_commercial_profile(
 
 
 @app.get("/api/templates")
-def list_templates(request: Request):
-    # ---------------------------------------------------------
-    # 1. Obtener usuario Supabase
-    # ---------------------------------------------------------
-    auth_header = request.headers.get("Authorization", "")
+def list_templates(user: Dict[str, Any] = Depends(get_current_user)):
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
 
-    token = None
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception as e:
+        print(f"[WARN] list_templates admin_client error: {e}")
 
-    if auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1]
-    elif "admin_session" in request.cookies:
-        token = request.cookies.get("admin_session")
-
-    supabase_user = None
-    user_client = None
-
-    if token:
+    active_doc = None
+    if admin_client:
         try:
-            supabase_user = decode_supabase_jwt(token)
-            user_client = get_supabase_user_client(token)
+            res = (
+                admin_client.table("user_documents")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                active_doc = res.data[0]
         except Exception as e:
-            print(
-                f"[AUTH ERROR] list_templates: "
-                f"{type(e).__name__}: {e}"
-            )
+            print(f"[WARN] Error querying user_documents in Supabase: {e}")
 
-    if APP_ENVIRONMENT == "production":
-        if not token or not supabase_user or not user_client:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Se requiere autenticación válida para consultar plantillas."
+    # Fallback local SQLite si no hay respuesta de Supabase (entorno dev/test)
+    if not active_doc and APP_ENVIRONMENT != "production":
+        db = SessionLocal()
+        try:
+            local_doc = (
+                db.query(UserDocument)
+                .filter(UserDocument.user_id == user_id, UserDocument.is_active == True)
+                .first()
             )
+            if local_doc:
+                active_doc = local_doc.to_dict()
+        finally:
+            db.close()
 
     templates = []
-    active_slot = get_active_slot()
+    active_slot = None
 
-    # ---------------------------------------------------------
-    # 2. Buscar plantilla activa local
-    # ---------------------------------------------------------
-    if active_slot:
-        local_template_id = active_slot.get("template_id")
-        filename = active_slot.get(
-            "filename",
-            f"{local_template_id}.pdf"
-        )
+    if active_doc:
+        doc_id = str(active_doc.get("id"))
+        template_code = active_doc.get("template_code") or doc_id
+        filename = active_doc.get("filename", f"{template_code}.pdf")
+        size_kb = float(active_doc.get("size_kb") or 0.0)
 
-        pdf_path = os.path.join(
-            INPUT_DIR,
-            f"{local_template_id}.pdf"
-        )
-
-        if not os.path.exists(pdf_path):
-            pdf_path = os.path.join(INPUT_DIR, filename)
-
-        if os.path.exists(pdf_path):
-
-            size_kb = round(
-                os.path.getsize(pdf_path) / 1024,
-                1
-            )
-
-            db_template_id = None
-            template_version_id = None
-            version_number = None
-
-            # -------------------------------------------------
-            # 3. Resolver IDs reales desde Supabase
-            # -------------------------------------------------
-            if user_client and supabase_user:
-
-                company_id = (
-                    supabase_user
-                    .get("app_metadata", {})
-                    .get("company_id")
-                )
-
-                if company_id:
-                    try:
-                        template_result = (
-                            user_client
-                            .table("pdf_templates")
-                            .select("id")
-                            .eq("company_id", company_id)
-                            .eq("codigo", local_template_id)
-                            .eq("is_active", True)
-                            .limit(1)
-                            .execute()
-                        )
-
-                        if template_result.data:
-
-                            db_template_id = (
-                                template_result.data[0]["id"]
-                            )
-
-                            version_result = (
-                                user_client
-                                .table("pdf_template_versions")
-                                .select(
-                                    "id,version,filename,status,is_active"
-                                )
-                                .eq(
-                                    "template_id",
-                                    db_template_id
-                                )
-                                .eq("is_active", True)
-                                .eq("status", "published")
-                                .order(
-                                    "version",
-                                    desc=True
-                                )
-                                .limit(1)
-                                .execute()
-                            )
-
-                            if version_result.data:
-                                version_row = (
-                                    version_result.data[0]
-                                )
-
-                                template_version_id = (
-                                    version_row["id"]
-                                )
-
-                                version_number = (
-                                    version_row["version"]
-                                )
-
-                    except Exception as e:
-                        print(
-                            "[WARN] No se pudo resolver "
-                            f"template_version_id: {e}"
-                        )
-
-            # -------------------------------------------------
-            # 4. En producción no ocultar inconsistencia
-            # -------------------------------------------------
-            if (
-                APP_ENVIRONMENT == "production"
-                and not template_version_id
-            ):
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "La plantilla activa no tiene una "
-                        "versión publicada asociada en Supabase."
-                    )
-                )
-
-            templates.append({
-                # Este ID se conserva porque el resto de la
-                # aplicación lo utiliza para localizar el PDF.
-                "id": local_template_id,
-
-                "filename": filename,
-                "size_kb": size_kb,
-
-                # IDs reales de Supabase
-                "template_id": db_template_id,
-                "template_version_id": template_version_id,
-                "version": version_number
-            })
-
-            return {
-                "templates": templates,
-                "active_slot": active_slot
-            }
-
-    # ---------------------------------------------------------
-    # 5. Fallback local para desarrollo
-    # ---------------------------------------------------------
-    if APP_ENVIRONMENT != "production":
-
-        if os.path.exists(INPUT_DIR):
-
-            for f in os.listdir(INPUT_DIR):
-
-                if f.lower().endswith(".pdf"):
-
-                    local_template_id = os.path.splitext(f)[0]
-
-                    size_kb = round(
-                        os.path.getsize(
-                            os.path.join(INPUT_DIR, f)
-                        ) / 1024,
-                        1
-                    )
-
-                    templates.append({
-                        "id": local_template_id,
-                        "filename": f,
-                        "size_kb": size_kb,
-                        "template_id": None,
-                        "template_version_id": None,
-                        "version": None
-                    })
+        templates.append({
+            "id": template_code,
+            "document_id": doc_id,
+            "template_id": doc_id,
+            "template_code": template_code,
+            "filename": filename,
+            "size_kb": size_kb,
+            "is_active": True,
+            "template_version_id": None,
+            "version": 1
+        })
+        active_slot = {
+            "template_id": template_code,
+            "document_id": doc_id,
+            "filename": filename,
+            "updated_at": active_doc.get("updated_at")
+        }
 
     return {
         "templates": templates,
@@ -1759,324 +1751,347 @@ def list_templates(request: Request):
     }
 
 @app.post("/api/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...), request: Request = None):
+async def upload_pdf(
+    file: UploadFile = File(...),
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=400,
             detail="Solo se admiten archivos PDF"
         )
 
-    # ---------------------------------------------------------
-    # 1. Autenticación Supabase
-    # ---------------------------------------------------------
-    auth_header = request.headers.get("Authorization", "") if request else ""
-
-    token = None
-    if auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1]
-
-    supabase_user = None
-    user_client = None
-
-    if token:
-        try:
-            supabase_user = decode_supabase_jwt(token)
-            user_client = get_supabase_user_client(token)
-        except Exception as e:
-            print(f"[AUTH ERROR] upload_pdf: {type(e).__name__}: {e}")
-
-    if APP_ENVIRONMENT == "production":
-        if not token or not supabase_user or not user_client:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Se requiere autenticación válida para subir plantillas."
-            )
-
-    # ---------------------------------------------------------
-    # 2. Datos básicos de la plantilla
-    # ---------------------------------------------------------
-    new_template_id = os.path.splitext(file.filename)[0]
-
-    company_id = None
-    user_id = None
-
-    if supabase_user:
-        company_id = supabase_user.get("app_metadata", {}).get("company_id")
-        user_id = supabase_user.get("sub")
-
-    if APP_ENVIRONMENT == "production" and not company_id:
+    # 1. Validación en memoria mediante PyMuPDF (ADR-0011)
+    content = await file.read()
+    if not content:
         raise HTTPException(
-            status_code=403,
-            detail="El usuario autenticado no tiene company_id."
+            status_code=400,
+            detail="El archivo PDF subido está vacío."
         )
 
-    # ---------------------------------------------------------
-    # 3. Gestión del slot local actual
-    # ---------------------------------------------------------
-    prev_slot = get_active_slot()
-
-    if prev_slot:
-        prev_id = prev_slot.get("template_id")
-
-        if prev_id and prev_id != new_template_id:
-
-            for candidate in [
-                os.path.join(INPUT_DIR, f"{prev_id}.pdf"),
-                os.path.join(INPUT_DIR, prev_slot.get("filename", ""))
-            ]:
-                if os.path.exists(candidate):
-                    try:
-                        os.remove(candidate)
-                    except Exception as e:
-                        print(
-                            f"[WARN] Error al eliminar PDF previo "
-                            f"{candidate}: {e}"
-                        )
-
-            prev_map = os.path.join(
-                DATA_DIR,
-                f"{prev_id}_mapping.json"
-            )
-
-            if os.path.exists(prev_map):
-                try:
-                    os.remove(prev_map)
-                except Exception as e:
-                    print(
-                        f"[WARN] Error al eliminar mapeo previo "
-                        f"{prev_map}: {e}"
-                    )
-
-    # ---------------------------------------------------------
-    # 4. Guardar PDF localmente
-    # ---------------------------------------------------------
-    dest_path = os.path.join(INPUT_DIR, file.filename)
-
+    import fitz
     try:
-        with open(dest_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"No fue posible guardar el PDF: {str(e)}"
-        )
-
-    # ---------------------------------------------------------
-    # 5. Detectar información del PDF
-    # ---------------------------------------------------------
-    try:
-        import fitz
-
-        pdf_doc = fitz.open(dest_path)
+        pdf_doc = fitz.open(stream=content, filetype="pdf")
         page_count = len(pdf_doc)
-
-        is_acroform = False
-
-        for page in pdf_doc:
-            widgets = page.widgets()
-            if widgets:
-                is_acroform = True
-                break
-
+        is_acroform = any(bool(p.widgets()) for p in pdf_doc)
         pdf_doc.close()
-
     except Exception as e:
-        print(f"[WARN] No se pudo inspeccionar el PDF: {e}")
-        page_count = 0
-        is_acroform = False
+        raise HTTPException(
+            status_code=400,
+            detail=f"Archivo PDF inválido o corrupto: {str(e)}"
+        )
 
-    # ---------------------------------------------------------
-    # 6. Registrar plantilla y versión en Supabase
-    # ---------------------------------------------------------
-    db_template_id = None
-    template_version_id = None
-    version_number = 1
+    # 2. Identificadores y rutas autoritativas
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
+    template_code = os.path.splitext(file.filename)[0]
+    size_kb = round(len(content) / 1024, 1)
 
-    if user_client and company_id:
+    storage_bucket = "templates"
+    storage_key = f"{company_id}/{user_id}/{file.filename}"
+    canonical_storage_path = f"templates/{storage_key}"
 
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception as e:
+        print(f"[WARN] Supabase admin client not available in upload_pdf: {e}")
+
+    # 3. Almacenamiento autoritativo en Supabase Storage (ADR-0011 Paso 1)
+    if admin_client:
         try:
-            # Buscar si esta plantilla ya existe para la empresa
-            existing = (
-                user_client
-                .table("pdf_templates")
-                .select("id,codigo,nombre")
-                .eq("company_id", company_id)
-                .eq("codigo", new_template_id)
-                .execute()
+            admin_client.storage.from_(storage_bucket).upload(
+                storage_key,
+                content,
+                file_options={"content-type": "application/pdf", "upsert": "true"}
             )
-
-            if existing.data:
-                db_template_id = existing.data[0]["id"]
-
-            else:
-                template_insert = (
-                    user_client
-                    .table("pdf_templates")
-                    .insert({
-                        "company_id": company_id,
-                        "codigo": new_template_id,
-                        "nombre": new_template_id,
-                        "descripcion": None,
-                        "is_active": True
-                    })
-                    .execute()
+        except Exception as e:
+            print(f"[ERROR] Error uploading to Supabase Storage: {e}")
+            if APP_ENVIRONMENT == "production":
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Fallo al persistir archivo en Supabase Storage: {str(e)}"
                 )
 
-                if not template_insert.data:
-                    raise Exception(
-                        "Supabase no devolvió el registro de pdf_templates."
-                    )
+    # 4. Transacción en Base de Datos (ADR-0011 Paso 2)
+    superseded_docs = []
+    new_doc_id = str(uuid.uuid4())
 
-                db_template_id = template_insert.data[0]["id"]
-
-            # -------------------------------------------------
-            # Calcular siguiente versión
-            # -------------------------------------------------
-            previous_versions = (
-                user_client
-                .table("pdf_template_versions")
-                .select("id,version")
-                .eq("template_id", db_template_id)
-                .order("version", desc=True)
-                .limit(1)
+    if admin_client:
+        try:
+            prev_res = (
+                admin_client.table("user_documents")
+                .select("id,storage_path,filename")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
                 .execute()
             )
+            if prev_res.data:
+                superseded_docs = prev_res.data
 
-            if previous_versions.data:
-                version_number = (
-                    int(previous_versions.data[0]["version"]) + 1
-                )
-
-            # Desactivar versiones anteriores
+            # Desactivar ranuras activas previas
             (
-                user_client
-                .table("pdf_template_versions")
+                admin_client.table("user_documents")
                 .update({"is_active": False})
-                .eq("template_id", db_template_id)
+                .eq("user_id", user_id)
                 .eq("is_active", True)
                 .execute()
             )
 
-            # -------------------------------------------------
-            # Crear nueva versión
-            # -------------------------------------------------
-            version_insert = (
-                user_client
-                .table("pdf_template_versions")
+            # Insertar nuevo registro activo
+            insert_res = (
+                admin_client.table("user_documents")
                 .insert({
-                    "template_id": db_template_id,
-                    "version": version_number,
+                    "id": new_doc_id,
+                    "company_id": company_id,
+                    "user_id": user_id,
+                    "template_code": template_code,
                     "filename": file.filename,
-                    "storage_path": f"local/{company_id}/{file.filename}",
-                    "page_count": page_count,
-                    "is_acroform": is_acroform,
-                    "is_active": True,
-                    "created_by": user_id,
-                    "status": "published"
+                    "storage_path": canonical_storage_path,
+                    "size_kb": size_kb,
+                    "is_active": True
                 })
                 .execute()
             )
-
-            if not version_insert.data:
-                raise Exception(
-                    "Supabase no devolvió la versión creada."
-                )
-
-            template_version_id = version_insert.data[0]["id"]
-
+            if insert_res.data:
+                new_doc_id = insert_res.data[0]["id"]
         except Exception as e:
-
-            # Si Supabase falla, eliminar el PDF local para evitar
-            # que quede una plantilla sin registro de versión.
+            print(f"[ERROR] Error updating user_documents in Supabase: {e}")
+            # COMPENSATING ROLLBACK (Saga Pattern):
+            # 1. Eliminar archivo recién subido a Storage para prevenir artefactos huérfanos
             try:
-                if os.path.exists(dest_path):
-                    os.remove(dest_path)
-            except Exception:
-                pass
+                print(f"[COMPENSATION] Rolling back uploaded storage object: {storage_bucket}/{storage_key}")
+                admin_client.storage.from_(storage_bucket).remove([storage_key])
+            except Exception as se:
+                print(f"[ERROR] Failed to execute compensating rollback on storage: {se}")
 
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "No fue posible registrar la plantilla "
-                    f"en Supabase: {str(e)}"
+            # 2. Restaurar estado is_active = True para los documentos previamente desactivados
+            if superseded_docs:
+                for s_doc in superseded_docs:
+                    s_id = s_doc.get("id")
+                    if s_id:
+                        try:
+                            admin_client.table("user_documents").update({"is_active": True}).eq("id", s_id).execute()
+                        except Exception as re_err:
+                            print(f"[WARN] Failed to reactivate superseded doc {s_id}: {re_err}")
+
+            if APP_ENVIRONMENT == "production":
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error registrando documento en base de datos: {str(e)}"
                 )
+
+    # Fallback/sync en SQLite local
+    if APP_ENVIRONMENT != "production":
+        db = SessionLocal()
+        try:
+            db.query(UserDocument).filter(
+                UserDocument.user_id == user_id,
+                UserDocument.is_active == True
+            ).update({"is_active": False})
+
+            local_rec = UserDocument(
+                id=new_doc_id,
+                company_id=company_id,
+                user_id=user_id,
+                template_code=template_code,
+                filename=file.filename,
+                storage_path=canonical_storage_path,
+                size_kb=size_kb,
+                is_active=True
             )
+            db.add(local_rec)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[WARN] Local SQLite user_documents sync error: {e}")
+        finally:
+            db.close()
 
-    # ---------------------------------------------------------
-    # 7. Actualizar slot local
-    # ---------------------------------------------------------
-    set_active_slot(
-        new_template_id,
-        file.filename
-    )
+    # 5. Purga condicionada de documentos anteriores (ADR-0011 Paso 3)
+    for prev_doc in superseded_docs:
+        prev_id = prev_doc.get("id")
+        prev_path = prev_doc.get("storage_path")
+        prev_fn = prev_doc.get("filename")
+        if not prev_id or prev_id == new_doc_id:
+            continue
 
-    # ---------------------------------------------------------
+        can_delete = False
+        if admin_client:
+            try:
+                rpc_res = admin_client.rpc(
+                    "can_hard_delete_user_document",
+                    {"p_doc_id": prev_id}
+                ).execute()
+                can_delete = bool(rpc_res.data)
+            except Exception as e:
+                print(f"[WARN] can_hard_delete_user_document error for {prev_id}: {e}")
+
+        if can_delete:
+            try:
+                if admin_client and prev_path:
+                    b_bucket, b_key = parse_storage_path(prev_path)
+                    admin_client.storage.from_(b_bucket).remove([b_key])
+                if admin_client:
+                    admin_client.table("user_documents").delete().eq("id", prev_id).execute()
+                if prev_fn:
+                    prev_cache = os.path.join(INPUT_DIR, user_id, prev_fn)
+                    if os.path.exists(prev_cache):
+                        os.remove(prev_cache)
+            except Exception as e:
+                print(f"[WARN] Error executing hard-delete cleanup for {prev_id}: {e}")
+
+    # 6. Escribir caché efímera local por usuario (input/{user_id}/{filename})
+    user_cache_dir = os.path.join(INPUT_DIR, user_id)
+    os.makedirs(user_cache_dir, exist_ok=True)
+    user_cache_path = os.path.join(user_cache_dir, file.filename)
+    try:
+        with open(user_cache_path, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        print(f"[WARN] Error writing user local cache: {e}")
+
+    # 7. Vinculación pasiva con plantillas institucionales (ADR-0011 Sección 8)
+    is_institutional = False
+    institutional_id = None
+    if admin_client and company_id:
+        try:
+            tmpl_res = (
+                admin_client.table("pdf_templates")
+                .select("id,codigo,nombre")
+                .eq("company_id", company_id)
+                .eq("codigo", template_code)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+            if tmpl_res.data:
+                is_institutional = True
+                institutional_id = tmpl_res.data[0]["id"]
+        except Exception as e:
+            print(f"[WARN] Error checking institutional template: {e}")
+
     # 8. Respuesta al frontend
-    # ---------------------------------------------------------
     return {
         "status": "success",
-        "template_id": new_template_id,
-        "pdf_template_id": db_template_id,
-        "template_version_id": template_version_id,
-        "version": version_number,
+        "template_id": template_code,
+        "document_id": new_doc_id,
+        "pdf_template_id": institutional_id,
+        "template_version_id": None,
+        "version": 1,
         "filename": file.filename,
+        "size_kb": size_kb,
         "page_count": page_count,
-        "is_acroform": is_acroform
+        "is_acroform": is_acroform,
+        "is_institutional": is_institutional,
+        "is_active": True
     }
 
 @app.delete("/api/templates/{template_id}")
-def delete_template(template_id: str):
+def delete_template(
+    template_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
+    is_admin = user.get("role") == "admin"
+
+    doc = resolve_user_document(user_id, template_id, is_admin=is_admin, company_id=company_id)
+    doc_id = doc["id"]
+    filename = doc["filename"]
+    storage_path = doc.get("storage_path")
+
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception:
+        pass
+
+    can_delete = False
+    if admin_client:
+        try:
+            rpc_res = admin_client.rpc("can_hard_delete_user_document", {"p_doc_id": doc_id}).execute()
+            can_delete = bool(rpc_res.data)
+        except Exception as e:
+            print(f"[WARN] can_hard_delete_user_document error: {e}")
+
     deleted_files = []
-
-    # Si la plantilla a eliminar es la ranura activa, limpiar el slot
-    active_slot = get_active_slot()
-    if active_slot and active_slot.get("template_id") == template_id:
-        clear_active_slot()
-
-    # Eliminar candidatos de PDF en input/
-    pdf_candidates = [
-        os.path.join(INPUT_DIR, f"{template_id}.pdf"),
-        os.path.join(INPUT_DIR, template_id)
-    ]
-    if active_slot and active_slot.get("filename"):
-        pdf_candidates.append(os.path.join(INPUT_DIR, active_slot["filename"]))
-
-    for p in pdf_candidates:
-        if os.path.exists(p):
+    if can_delete:
+        if admin_client and storage_path:
             try:
-                os.remove(p)
-                deleted_files.append(os.path.basename(p))
+                b_name, b_key = parse_storage_path(storage_path)
+                admin_client.storage.from_(b_name).remove([b_key])
             except Exception as e:
-                print(f"[ERROR] Removing PDF {p}: {e}")
+                print(f"[WARN] Error removing storage object {storage_path}: {e}")
 
-    # Eliminar JSON de mapeo en backend/data/
-    map_path = os.path.join(DATA_DIR, f"{template_id}_mapping.json")
+        if admin_client:
+            try:
+                admin_client.table("user_documents").delete().eq("id", doc_id).execute()
+            except Exception as e:
+                print(f"[WARN] Error deleting user_documents record: {e}")
+
+        if APP_ENVIRONMENT != "production":
+            db = SessionLocal()
+            try:
+                db.query(UserDocument).filter(UserDocument.id == doc_id).delete()
+                db.commit()
+            finally:
+                db.close()
+    else:
+        # Soft-delete para retención y auditoría legal
+        if admin_client:
+            try:
+                admin_client.table("user_documents").update({"is_active": False}).eq("id", doc_id).execute()
+            except Exception as e:
+                print(f"[WARN] Error deactivating user_document: {e}")
+
+        if APP_ENVIRONMENT != "production":
+            db = SessionLocal()
+            try:
+                db.query(UserDocument).filter(UserDocument.id == doc_id).update({"is_active": False})
+                db.commit()
+            finally:
+                db.close()
+
+    # Limpiar caché local del usuario
+    user_cache = os.path.join(INPUT_DIR, user_id, filename)
+    if os.path.exists(user_cache):
+        try:
+            os.remove(user_cache)
+            deleted_files.append(filename)
+        except Exception as e:
+            print(f"[WARN] Error removing user cache: {e}")
+
+    # Limpiar mapeo si existe
+    map_code = doc.get("template_code") or template_id
+    map_path = os.path.join(DATA_DIR, f"{map_code}_mapping.json")
     if os.path.exists(map_path):
         try:
             os.remove(map_path)
             deleted_files.append(os.path.basename(map_path))
-        except Exception as e:
-            print(f"[ERROR] Removing mapping {map_path}: {e}")
-
-    if not deleted_files:
-        raise HTTPException(status_code=404, detail=f"Plantilla '{template_id}' no encontrada en el sistema")
+        except Exception:
+            pass
 
     return {
         "status": "success",
         "message": f"Plantilla '{template_id}' eliminada exitosamente",
-        "deleted": deleted_files
+        "deleted": deleted_files or [filename]
     }
 
 @app.get("/api/pdf/{template_id}/pages")
-def get_pdf_pages(template_id: str):
-    pdf_path = os.path.join(INPUT_DIR, f"{template_id}.pdf")
-    if not os.path.exists(pdf_path):
-        pdf_path = os.path.join(INPUT_DIR, template_id)
-        if not os.path.exists(pdf_path):
-            raise HTTPException(status_code=404, detail=f"PDF '{template_id}' not found in input/")
+def get_pdf_pages(
+    template_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
+    is_admin = user.get("role") == "admin"
+
+    doc = resolve_user_document(user_id, template_id, is_admin=is_admin, company_id=company_id)
+    pdf_bytes = get_user_pdf_bytes(user_id, doc)
 
     processor = VisualPDFProcessor(output_dir=OUTPUT_DIR, dpi=120)
-    pages = processor.render_all_pages(pdf_path, dpi=120)
+    pages = processor.render_all_pages_from_bytes(pdf_bytes, dpi=120)
 
     return {
         "template_id": template_id,
@@ -2221,28 +2236,14 @@ def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], us
         return json.load(f)
 
 @app.post("/api/generate")
-def generate_pdf(req: GenerateRequest, request: Request):
-    # Check for Supabase Auth token
-    token = None
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1]
-    elif "admin_session" in request.cookies:
-        token = request.cookies.get("admin_session")
-
-    supabase_user = None
-    if token:
-        try:
-            supabase_user = decode_supabase_jwt(token)
-        except Exception:
-            supabase_user = None
+def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_current_user)):
+    token = user.get("token")
+    supabase_user = user
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
+    user_client = user.get("user_client")
 
     if APP_ENVIRONMENT == "production":
-        if not token or not supabase_user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="En entorno de producción se requiere autenticación obligatoria para generar formularios."
-            )
         if not req.template_version_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -2323,11 +2324,23 @@ def generate_pdf(req: GenerateRequest, request: Request):
             mappings = mapping_data.get("mappings", [])
 
     # 3. Locate input PDF
-    pdf_path = os.path.join(INPUT_DIR, f"{req.template_id}.pdf")
-    if not os.path.exists(pdf_path):
-        pdf_path = os.path.join(INPUT_DIR, req.template_id)
-        if not os.path.exists(pdf_path):
-            raise HTTPException(status_code=404, detail=f"Input PDF '{req.template_id}' not found")
+    user_id = str(supabase_user.get("sub") or supabase_user.get("id")) if supabase_user else None
+    pdf_path = None
+    if user_id:
+        try:
+            pdf_path = resolve_user_pdf_path(user_id, req.template_id, company_id=company_id)
+        except Exception:
+            pass
+    if not pdf_path or not os.path.exists(pdf_path):
+        for candidate in [
+            os.path.join(INPUT_DIR, f"{req.template_id}.pdf"),
+            os.path.join(INPUT_DIR, req.template_id)
+        ]:
+            if os.path.exists(candidate):
+                pdf_path = candidate
+                break
+    if not pdf_path or not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail=f"Input PDF '{req.template_id}' not found")
 
     # 4. Create visual placements
     placements = []
@@ -2448,37 +2461,14 @@ def generate_pdf(req: GenerateRequest, request: Request):
     }
 
 @app.post("/api/ai-fill")
-def ai_fill_pdf(req: AiFillRequest, request: Request):
-    token = None
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1]
-    elif "admin_session" in request.cookies:
-        token = request.cookies.get("admin_session")
-
-    supabase_user = None
-    if token:
-        try:
-            supabase_user = decode_supabase_jwt(token)
-        except Exception as e:
-            print(f"[AUTH ERROR] decode_supabase_jwt: {type(e).__name__}: {e}")
-            supabase_user = None
-
-    print("========== AI-FILL AUTH DEBUG ==========")
-    print("Environment:", APP_ENVIRONMENT)
-    print("Authorization header presente:", bool(auth_header))
-    print("Authorization es Bearer:", auth_header.startswith("Bearer "))
-    print("Token presente:", bool(token))
-    print("Cookie admin_session presente:", "admin_session" in request.cookies)
-    print("Supabase user válido:", bool(supabase_user))
-    print("========================================")
+def ai_fill_pdf(req: AiFillRequest, user: Dict[str, Any] = Depends(get_current_user)):
+    token = user.get("token")
+    supabase_user = user
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
+    user_client = user.get("user_client")
 
     if APP_ENVIRONMENT == "production":
-        if not token or not supabase_user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="En entorno de producción se requiere autenticación obligatoria para autollenado IA."
-            )
         if not req.template_version_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -2508,11 +2498,24 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
 
     # 1. Locate input PDF
     template_id = req.template_id
-    pdf_path = os.path.join(INPUT_DIR, f"{template_id}.pdf")
-    if not os.path.exists(pdf_path):
-        pdf_path = os.path.join(INPUT_DIR, template_id)
-        if not os.path.exists(pdf_path):
-            raise HTTPException(status_code=404, detail=f"Input PDF '{template_id}' not found")
+    user_id = str(supabase_user.get("sub") or supabase_user.get("id")) if supabase_user else None
+    company_id = (supabase_user or {}).get("app_metadata", {}).get("company_id")
+    pdf_path = None
+    if user_id:
+        try:
+            pdf_path = resolve_user_pdf_path(user_id, template_id, company_id=company_id)
+        except Exception:
+            pass
+    if not pdf_path or not os.path.exists(pdf_path):
+        for candidate in [
+            os.path.join(INPUT_DIR, f"{template_id}.pdf"),
+            os.path.join(INPUT_DIR, template_id)
+        ]:
+            if os.path.exists(candidate):
+                pdf_path = candidate
+                break
+    if not pdf_path or not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail=f"Input PDF '{template_id}' not found")
 
     # 2. Load company data (enforcing Supabase in production)
     company_data = load_company_data_for_generation(supabase_user, user_client)
@@ -2572,15 +2575,104 @@ def ai_fill_pdf(req: AiFillRequest, request: Request):
         print(f"[ERROR] ai_fill_pdf error: {e}")
         raise HTTPException(status_code=500, detail=f"Error en Autollenado IA: {str(e)}")
 
-@app.get("/api/download/{filename}")
-def download_file(filename: str):
-    file_path = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type="application/pdf"
+@app.get("/api/download/{history_id}")
+async def download_file_by_history_id(
+    history_id: str,
+    request: Request,
+    token: Optional[str] = None
+):
+    """
+    Endpoint seguro de descarga autenticada por history_id (ADR-0011 Sección 7).
+    Valida pertenencia contra form_fill_history y genera signed URL efímera (TTL 600s).
+    Aplica protección contra enumeración ciega retornando 404 de manera uniforme.
+    """
+    auth_token = token
+    if not auth_token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            auth_token = auth_header.split(" ", 1)[1]
+        elif "admin_session" in request.cookies:
+            auth_token = request.cookies.get("admin_session")
+
+    # Si no hay token en producción, fallar cerrado ciego
+    if APP_ENVIRONMENT == "production" and not auth_token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archivo no encontrado o acceso no autorizado."
+        )
+
+    user = None
+    if auth_token:
+        try:
+            user = decode_supabase_jwt(auth_token)
+        except Exception:
+            try:
+                from backend.db.auth import verify_session_token
+                user = verify_session_token(auth_token)
+            except Exception:
+                user = None
+
+    if APP_ENVIRONMENT == "production" and not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archivo no encontrado o acceso no autorizado."
+        )
+
+    user_id = str(user.get("sub") or user.get("id")) if user else None
+    user_role = (user.get("app_metadata", {}).get("role") or user.get("role")) if user else None
+    is_admin = user_role == "admin"
+
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception:
+        pass
+
+    if admin_client:
+        try:
+            hist_res = (
+                admin_client.table("form_fill_history")
+                .select("id,operator_user_id,output_storage_path,company_id")
+                .eq("id", history_id)
+                .single()
+                .execute()
+            )
+            hist = hist_res.data
+            if hist:
+                # Comprobar pertenencia
+                if not is_admin and user_id and str(hist.get("operator_user_id")) != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Archivo no encontrado o acceso no autorizado."
+                    )
+                storage_path = hist.get("output_storage_path")
+                if storage_path:
+                    b_name, b_key = parse_storage_path(storage_path)
+                    signed = admin_client.storage.from_(b_name).create_signed_url(b_key, expires_in=600)
+                    signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                    if signed_url:
+                        return RedirectResponse(signed_url)
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[WARN] Error fetching form_fill_history {history_id}: {e}")
+
+    # Fallback local para desarrollo y tests
+    if APP_ENVIRONMENT != "production":
+        for candidate in [
+            os.path.join(OUTPUT_DIR, f"{history_id}.pdf"),
+            os.path.join(OUTPUT_DIR, history_id)
+        ]:
+            if os.path.exists(candidate):
+                return FileResponse(
+                    path=candidate,
+                    filename=os.path.basename(candidate),
+                    media_type="application/pdf"
+                )
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Archivo no encontrado o acceso no autorizado."
     )
 
 if __name__ == "__main__":

@@ -53,11 +53,17 @@ class VisualPDFProcessor:
             # Arial, Calibri, Helvetica, Roboto, etc.
             return "hebo" if is_bold else "helv"
 
-    def render_page_to_image(self, pdf_path: str, page_num: int, dpi: int = 150) -> PageImage:
+    def _open_pdf(self, pdf_source: Any) -> fitz.Document:
+        if isinstance(pdf_source, (bytes, bytearray)):
+            return fitz.open(stream=pdf_source, filetype="pdf")
+        return fitz.open(pdf_source)
+
+    def render_page_to_image(self, pdf_path: Any, page_num: int, dpi: int = 150) -> PageImage:
         """
         Render a single PDF page to a PNG image, returning base64 and coordinate metadata.
+        Accepts either a filesystem path (str) or raw PDF bytes.
         """
-        doc = fitz.open(pdf_path)
+        doc = self._open_pdf(pdf_path)
         if page_num < 0 or page_num >= len(doc):
             doc.close()
             raise ValueError(f"Page {page_num} out of bounds (total pages: {len(doc)})")
@@ -87,18 +93,24 @@ class VisualPDFProcessor:
             dpi=dpi
         )
 
-    def render_all_pages(self, pdf_path: str, dpi: int = 150) -> List[PageImage]:
+    def render_all_pages(self, pdf_path: Any, dpi: int = 150) -> List[PageImage]:
         """
         Render all pages of a PDF to images.
+        Accepts either a filesystem path (str) or raw PDF bytes.
         """
-        doc = fitz.open(pdf_path)
-        images = []
-        for page_num in range(len(doc)):
-            doc.close()
-            images.append(self.render_page_to_image(pdf_path, page_num, dpi))
-            doc = fitz.open(pdf_path)
+        doc = self._open_pdf(pdf_path)
+        total_pages = len(doc)
         doc.close()
+        images = []
+        for page_num in range(total_pages):
+            images.append(self.render_page_to_image(pdf_path, page_num, dpi))
         return images
+
+    def render_all_pages_from_bytes(self, pdf_bytes: bytes, dpi: int = 150) -> List[PageImage]:
+        """
+        Convenience method for in-memory stream rendering (ADR-0011).
+        """
+        return self.render_all_pages(pdf_bytes, dpi=dpi)
 
     def extract_page_layouts(self, pdf_path: str) -> List[Dict[str, Any]]:
         """

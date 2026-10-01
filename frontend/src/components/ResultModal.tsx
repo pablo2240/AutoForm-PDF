@@ -17,7 +17,7 @@ export const ResultModal: React.FC<ResultModalProps> = ({
   const [showAuditDetails, setShowAuditDetails] = useState(false);
   if (!isOpen || !result) return null;
 
-  const downloadUrl = getDownloadUrl(result.filename);
+  const downloadUrl = result.download_url || getDownloadUrl(result.filename);
   const audit = result.audit_report;
 
   return (

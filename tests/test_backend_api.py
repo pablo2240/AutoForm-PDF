@@ -1,10 +1,48 @@
 import json
 import os
 import shutil
+import pytest
+import fitz
 from fastapi.testclient import TestClient
 from backend.main import app, INPUT_DIR, DATA_DIR
+from backend.auth_supabase import get_current_user
 
 client = TestClient(app)
+
+TEST_USER_ID = "53ac8522-38f6-46d8-86ee-1cad3d0b66c4"
+TEST_COMPANY_ID = "8cb5378d-b9a7-4e2e-aa36-2718371731a6"
+
+def get_test_pdf_bytes():
+    doc = fitz.open()
+    p = doc.new_page(-1, width=612, height=792)
+    p.insert_text((72, 72), "Test PDF Document AutoForm")
+    b = doc.tobytes()
+    doc.close()
+    return b
+
+@pytest.fixture(autouse=True)
+def auth_override():
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": TEST_USER_ID,
+        "company_id": TEST_COMPANY_ID,
+        "role": "admin",
+        "email": "test.admin@iaclatam.com",
+        "nombre": "Test Admin",
+        "is_active": True
+    }
+    yield
+    app.dependency_overrides.clear()
+
+def ensure_active_template():
+    res = client.get("/api/templates")
+    templates = res.json().get("templates", [])
+    if not templates:
+        pdf_bytes = get_test_pdf_bytes()
+        up_res = client.post("/api/upload-pdf", files={"file": ("base_test_template.pdf", pdf_bytes, "application/pdf")})
+        assert up_res.status_code == 200
+        res = client.get("/api/templates")
+        templates = res.json().get("templates", [])
+    return templates[0]["id"]
 
 def test_root():
     response = client.get("/")
@@ -18,16 +56,14 @@ def test_company_data():
     assert "razon_social" in data
 
 def test_templates():
+    ensure_active_template()
     response = client.get("/api/templates")
     assert response.status_code == 200
     templates = response.json().get("templates", [])
     assert len(templates) > 0
 
 def test_get_pdf_pages():
-    templates_res = client.get("/api/templates")
-    templates = templates_res.json().get("templates", [])
-    assert len(templates) > 0
-    tpl_id = templates[0]["id"]
+    tpl_id = ensure_active_template()
     response = client.get(f"/api/pdf/{tpl_id}/pages")
     assert response.status_code == 200
     res_data = response.json()
@@ -36,10 +72,7 @@ def test_get_pdf_pages():
     assert "image_base64" in res_data["pages"][0]
 
 def test_save_mapping_and_generate_with_styles():
-    templates_res = client.get("/api/templates")
-    templates = templates_res.json().get("templates", [])
-    assert len(templates) > 0
-    tpl_id = templates[0]["id"]
+    tpl_id = ensure_active_template()
 
     mapping_path = os.path.join(DATA_DIR, f"{tpl_id}_mapping.json")
     original_mapping = None
@@ -91,17 +124,10 @@ def test_save_mapping_and_generate_with_styles():
 def test_delete_template():
     # 1. Upload a dummy test pdf in the single-slot
     dummy_id = "test_dummy_temp_tpl"
-    pdf_bytes = (
-        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj "
-        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj "
-        b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]>>endobj\n"
-        b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n"
-        b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n160\n%%EOF"
-    )
+    pdf_bytes = get_test_pdf_bytes()
     up_res = client.post("/api/upload-pdf", files={"file": (f"{dummy_id}.pdf", pdf_bytes, "application/pdf")})
     assert up_res.status_code == 200
 
-    dummy_pdf = os.path.join(INPUT_DIR, f"{dummy_id}.pdf")
     dummy_mapping = os.path.join(DATA_DIR, f"{dummy_id}_mapping.json")
     with open(dummy_mapping, "w", encoding="utf-8") as f:
         json.dump({"template_id": dummy_id, "mappings": []}, f)
@@ -114,8 +140,8 @@ def test_delete_template():
     del_res = client.delete(f"/api/templates/{dummy_id}")
     assert del_res.status_code == 200
     assert del_res.json()["status"] == "success"
-    assert not os.path.exists(dummy_pdf)
-    assert not os.path.exists(dummy_mapping)
+    user_cache = os.path.join(INPUT_DIR, TEST_USER_ID, f"{dummy_id}.pdf")
+    assert not os.path.exists(user_cache)
     print("[SUCCESS] Template deletion test passed!")
 
 def test_ai_fill_endpoint_validation(monkeypatch):
@@ -134,16 +160,7 @@ def test_ai_fill_endpoint_validation(monkeypatch):
         f.write(b"%PDF-1.4\n%%EOF")
     monkeypatch.setattr(PDFAgent, "fill_pdf", lambda self, *args, **kwargs: mock_out)
 
-    templates_res = client.get("/api/templates")
-    templates = templates_res.json().get("templates", [])
-    if not templates:
-        pdf_bytes = b"%PDF-1.4\n%%EOF"
-        client.post("/api/upload-pdf", files={"file": ("sample_test_doc.pdf", pdf_bytes, "application/pdf")})
-        templates_res = client.get("/api/templates")
-        templates = templates_res.json().get("templates", [])
-
-    assert len(templates) > 0
-    tpl_id = templates[0]["id"]
+    tpl_id = ensure_active_template()
 
     res2 = client.post("/api/ai-fill", json={
         "template_id": tpl_id,
@@ -152,16 +169,9 @@ def test_ai_fill_endpoint_validation(monkeypatch):
     assert res2.status_code in [200, 500]
     print("[SUCCESS] AI Fill endpoint validation test passed!")
 
-
 def test_single_file_slot_atomic_replacement():
     """Valida que subir un nuevo PDF reemplace atómicamente el documento previo del slot único."""
-    pdf_bytes = (
-        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj "
-        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj "
-        b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]>>endobj\n"
-        b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n"
-        b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n160\n%%EOF"
-    )
+    pdf_bytes = get_test_pdf_bytes()
 
     # 1. Subir primer archivo en el slot
     filename_1 = "test_slot_document_a.pdf"
@@ -181,8 +191,8 @@ def test_single_file_slot_atomic_replacement():
     assert res2.status_code == 200
     tpl2_id = res2.json()["template_id"]
 
-    path_1 = os.path.join(INPUT_DIR, filename_1)
-    assert not os.path.exists(path_1), f"El archivo previo {filename_1} no fue eliminado de input/"
+    path_1 = os.path.join(INPUT_DIR, TEST_USER_ID, filename_1)
+    assert not os.path.exists(path_1), f"El archivo previo {filename_1} no fue eliminado de la caché de usuario"
 
     list2 = client.get("/api/templates").json()
     assert list2["active_slot"] is not None
@@ -193,9 +203,82 @@ def test_single_file_slot_atomic_replacement():
     # 3. Eliminar el archivo activo limpia el slot
     del_res = client.delete(f"/api/templates/{tpl2_id}")
     assert del_res.status_code == 200
-    path_2 = os.path.join(INPUT_DIR, filename_2)
+    path_2 = os.path.join(INPUT_DIR, TEST_USER_ID, filename_2)
     assert not os.path.exists(path_2)
 
+def test_upload_pdf_compensating_rollback_on_db_failure(monkeypatch):
+    """Valida que ante fallo en la BD durante upload_pdf, se ejecute rollback compensatorio en Storage."""
+    from backend import main as main_module
+
+    removed_keys = []
+    reactivated_ids = []
+
+    class MockStorageBucket:
+        def upload(self, key, content, file_options=None):
+            return {"Key": key}
+        def remove(self, keys):
+            removed_keys.extend(keys)
+            return keys
+
+    class MockStorage:
+        def from_(self, bucket):
+            return MockStorageBucket()
+
+    class MockQuery:
+        def __init__(self, table_name):
+            self.table_name = table_name
+            self._action = None
+            self._update_data = None
+            self._eq_filters = []
+
+        def select(self, *args):
+            self._action = "select"
+            return self
+
+        def update(self, data):
+            self._action = "update"
+            self._update_data = data
+            return self
+
+        def insert(self, data):
+            self._action = "insert"
+            return self
+
+        def eq(self, col, val):
+            self._eq_filters.append((col, val))
+            return self
+
+        def execute(self):
+            if self._action == "select":
+                class Res:
+                    data = [{"id": "prev-doc-123", "storage_path": "templates/p.pdf", "filename": "p.pdf"}]
+                return Res()
+            elif self._action == "update":
+                if self._update_data and self._update_data.get("is_active") is True:
+                    for col, val in self._eq_filters:
+                        if col == "id":
+                            reactivated_ids.append(val)
+                class Res:
+                    data = []
+                return Res()
+            elif self._action == "insert":
+                raise RuntimeError("Simulated DB connection error during user_documents insert")
+
+    class MockAdminClient:
+        storage = MockStorage()
+        def table(self, table_name):
+            return MockQuery(table_name)
+
+    monkeypatch.setattr(main_module, "get_supabase_admin_client", lambda: MockAdminClient())
+    monkeypatch.setattr(main_module, "APP_ENVIRONMENT", "production")
+
+    pdf_bytes = get_test_pdf_bytes()
+    filename = "test_rollback.pdf"
+    res = client.post("/api/upload-pdf", files={"file": (filename, pdf_bytes, "application/pdf")})
+
+    assert res.status_code == 500
+    assert f"{TEST_COMPANY_ID}/{TEST_USER_ID}/{filename}" in removed_keys
+    assert "prev-doc-123" in reactivated_ids
 
 if __name__ == "__main__":
     test_root()

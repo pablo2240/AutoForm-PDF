@@ -12,20 +12,6 @@ if str(PROJECT_ROOT) not in sys.path:
 ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
-# Select staging credentials by default for destructive E2E tests
-SUPABASE_URL = os.environ.get("SUPABASE_STAGING_URL") or os.environ.get("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_STAGING_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY", "")
-SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_STAGING_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-
-# Sync backend auth module to use the same target environment
-import backend.auth_supabase as auth_mod
-auth_mod.SUPABASE_URL = SUPABASE_URL
-auth_mod.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY
-auth_mod.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY
-auth_mod.EXPECTED_ISSUER = f"{SUPABASE_URL.rstrip('/')}/auth/v1"
-auth_mod.JWKS_URL = f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
-auth_mod.jwks_client = auth_mod.jwt.PyJWKClient(auth_mod.JWKS_URL, cache_jwk_set=True, lifespan=3600)
-
 from fastapi.testclient import TestClient
 from supabase import create_client
 from backend.main import app
@@ -46,6 +32,20 @@ TEST_VER_ID = "00000000-0000-0000-0000-000000000020"
 client = TestClient(app)
 
 def run_controlled_e2e_test():
+    # Select staging credentials by default for destructive E2E tests
+    SUPABASE_URL = os.environ.get("SUPABASE_STAGING_URL") or os.environ.get("SUPABASE_URL", "")
+    SUPABASE_ANON_KEY = os.environ.get("SUPABASE_STAGING_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY", "")
+    SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_STAGING_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+    # Sync backend auth module to use the same target environment
+    import backend.auth_supabase as auth_mod
+    auth_mod.SUPABASE_URL = SUPABASE_URL
+    auth_mod.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY
+    auth_mod.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY
+    auth_mod.EXPECTED_ISSUER = f"{SUPABASE_URL.rstrip('/')}/auth/v1"
+    auth_mod.JWKS_URL = f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+    auth_mod.jwks_client = auth_mod.jwt.PyJWKClient(auth_mod.JWKS_URL, cache_jwk_set=True, lifespan=3600)
+
     print("\n=======================================================")
     print("STARTING CONTROLLED E2E TEST: Supabase Integration")
     print(f"Target Environment URL: {SUPABASE_URL}")
