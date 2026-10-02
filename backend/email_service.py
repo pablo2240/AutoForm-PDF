@@ -16,17 +16,63 @@ if ENV_PATH.exists():
 else:
     load_dotenv(override=True)
 
+def mask_email(email: str) -> str:
+    """Enmascara correo para logs seguros sin exponer PII (ej: p***s@iaclatam.com)."""
+    if not email or "@" not in email:
+        return ""
+    parts = email.split("@", 1)
+    name = parts[0]
+    domain = parts[1]
+    if len(name) <= 2:
+        masked_name = name[0] + "*"
+    else:
+        masked_name = name[0] + ("*" * (len(name) - 2)) + name[-1]
+    return f"{masked_name}@{domain}"
+
+def get_missing_smtp_vars() -> list:
+    """
+    Verifica la presencia explícita de las 6 variables requeridas para SMTP corporativo:
+    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_FROM_NAME.
+    """
+    required = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "SMTP_FROM_NAME"]
+    missing = []
+    for var in required:
+        val = os.getenv(var, "").strip()
+        if not val:
+            missing.append(var)
+    if "SMTP_PORT" not in missing:
+        try:
+            int(os.getenv("SMTP_PORT", "587").strip())
+        except ValueError:
+            missing.append("SMTP_PORT (puerto numérico inválido)")
+    return missing
+
 def get_smtp_config():
     app_env = os.getenv("APP_ENVIRONMENT", os.getenv("ENVIRONMENT", "local")).lower()
+    raw_port = os.getenv("SMTP_PORT", "").strip()
+    try:
+        port = int(raw_port) if raw_port else 587
+    except ValueError:
+        port = 587
+
+    site_url = os.getenv("SITE_URL", "").strip().rstrip("/")
+    if not site_url:
+        if app_env in ("production", "staging"):
+            site_url = "https://autoform-pdf-web.onrender.com"
+        else:
+            site_url = "http://localhost:5173"
+
+    user = os.getenv("SMTP_USER", "").strip()
     return {
         "app_env": app_env,
-        "host": os.getenv("SMTP_HOST", "smtp.gmail.com").strip(),
-        "port": int(os.getenv("SMTP_PORT", "587")),
-        "user": os.getenv("SMTP_USER", "").strip(),
+        "host": os.getenv("SMTP_HOST", "").strip(),
+        "port": port,
+        "raw_port": raw_port,
+        "user": user,
         "password": os.getenv("SMTP_PASSWORD", "").strip(),
-        "from_email": os.getenv("SMTP_FROM_EMAIL", "").strip() or os.getenv("SMTP_USER", "").strip() or "autoform.soporte@gmail.com",
-        "from_name": os.getenv("SMTP_FROM_NAME", "AutoForm PDF - Seguridad").strip(),
-        "site_url": os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
+        "from_email": os.getenv("SMTP_FROM_EMAIL", "").strip() or user,
+        "from_name": os.getenv("SMTP_FROM_NAME", "").strip() or "AutoForm PDF - Seguridad",
+        "site_url": site_url
     }
 
 def render_reset_email_html(recipient_name: str, reset_link: str) -> str:
@@ -199,19 +245,20 @@ def send_password_reset_email(
     """
     cfg = get_smtp_config()
     clean_recipient = recipient_email.strip().lower()
+    missing_vars = get_missing_smtp_vars()
 
-    # Development simulation fallback
-    if not cfg["user"] or not cfg["password"]:
-        if cfg["app_env"] in ("local", "test", "testing", "development"):
+    # Development simulation fallback when running locally without explicit SMTP config
+    if missing_vars:
+        if cfg["app_env"] in ("local", "development") and not os.getenv("STRICT_SMTP"):
             print("\n" + "=" * 70, flush=True)
-            print("[DEV EMAIL SIMULATION] Credenciales SMTP no configuradas. Simulación de envío:", flush=True)
-            print(f"[DEV EMAIL SIMULATION] Destinatario: {clean_recipient} ({recipient_name})", flush=True)
+            print(f"[DEV EMAIL SIMULATION] Faltan variables SMTP: {', '.join(missing_vars)}. Simulación de envío:", flush=True)
+            print(f"[DEV EMAIL SIMULATION] Destinatario: {mask_email(clean_recipient)} ({recipient_name})", flush=True)
             print(f"[DEV EMAIL SIMULATION] Enlace de Restablecimiento: {reset_link}", flush=True)
             print("=" * 70 + "\n", flush=True)
             return True
         else:
             raise RuntimeError(
-                "SMTP_USER y SMTP_PASSWORD son obligatorios en entorno de producción/staging para enviar correos."
+                f"Configuración SMTP incompleta en entorno {cfg['app_env']}. Faltan variables requeridas: {', '.join(missing_vars)}"
             )
 
     msg = MIMEMultipart("alternative")
@@ -247,5 +294,5 @@ def send_password_reset_email(
                 server.sendmail(cfg["from_email"], [clean_recipient], msg.as_string())
         return True
     except Exception as e:
-        print(f"[SMTP_ERROR] Error al despachar correo a {clean_recipient}: {str(e)}", flush=True)
+        print(f"[SMTP_ERROR] Error al despachar correo a {mask_email(clean_recipient)}: {type(e).__name__}: {str(e)}", flush=True)
         raise e

@@ -7,6 +7,7 @@ import time
 import uuid
 import secrets
 import hashlib
+import traceback
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from sqlalchemy import func
@@ -32,7 +33,7 @@ from backend.pdf_filling_agent.visual_processor import VisualPDFProcessor, Visua
 from backend.db.session import get_db, SessionLocal
 from backend.db.models import CommercialProfile, PasswordResetToken, UserDocument
 from backend.db.auth import hash_password, verify_password, create_session_token, verify_session_token, SESSION_MAX_AGE_SECONDS
-from backend.email_service import send_password_reset_email
+from backend.email_service import send_password_reset_email, get_smtp_config, get_missing_smtp_vars, mask_email
 from backend.auth_supabase import (
     get_current_user,
     require_admin,
@@ -1405,86 +1406,177 @@ def auth_register(dto: CommercialRegisterDTO, request: Request, response: Respon
 
 forgot_password_rate_limiter = RegistrationRateLimiter(max_requests=3, window_seconds=900)
 
-def mask_email(email: str) -> str:
-    if not email or "@" not in email:
-        return ""
-    parts = email.split("@", 1)
-    name = parts[0]
-    domain = parts[1]
-    if len(name) <= 2:
-        masked_name = name[0] + "*"
-    else:
-        masked_name = name[0] + ("*" * (len(name) - 2)) + name[-1]
-    return f"{masked_name}@{domain}"
+def get_client_ip(request: Request) -> str:
+    """Extrae la IP real del cliente respetando proxies reversos (Render, Cloudflare, Nginx)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+def extract_supabase_user_info(res: Any) -> Tuple[Optional[str], Optional[str], Optional[dict]]:
+    """Extrae de forma robusta (id, email, metadata) de un User o UserResponse de Supabase."""
+    if not res:
+        return None, None, None
+    target = getattr(res, "user", None) or res
+    user_id = str(getattr(target, "id", None) or "") or None
+    user_email = getattr(target, "email", None)
+    if not isinstance(user_email, str):
+        nested = getattr(target, "user", None)
+        if nested and isinstance(getattr(nested, "email", None), str):
+            user_email = nested.email
+            if not user_id:
+                user_id = str(getattr(nested, "id", None) or "")
+    meta = getattr(target, "user_metadata", {}) or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    return user_id, user_email if isinstance(user_email, str) else None, meta
+
+def find_user_for_password_reset(db, email_clean: str) -> Optional[Tuple[str, str, str]]:
+    """
+    Busca al usuario por correo normalizado (trim + lowercase):
+    1. En la base de datos relacional (CommercialProfile).
+    2. Fallback autoritativo en Supabase Auth (auth.users).
+    Retorna (user_id, display_name, canonical_email) o None.
+    """
+    # 1. Búsqueda en CommercialProfile (activo)
+    user_profile = db.query(CommercialProfile).filter(
+        CommercialProfile.email.ilike(email_clean),
+        CommercialProfile.is_active == True
+    ).first()
+
+    if user_profile:
+        display_name = user_profile.nombre or user_profile.profile_name or "Usuario Comercial"
+        return (str(user_profile.id), display_name, user_profile.email.strip().lower())
+
+    # 2. Fallback autoritativo en Supabase Auth
+    try:
+        admin_client = get_supabase_admin_client()
+        if admin_client:
+            page = 1
+            while True:
+                users_batch = admin_client.auth.admin.list_users(page=page, per_page=100)
+                if not users_batch:
+                    break
+                for u in users_batch:
+                    _, u_email, u_meta = extract_supabase_user_info(u)
+                    if u_email and u_email.strip().lower() == email_clean:
+                        nombre = u_meta.get("nombre", "") if u_meta else ""
+                        apellido = u_meta.get("apellido", "") if u_meta else ""
+                        disp_name = f"{nombre} {apellido}".strip() or email_clean.split("@")[0]
+                        u_id = str(getattr(u, "id", None) or "")
+                        return (u_id, disp_name, u_email.strip().lower())
+                if len(users_batch) < 100:
+                    break
+                page += 1
+    except Exception as e:
+        print(f"[RESET] [WARN] Error en búsqueda de usuario en Supabase Auth: {type(e).__name__}: {e}", flush=True)
+
+    return None
 
 @app.post("/api/auth/forgot-password")
 def forgot_password(dto: ForgotPasswordRequestDTO, request: Request, db = Depends(get_db)):
     """
     Solicitud de recuperación de contraseña con respuesta ciega anti-enumeración,
-    generación de token SHA-256 de un solo uso y despacho síncrono vía SMTP corporativo.
+    generación de token SHA-256 de un solo uso, búsqueda federada y despacho síncrono vía SMTP corporativo.
     """
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = get_client_ip(request)
+    print("[RESET] request_received", flush=True)
+
     if not forgot_password_rate_limiter.is_allowed(client_ip):
         raise HTTPException(
             status_code=429,
             detail="Límite de solicitudes de recuperación excedido. Por favor intenta de nuevo en 15 minutos."
         )
 
-    email_clean = dto.email.strip().lower()
+    email_clean = (dto.email or "").strip().lower()
     if not email_clean or "@" not in email_clean:
+        print("[RESET] user_found=false", flush=True)
+        time.sleep(0.35)
         return {
             "status": "success",
             "message": "Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso."
         }
 
-    user = db.query(CommercialProfile).filter(
-        CommercialProfile.email.ilike(email_clean),
-        CommercialProfile.is_active == True
-    ).first()
-
-    if user:
-        try:
-            now_utc = datetime.now(timezone.utc)
-            # 1. Invalidar cualquier token activo previo para este usuario
-            db.query(PasswordResetToken).filter(
-                PasswordResetToken.user_id == str(user.id),
-                PasswordResetToken.used_at.is_(None)
-            ).update({"used_at": now_utc}, synchronize_session=False)
-
-            # 2. Generar token criptográfico y almacenar su hash SHA-256
-            raw_token = secrets.token_urlsafe(32)
-            token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-            expires_at = now_utc + timedelta(minutes=15)
-
-            new_token_record = PasswordResetToken(
-                id=str(uuid.uuid4()),
-                user_id=str(user.id),
-                token_hash=token_hash,
-                expires_at=expires_at,
-                request_ip=client_ip
-            )
-            db.add(new_token_record)
-            db.commit()
-
-            # 3. Construir enlace de restablecimiento
-            site_url = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
-            reset_link = f"{site_url}/?token={raw_token}"
-
-            # 4. Despacho síncrono del correo
-            display_name = user.nombre or user.profile_name or "Usuario Comercial"
-            send_password_reset_email(
-                recipient_email=user.email,
-                recipient_name=display_name,
-                reset_link=reset_link
-            )
-        except Exception as err:
-            db.rollback()
-            print(f"[FORGOT_PASSWORD_ERROR] Error procesando recuperación para {email_clean}: {err}", flush=True)
-            if os.getenv("APP_ENVIRONMENT", "").lower() in ("test", "testing"):
-                raise err
-    else:
-        # Retardo simulado para mitigar timing attacks
+    user_info = find_user_for_password_reset(db, email_clean)
+    if not user_info:
+        print("[RESET] user_found=false", flush=True)
         time.sleep(0.35)
+        return {
+            "status": "success",
+            "message": "Si la dirección ingresada corresponde a un usuario corporativo registrado, recibirá un enlace seguro con las instrucciones de acceso."
+        }
+
+    user_id, display_name, canonical_email = user_info
+    print("[RESET] user_found=true", flush=True)
+
+    # Verificar estado de configuración SMTP (solo presencia de variables, nunca secretos)
+    cfg = get_smtp_config()
+    has_host = bool(os.getenv("SMTP_HOST", "").strip())
+    has_port = bool(os.getenv("SMTP_PORT", "").strip())
+    has_user = bool(os.getenv("SMTP_USER", "").strip())
+    has_password = bool(os.getenv("SMTP_PASSWORD", "").strip())
+    missing_vars = get_missing_smtp_vars()
+    is_smtp_configured = len(missing_vars) == 0
+
+    print(
+        f"[RESET] smtp_configured={str(is_smtp_configured).lower()} "
+        f"(host={has_host}, port={has_port}, user={has_user}, password={has_password})",
+        flush=True
+    )
+
+    try:
+        if not is_smtp_configured:
+            print(f"[RESET] [SMTP_CONFIG_ERROR] Variables requeridas no configuradas: {', '.join(missing_vars)}", flush=True)
+            raise RuntimeError(f"Configuración SMTP incompleta. Faltan variables requeridas: {', '.join(missing_vars)}")
+
+        now_utc = datetime.now(timezone.utc)
+        # 1. Invalidar cualquier token activo previo para este usuario
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user_id,
+            PasswordResetToken.used_at.is_(None)
+        ).update({"used_at": now_utc}, synchronize_session=False)
+
+        # 2. Generar token criptográfico y almacenar su hash SHA-256
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires_at = now_utc + timedelta(minutes=15)
+
+        new_token_record = PasswordResetToken(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            request_ip=client_ip
+        )
+        db.add(new_token_record)
+        db.commit()
+
+        # 3. Construir enlace de restablecimiento
+        site_url = cfg["site_url"]
+        reset_link = f"{site_url}/?token={raw_token}"
+
+        # 4. Despacho síncrono del correo
+        send_password_reset_email(
+            recipient_email=canonical_email,
+            recipient_name=display_name,
+            reset_link=reset_link
+        )
+        print("[RESET] email_sent=true", flush=True)
+
+    except Exception as err:
+        try:
+            db.rollback()
+            if 'new_token_record' in locals() and hasattr(new_token_record, 'id') and new_token_record.id:
+                db.query(PasswordResetToken).filter(PasswordResetToken.id == new_token_record.id).update(
+                    {"used_at": datetime.now(timezone.utc)}, synchronize_session=False
+                )
+                db.commit()
+        except Exception:
+            pass
+
+        exc_type = type(err).__name__
+        tb_safe = traceback.format_exc()
+        print(f"[RESET] smtp_send_failed: {exc_type}: {str(err)}\n{tb_safe}", flush=True)
 
     return {
         "status": "success",
@@ -1526,7 +1618,23 @@ def verify_reset_token(token: str, db = Depends(get_db)):
         CommercialProfile.id == record.user_id,
         CommercialProfile.is_active == True
     ).first()
-    if not user:
+
+    masked = None
+    if user:
+        masked = mask_email(user.email)
+    else:
+        # Fallback a Supabase Auth si el perfil comercial aún no se ha sincronizado
+        try:
+            admin_client = get_supabase_admin_client()
+            if admin_client:
+                res = admin_client.auth.admin.get_user_by_id(record.user_id)
+                _, u_email, _ = extract_supabase_user_info(res)
+                if u_email:
+                    masked = mask_email(u_email)
+        except Exception as e:
+            print(f"[RESET] [WARN] Error verificando usuario en Supabase Auth: {type(e).__name__}: {e}", flush=True)
+
+    if not masked:
         raise HTTPException(
             status_code=400,
             detail="El usuario asociado a este enlace ya no se encuentra activo."
@@ -1534,7 +1642,7 @@ def verify_reset_token(token: str, db = Depends(get_db)):
 
     return VerifyResetTokenResponseDTO(
         valid=True,
-        masked_email=mask_email(user.email),
+        masked_email=masked,
         message="Token válido."
     )
 
@@ -1583,7 +1691,24 @@ def reset_password(dto: ResetPasswordRequestDTO, db = Depends(get_db)):
         CommercialProfile.id == record.user_id,
         CommercialProfile.is_active == True
     ).first()
-    if not user:
+
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception:
+        admin_client = None
+
+    auth_user_id = None
+    auth_user_email = None
+    auth_user_meta = {}
+    if admin_client:
+        try:
+            res = admin_client.auth.admin.get_user_by_id(record.user_id)
+            auth_user_id, auth_user_email, auth_user_meta = extract_supabase_user_info(res)
+        except Exception as e:
+            print(f"[RESET] [WARN] Error obteniendo usuario en Supabase Auth: {type(e).__name__}: {e}", flush=True)
+
+    if not user and not auth_user_email:
         raise HTTPException(status_code=404, detail="Usuario no encontrado o inactivo.")
 
     # 3. Consumir token inmediatamente (One-Time Use)
@@ -1591,18 +1716,11 @@ def reset_password(dto: ResetPasswordRequestDTO, db = Depends(get_db)):
     db.commit()
 
     # 4. Actualización en Supabase Auth como autoridad primaria
-    admin_client = None
-    try:
-        admin_client = get_supabase_admin_client()
-    except Exception:
-        admin_client = None
-
     if admin_client:
         try:
-            admin_client.auth.admin.update_user_by_id(str(user.id), {"password": password_clean})
+            admin_client.auth.admin.update_user_by_id(record.user_id, {"password": password_clean})
         except Exception as supa_err:
-            print(f"[SUPABASE_AUTH_ERROR] Error al actualizar usuario {user.id} en Supabase Auth: {supa_err}", flush=True)
-            # Restaurar token para permitir reintento del usuario si Supabase Auth falla
+            print(f"[SUPABASE_AUTH_ERROR] Error al actualizar usuario {record.user_id} en Supabase Auth: {supa_err}", flush=True)
             record.used_at = None
             db.commit()
             raise HTTPException(
@@ -1610,25 +1728,32 @@ def reset_password(dto: ResetPasswordRequestDTO, db = Depends(get_db)):
                 detail=f"Error al sincronizar con el proveedor de autenticación: {str(supa_err)}"
             )
 
-    # 5. Sincronización consistente de hash en PostgreSQL/SQLite
+    # 5. Sincronización posterior de hash en PostgreSQL/SQLite
     try:
-        user.password_hash = hash_password(password_clean)
-        if hasattr(user, "needs_password_hash_sync"):
-            user.needs_password_hash_sync = False
-        db.commit()
+        if user:
+            user.password_hash = hash_password(password_clean)
+            if hasattr(user, "needs_password_hash_sync"):
+                user.needs_password_hash_sync = False
+            db.commit()
+        elif auth_user_email:
+            meta = auth_user_meta or {}
+            new_cp = CommercialProfile(
+                id=str(record.user_id),
+                profile_name=f"{meta.get('nombre', '')} {meta.get('apellido', '')}".strip() or auth_user_email.split('@')[0],
+                nombre=meta.get("nombre") or auth_user_email.split('@')[0],
+                apellido=meta.get("apellido") or "",
+                cargo=meta.get("cargo") or "Asesor Comercial",
+                email=auth_user_email.strip().lower(),
+                celular=meta.get("celular") or "3000000000",
+                password_hash=hash_password(password_clean),
+                role=meta.get("role") or "commercial",
+                is_active=True
+            )
+            db.add(new_cp)
+            db.commit()
     except Exception as db_err:
         db.rollback()
-        print(f"[CREDENTIAL_SYNC_ERROR] Fallo al sincronizar hash local para usuario {user.id} ({user.email}): {db_err}", flush=True)
-        try:
-            rec = db.query(PasswordResetToken).filter(PasswordResetToken.id == record.id).first()
-            if rec:
-                rec.used_at = now_utc
-            u = db.query(CommercialProfile).filter(CommercialProfile.id == user.id).first()
-            if u and hasattr(u, "needs_password_hash_sync"):
-                u.needs_password_hash_sync = True
-            db.commit()
-        except Exception:
-            pass
+        print(f"[CREDENTIAL_SYNC_ERROR] Fallo al sincronizar hash local para usuario {record.user_id}: {db_err}", flush=True)
 
     return {
         "status": "success",
