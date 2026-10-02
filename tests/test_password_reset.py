@@ -33,13 +33,19 @@ def setup_teardown():
     # Create a test commercial user
     db = SessionLocal()
     test_user_id = str(uuid.uuid4())
-    test_email = f"reset.test.{uuid.uuid4().hex[:6]}@iaclatam.com"
+    test_email = "Santiago.Giraldo@iaclatam.com"
     initial_pass = "InitialPass123!"
+
+    # Clean up any leftover records for test email before creating
+    db.query(PasswordResetToken).filter(PasswordResetToken.user_id == test_user_id).delete()
+    db.query(CommercialProfile).filter(CommercialProfile.email.ilike(test_email)).delete()
+    db.commit()
+
     user = CommercialProfile(
         id=test_user_id,
-        profile_name="Test User Reset",
-        nombre="Usuario",
-        apellido="Prueba",
+        profile_name="Santiago Giraldo",
+        nombre="Santiago",
+        apellido="Giraldo",
         cargo="Asesor Comercial",
         email=test_email,
         celular="3001234567",
@@ -61,7 +67,7 @@ def setup_teardown():
 
     # Clean up test rows
     db.query(PasswordResetToken).filter(PasswordResetToken.user_id == test_user_id).delete()
-    db.query(CommercialProfile).filter(CommercialProfile.id == test_user_id).delete()
+    db.query(CommercialProfile).filter(CommercialProfile.email.ilike(test_email)).delete()
     db.commit()
     db.close()
 
@@ -93,7 +99,7 @@ def test_forgot_password_generates_token_and_sends_email(setup_teardown):
         assert res.status_code == 200
         assert mock_send.called
         call_args = mock_send.call_args[1]
-        assert call_args["recipient_email"] == email
+        assert call_args["recipient_email"] == email.lower()
         reset_link = call_args["reset_link"]
         assert "token=" in reset_link
 
@@ -417,7 +423,7 @@ def test_microsoft_graph_success(setup_teardown, capsys, monkeypatch):
             assert kwargs["headers"]["Authorization"] == "Bearer mock-access-token-xyz"
             msg = kwargs["json"]["message"]
             assert msg["from"]["emailAddress"]["address"] == "pablo.reyes@iaclatam.com"
-            assert msg["toRecipients"][0]["emailAddress"]["address"] == email
+            assert msg["toRecipients"][0]["emailAddress"]["address"] == email.lower()
             assert "token=" in msg["body"]["content"]
             return httpx.Response(202, request=httpx.Request("POST", url))
         return httpx.Response(404, request=httpx.Request("POST", url))
@@ -430,6 +436,7 @@ def test_microsoft_graph_success(setup_teardown, capsys, monkeypatch):
         out = capsys.readouterr().out
         assert "[RESET] request_received" in out
         assert "[RESET] user_found=true" in out
+        assert "[RESET] recipient=s**************o@iaclatam.com" in out
         assert "[RESET] provider=microsoft_graph" in out
         assert "[RESET] graph_configured=true" in out
         assert "tenant=True, client_id=True, secret=True, sender=True" in out
@@ -571,16 +578,16 @@ def test_microsoft_graph_local_simulation(capsys, monkeypatch):
     monkeypatch.setenv("MAIL_SENDER", "")
 
     result = send_password_reset_email_graph(
-        recipient_email="local.user@iaclatam.com",
-        recipient_name="Usuario Local",
+        recipient_email="Santiago.Giraldo@iaclatam.com",
+        recipient_name="Santiago Giraldo",
         reset_link="http://localhost:5173/?token=simulated_token_123"
     )
     assert result is True
 
     out = capsys.readouterr().out
     assert "[DEV GRAPH EMAIL SIMULATION]" in out
-    assert "l********r@iaclatam.com" in out
-    assert "local.user@iaclatam.com" not in out
+    assert "s**************o@iaclatam.com" in out.lower()
+    assert "santiago.giraldo@iaclatam.com" not in out.lower()
 
 
 

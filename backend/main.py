@@ -1518,6 +1518,10 @@ def forgot_password(dto: ForgotPasswordRequestDTO, request: Request, db = Depend
     user_id, display_name, canonical_email = user_info
     print("[RESET] user_found=true", flush=True)
 
+    # Exclusivamente el correo digitado por el usuario en el formulario (trim + lowercase)
+    target_recipient = email_clean
+    print(f"[RESET] recipient={mask_email(target_recipient)}", flush=True)
+
     provider = get_email_provider()
     print(f"[RESET] provider={provider}", flush=True)
 
@@ -1569,7 +1573,7 @@ def forgot_password(dto: ForgotPasswordRequestDTO, request: Request, db = Depend
 
             # 4. Despacho síncrono del correo vía Microsoft Graph
             send_password_reset_email(
-                recipient_email=canonical_email,
+                recipient_email=target_recipient,
                 recipient_name=display_name,
                 reset_link=reset_link
             )
@@ -1641,7 +1645,7 @@ def forgot_password(dto: ForgotPasswordRequestDTO, request: Request, db = Depend
 
             # 4. Despacho síncrono del correo
             send_password_reset_email(
-                recipient_email=canonical_email,
+                recipient_email=target_recipient,
                 recipient_name=display_name,
                 reset_link=reset_link
             )
