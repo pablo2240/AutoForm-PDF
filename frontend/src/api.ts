@@ -358,11 +358,14 @@ export async function adminLogout(): Promise<void> {
   } catch (e) {
     console.warn('Error closing supabase session:', e);
   }
-  const res = await fetch(`${API_BASE}/api/auth/logout`, {
-    method: 'POST',
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error('Error al cerrar sesión');
+  try {
+    await fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (e) {
+    console.warn('Error calling logout endpoint:', e);
+  }
 }
 
 export async function fetchAdminCommercialProfiles(): Promise<CommercialProfileAdmin[]> {

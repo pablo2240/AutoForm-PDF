@@ -148,18 +148,25 @@ def get_user_pdf_bytes(user_id: str, doc_row: Dict[str, Any]) -> bytes:
     3. Almacena en caché efímera local input/{user_id}/{filename}
     4. Retorna bytes
     """
+    doc_id = doc_row.get("id")
     filename = doc_row.get("filename")
     storage_path = doc_row.get("storage_path")
-    user_cache_path = os.path.join(INPUT_DIR, str(user_id), filename) if filename else None
 
-    if user_cache_path and os.path.exists(user_cache_path):
-        try:
-            with open(user_cache_path, "rb") as f:
-                content = f.read()
-            if content:
-                return content
-        except Exception as e:
-            print(f"[WARN] Error reading local user cache {user_cache_path}: {e}")
+    candidates = []
+    if doc_id:
+        candidates.append(os.path.join(INPUT_DIR, str(user_id), f"{doc_id}.pdf"))
+    if filename:
+        candidates.append(os.path.join(INPUT_DIR, str(user_id), filename))
+
+    for user_cache_path in candidates:
+        if os.path.exists(user_cache_path):
+            try:
+                with open(user_cache_path, "rb") as f:
+                    content = f.read()
+                if content:
+                    return content
+            except Exception as e:
+                print(f"[WARN] Error reading local user cache {user_cache_path}: {e}")
 
     # Descarga autoritativa desde Supabase Storage
     if storage_path:
@@ -168,7 +175,7 @@ def get_user_pdf_bytes(user_id: str, doc_row: Dict[str, Any]) -> bytes:
             admin_client = get_supabase_admin_client()
             content = admin_client.storage.from_(bucket).download(key)
             if content:
-                if user_cache_path:
+                for user_cache_path in candidates:
                     try:
                         os.makedirs(os.path.dirname(user_cache_path), exist_ok=True)
                         with open(user_cache_path, "wb") as f:
@@ -192,7 +199,9 @@ def resolve_user_document(
 ) -> Dict[str, Any]:
     """
     Busca de manera autoritativa un documento en user_documents por id (UUID) o template_code,
-    garantizando aislamiento estricto por usuario y auditoría tenant admin.
+    garantizando aislamiento estricto por usuario autenticado.
+    Si el documento pertenece a otro usuario o no se encuentra con un UUID válido,
+    devuelve HTTP 403 Forbidden para impedir enumeración ciega.
     """
     admin_client = None
     try:
@@ -207,47 +216,97 @@ def resolve_user_document(
     except Exception:
         pass
 
+    # 1. Supabase (Authoritative)
     if admin_client:
         try:
-            query = admin_client.table("user_documents").select("*")
-            if is_admin and company_id:
-                query = query.eq("company_id", company_id)
-            else:
-                query = query.eq("user_id", user_id)
-
             if is_valid_uuid:
-                res = query.eq("id", template_identifier).limit(1).execute()
-                if res.data:
-                    return res.data[0]
+                res = admin_client.table("user_documents").select("*").eq("id", template_identifier).limit(1).execute()
+                if res.data and len(res.data) > 0:
+                    found_doc = res.data[0]
+                    if str(found_doc.get("user_id")) == str(user_id):
+                        return found_doc
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Acceso denegado: no tienes permisos para acceder a este documento."
+                        )
+            else:
+                # Búsqueda por template_code para el usuario autenticado
+                res_code = (
+                    admin_client.table("user_documents")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("template_code", template_identifier)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if res_code.data and len(res_code.data) > 0:
+                    return res_code.data[0]
 
-            res_code = query.eq("template_code", template_identifier).order("created_at", desc=True).limit(1).execute()
-            if res_code.data:
-                return res_code.data[0]
+                # Verificar si pertenece a otro usuario para denegar explícitamente con 403
+                res_other = (
+                    admin_client.table("user_documents")
+                    .select("id")
+                    .eq("template_code", template_identifier)
+                    .limit(1)
+                    .execute()
+                )
+                if res_other.data and len(res_other.data) > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Acceso denegado: no tienes permisos para acceder a este documento."
+                    )
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"[WARN] Error resolving user document in Supabase: {e}")
 
-    # Fallback local SQLite en modo dev/test
+    # 2. Fallback SQLite local (entorno dev/test)
     if APP_ENVIRONMENT != "production":
         db = SessionLocal()
         try:
-            local_q = db.query(UserDocument)
-            if is_admin and company_id:
-                local_q = local_q.filter(UserDocument.company_id == company_id)
-            else:
-                local_q = local_q.filter(UserDocument.user_id == user_id)
             if is_valid_uuid:
-                doc = local_q.filter(UserDocument.id == template_identifier).first()
-                if doc:
-                    return doc.to_dict()
-            doc = local_q.filter(UserDocument.template_code == template_identifier).order_by(UserDocument.created_at.desc()).first()
-            if doc:
-                return doc.to_dict()
+                local_doc = db.query(UserDocument).filter(UserDocument.id == template_identifier).first()
+                if local_doc:
+                    if str(local_doc.user_id) == str(user_id):
+                        return local_doc.to_dict()
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Acceso denegado: no tienes permisos para acceder a este documento."
+                        )
+            else:
+                local_doc = (
+                    db.query(UserDocument)
+                    .filter(UserDocument.user_id == user_id, UserDocument.template_code == template_identifier)
+                    .order_by(UserDocument.created_at.desc())
+                    .first()
+                )
+                if local_doc:
+                    return local_doc.to_dict()
+
+                # Verificar si pertenece a otro usuario en SQLite
+                other_doc = db.query(UserDocument).filter(UserDocument.template_code == template_identifier).first()
+                if other_doc:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Acceso denegado: no tienes permisos para acceder a este documento."
+                    )
         finally:
             db.close()
 
+    # 3. No encontrado
+    if is_valid_uuid:
+        # Anti-enumeración para UUIDs no encontrados
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado o documento no autorizado."
+        )
+
     raise HTTPException(
-        status_code=404,
-        detail=f"Documento '{template_identifier}' no encontrado o no pertenece al usuario autenticado."
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Documento '{template_identifier}' no encontrado."
     )
 
 def resolve_user_pdf_path(
@@ -1043,19 +1102,35 @@ async def api_fail_form_fill(dto: FailFormFillDTO, user: Dict[str, Any] = Depend
 @app.get("/api/form-fill/{history_id}/signed-url")
 async def api_get_signed_url(history_id: str, user: Dict[str, Any] = Depends(get_current_user)):
     """Genera una URL firmada de descarga temporal en Storage para el PDF generado."""
+    user_id = str(user["id"])
+    client = user.get("user_client")
+    if not client:
+        try:
+            client = get_supabase_admin_client()
+        except Exception:
+            pass
+    if not client:
+        raise HTTPException(status_code=500, detail="Cliente de almacenamiento no disponible.")
+
     try:
-        hist_res = user["user_client"].table("form_fill_history").select("output_storage_path").eq("id", history_id).single().execute()
-        if not hist_res.data or not hist_res.data.get("output_storage_path"):
-            raise HTTPException(status_code=404, detail="Registro de llenado no encontrado o sin PDF generado.")
-        path = hist_res.data["output_storage_path"]
-        signed = user["user_client"].storage.from_("generated-pdfs").create_signed_url(path, expires_in=3600)
+        hist_res = client.table("form_fill_history").select("operator_user_id,output_storage_path").eq("id", history_id).limit(1).execute()
+        if not hist_res.data or len(hist_res.data) == 0:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado o registro no autorizado.")
+        row = hist_res.data[0]
+        if str(row.get("operator_user_id")) != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado: no tienes permisos para acceder a este registro.")
+        path = row.get("output_storage_path")
+        if not path:
+            raise HTTPException(status_code=404, detail="Registro de llenado sin PDF generado.")
+        b_name, b_key = parse_storage_path(path)
+        signed = client.storage.from_("generated-pdfs").create_signed_url(b_key, expires_in=3600)
         url = signed.get("signedURL") or signed.get("signedUrl")
         return {"signed_url": url, "storage_path": path}
     except HTTPException:
         raise
     except Exception as e:
         if "PGRST116" in str(e) or "0 rows" in str(e):
-            raise HTTPException(status_code=404, detail="Registro de llenado no encontrado o acceso denegado por RLS.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado o registro no autorizado.")
         raise HTTPException(status_code=400, detail=f"Error al generar enlace firmado: {str(e)}")
 
 @app.post("/api/admin/login")
@@ -1784,18 +1859,28 @@ async def upload_pdf(
     # 2. Identificadores y rutas autoritativas
     user_id = str(user["id"])
     company_id = str(user.get("company_id") or "local_company")
+    new_doc_id = str(uuid.uuid4())
     template_code = os.path.splitext(file.filename)[0]
     size_kb = round(len(content) / 1024, 1)
-
-    storage_bucket = "templates"
-    storage_key = f"{company_id}/{user_id}/{file.filename}"
-    canonical_storage_path = f"templates/{storage_key}"
 
     admin_client = None
     try:
         admin_client = get_supabase_admin_client()
     except Exception as e:
         print(f"[WARN] Supabase admin client not available in upload_pdf: {e}")
+
+    # Verificar coherencia de company_id si está disponible en Supabase
+    if admin_client and (not company_id or company_id == "local_company"):
+        try:
+            prof_res = admin_client.table("profiles").select("company_id").eq("id", user_id).limit(1).execute()
+            if prof_res.data and len(prof_res.data) > 0 and prof_res.data[0].get("company_id"):
+                company_id = str(prof_res.data[0]["company_id"])
+        except Exception:
+            pass
+
+    storage_bucket = "templates"
+    storage_key = f"user_documents/{user_id}/{new_doc_id}.pdf"
+    canonical_storage_path = f"templates/{storage_key}"
 
     # 3. Almacenamiento autoritativo en Supabase Storage (ADR-0011 Paso 1)
     if admin_client:
@@ -1815,7 +1900,6 @@ async def upload_pdf(
 
     # 4. Transacción en Base de Datos (ADR-0011 Paso 2)
     superseded_docs = []
-    new_doc_id = str(uuid.uuid4())
 
     if admin_client:
         try:
@@ -1938,15 +2022,22 @@ async def upload_pdf(
                     prev_cache = os.path.join(INPUT_DIR, user_id, prev_fn)
                     if os.path.exists(prev_cache):
                         os.remove(prev_cache)
+                if prev_id:
+                    prev_uuid_cache = os.path.join(INPUT_DIR, user_id, f"{prev_id}.pdf")
+                    if os.path.exists(prev_uuid_cache):
+                        os.remove(prev_uuid_cache)
             except Exception as e:
                 print(f"[WARN] Error executing hard-delete cleanup for {prev_id}: {e}")
 
-    # 6. Escribir caché efímera local por usuario (input/{user_id}/{filename})
+    # 6. Escribir caché efímera local por usuario (input/{user_id}/{filename} y {doc_id}.pdf)
     user_cache_dir = os.path.join(INPUT_DIR, user_id)
     os.makedirs(user_cache_dir, exist_ok=True)
     user_cache_path = os.path.join(user_cache_dir, file.filename)
+    user_cache_uuid_path = os.path.join(user_cache_dir, f"{new_doc_id}.pdf")
     try:
         with open(user_cache_path, "wb") as f:
+            f.write(content)
+        with open(user_cache_uuid_path, "wb") as f:
             f.write(content)
     except Exception as e:
         print(f"[WARN] Error writing user local cache: {e}")
@@ -2055,22 +2146,28 @@ def delete_template(
 
     # Limpiar caché local del usuario
     user_cache = os.path.join(INPUT_DIR, user_id, filename)
-    if os.path.exists(user_cache):
-        try:
-            os.remove(user_cache)
-            deleted_files.append(filename)
-        except Exception as e:
-            print(f"[WARN] Error removing user cache: {e}")
+    user_uuid_cache = os.path.join(INPUT_DIR, user_id, f"{doc_id}.pdf")
+    for cp in (user_cache, user_uuid_cache):
+        if os.path.exists(cp):
+            try:
+                os.remove(cp)
+                deleted_files.append(os.path.basename(cp))
+            except Exception as e:
+                print(f"[WARN] Error removing user cache: {e}")
 
     # Limpiar mapeo si existe
     map_code = doc.get("template_code") or template_id
-    map_path = os.path.join(DATA_DIR, f"{map_code}_mapping.json")
-    if os.path.exists(map_path):
-        try:
-            os.remove(map_path)
-            deleted_files.append(os.path.basename(map_path))
-        except Exception:
-            pass
+    for mp in [
+        os.path.join(DATA_DIR, f"{user_id}_{map_code}_mapping.json"),
+        os.path.join(DATA_DIR, f"{user_id}_{doc_id}_mapping.json"),
+        os.path.join(DATA_DIR, f"{map_code}_mapping.json")
+    ]:
+        if os.path.exists(mp):
+            try:
+                os.remove(mp)
+                deleted_files.append(os.path.basename(mp))
+            except Exception:
+                pass
 
     return {
         "status": "success",
@@ -2110,15 +2207,45 @@ def get_pdf_pages(
     }
 
 @app.post("/api/mapping")
-def save_mapping(mapping: TemplateMapping):
-    path = os.path.join(DATA_DIR, f"{mapping.template_id}_mapping.json")
+def save_mapping(
+    mapping: TemplateMapping,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
+    is_admin = user.get("role") == "admin"
+
+    # Enforce document ownership: raises 403 if document belongs to another user
+    resolve_user_document(user_id, mapping.template_id, is_admin=is_admin, company_id=company_id)
+
+    path = os.path.join(DATA_DIR, f"{user_id}_{mapping.template_id}_mapping.json")
     with open(path, "w", encoding="utf-8") as f:
         f.write(mapping.model_dump_json(indent=2))
+    # Keep legacy format for backward compatibility
+    legacy_path = os.path.join(DATA_DIR, f"{mapping.template_id}_mapping.json")
+    try:
+        with open(legacy_path, "w", encoding="utf-8") as f:
+            f.write(mapping.model_dump_json(indent=2))
+    except Exception:
+        pass
     return {"status": "success", "message": "Mapping saved successfully"}
 
 @app.get("/api/mapping/{template_id}")
-def get_mapping(template_id: str):
-    path = os.path.join(DATA_DIR, f"{template_id}_mapping.json")
+def get_mapping(
+    template_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    user_id = str(user["id"])
+    company_id = str(user.get("company_id") or "local_company")
+    is_admin = user.get("role") == "admin"
+
+    # Enforce document ownership: raises 403 if document belongs to another user
+    resolve_user_document(user_id, template_id, is_admin=is_admin, company_id=company_id)
+
+    user_path = os.path.join(DATA_DIR, f"{user_id}_{template_id}_mapping.json")
+    legacy_path = os.path.join(DATA_DIR, f"{template_id}_mapping.json")
+    path = user_path if os.path.exists(user_path) else legacy_path
+
     if not os.path.exists(path):
         return {"template_id": template_id, "page_width": 0, "page_height": 0, "mappings": []}
     with open(path, "r", encoding="utf-8-sig") as f:
@@ -2316,29 +2443,17 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
     if req.mappings is not None and len(req.mappings) > 0:
         mappings = [m.model_dump() for m in req.mappings]
     else:
-        mapping_path = os.path.join(DATA_DIR, f"{req.template_id}_mapping.json")
+        user_mapping_path = os.path.join(DATA_DIR, f"{user_id}_{req.template_id}_mapping.json")
+        legacy_mapping_path = os.path.join(DATA_DIR, f"{req.template_id}_mapping.json")
+        mapping_path = user_mapping_path if os.path.exists(user_mapping_path) else legacy_mapping_path
         if not os.path.exists(mapping_path):
             raise HTTPException(status_code=404, detail=f"No mappings found for template {req.template_id}")
         with open(mapping_path, "r", encoding="utf-8") as f:
             mapping_data = json.load(f)
             mappings = mapping_data.get("mappings", [])
 
-    # 3. Locate input PDF
-    user_id = str(supabase_user.get("sub") or supabase_user.get("id")) if supabase_user else None
-    pdf_path = None
-    if user_id:
-        try:
-            pdf_path = resolve_user_pdf_path(user_id, req.template_id, company_id=company_id)
-        except Exception:
-            pass
-    if not pdf_path or not os.path.exists(pdf_path):
-        for candidate in [
-            os.path.join(INPUT_DIR, f"{req.template_id}.pdf"),
-            os.path.join(INPUT_DIR, req.template_id)
-        ]:
-            if os.path.exists(candidate):
-                pdf_path = candidate
-                break
+    # 3. Locate input PDF (strictly owner-isolated)
+    pdf_path = resolve_user_pdf_path(user_id, req.template_id, company_id=company_id)
     if not pdf_path or not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail=f"Input PDF '{req.template_id}' not found")
 
@@ -2402,11 +2517,12 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
     if not placements:
         raise HTTPException(status_code=400, detail="No matching fields or images to place onto PDF")
 
-    processor = VisualPDFProcessor(output_dir=OUTPUT_DIR)
+    user_out_dir = os.path.join(OUTPUT_DIR, user_id)
+    os.makedirs(user_out_dir, exist_ok=True)
     out_filename = f"filled_{os.path.basename(pdf_path)}"
-    out_path = os.path.join(OUTPUT_DIR, out_filename)
+    out_path = os.path.join(user_out_dir, out_filename)
+    processor = VisualPDFProcessor(output_dir=user_out_dir)
     processor.apply_visual_placements(pdf_path, placements, output_path=out_path)
-
     download_url = f"/api/download/{out_filename}"
 
     # Supabase Lifecycle & Storage Upload
@@ -2496,24 +2612,9 @@ def ai_fill_pdf(req: AiFillRequest, user: Dict[str, Any] = Depends(get_current_u
     if APP_ENVIRONMENT == "production" and not history_id:
         raise HTTPException(status_code=500, detail="Fallo al registrar historial de autollenado en Supabase.")
 
-    # 1. Locate input PDF
+    # 1. Locate input PDF (strictly owner-isolated)
     template_id = req.template_id
-    user_id = str(supabase_user.get("sub") or supabase_user.get("id")) if supabase_user else None
-    company_id = (supabase_user or {}).get("app_metadata", {}).get("company_id")
-    pdf_path = None
-    if user_id:
-        try:
-            pdf_path = resolve_user_pdf_path(user_id, template_id, company_id=company_id)
-        except Exception:
-            pass
-    if not pdf_path or not os.path.exists(pdf_path):
-        for candidate in [
-            os.path.join(INPUT_DIR, f"{template_id}.pdf"),
-            os.path.join(INPUT_DIR, template_id)
-        ]:
-            if os.path.exists(candidate):
-                pdf_path = candidate
-                break
+    pdf_path = resolve_user_pdf_path(user_id, template_id, company_id=company_id)
     if not pdf_path or not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail=f"Input PDF '{template_id}' not found")
 
@@ -2530,8 +2631,10 @@ def ai_fill_pdf(req: AiFillRequest, user: Dict[str, Any] = Depends(get_current_u
 
     try:
         from backend.pdf_filling_agent.agent import PDFAgent
+        user_out_dir = os.path.join(OUTPUT_DIR, user_id)
+        os.makedirs(user_out_dir, exist_ok=True)
         agent = PDFAgent(company_profile=company_data, commercial_profile=resolved_cp)
-        output_path = agent.fill_pdf(pdf_path, instructions, output_dir=OUTPUT_DIR, mode="auto")
+        output_path = agent.fill_pdf(pdf_path, instructions, output_dir=user_out_dir, mode="auto")
         out_filename = os.path.basename(output_path)
         download_url = f"/api/download/{out_filename}"
 
@@ -2594,33 +2697,44 @@ async def download_file_by_history_id(
         elif "admin_session" in request.cookies:
             auth_token = request.cookies.get("admin_session")
 
-    # Si no hay token en producción, fallar cerrado ciego
-    if APP_ENVIRONMENT == "production" and not auth_token:
+    if not auth_token:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Archivo no encontrado o acceso no autorizado."
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Se requiere autenticación para descargar este archivo."
         )
 
     user = None
-    if auth_token:
+    try:
+        user = decode_supabase_jwt(auth_token)
+    except Exception:
         try:
-            user = decode_supabase_jwt(auth_token)
+            from backend.db.auth import verify_session_token
+            user = verify_session_token(auth_token)
         except Exception:
-            try:
-                from backend.db.auth import verify_session_token
-                user = verify_session_token(auth_token)
-            except Exception:
-                user = None
+            user = None
 
-    if APP_ENVIRONMENT == "production" and not user:
+    if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Archivo no encontrado o acceso no autorizado."
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión expirada o token inválido."
         )
 
-    user_id = str(user.get("sub") or user.get("id")) if user else None
-    user_role = (user.get("app_metadata", {}).get("role") or user.get("role")) if user else None
-    is_admin = user_role == "admin"
+    user_id = str(user.get("sub") or user.get("id") or "")
+    if not user_id and user.get("email"):
+        db = SessionLocal()
+        try:
+            cp = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(user["email"])).first()
+            if cp:
+                user_id = str(cp.id)
+        finally:
+            db.close()
+
+    is_valid_uuid = False
+    try:
+        uuid.UUID(str(history_id))
+        is_valid_uuid = True
+    except Exception:
+        pass
 
     admin_client = None
     try:
@@ -2630,22 +2744,45 @@ async def download_file_by_history_id(
 
     if admin_client:
         try:
+            # 1. Comprobar form_fill_history
             hist_res = (
                 admin_client.table("form_fill_history")
                 .select("id,operator_user_id,output_storage_path,company_id")
                 .eq("id", history_id)
-                .single()
+                .limit(1)
                 .execute()
             )
-            hist = hist_res.data
-            if hist:
-                # Comprobar pertenencia
-                if not is_admin and user_id and str(hist.get("operator_user_id")) != user_id:
+            if hist_res.data and len(hist_res.data) > 0:
+                hist = hist_res.data[0]
+                if str(hist.get("operator_user_id")) != user_id:
                     raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Archivo no encontrado o acceso no autorizado."
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Acceso denegado: no tienes permisos para acceder a este archivo."
                     )
                 storage_path = hist.get("output_storage_path")
+                if storage_path:
+                    b_name, b_key = parse_storage_path(storage_path)
+                    signed = admin_client.storage.from_(b_name).create_signed_url(b_key, expires_in=600)
+                    signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                    if signed_url:
+                        return RedirectResponse(signed_url)
+
+            # 2. Comprobar user_documents (si se pasó un document_id)
+            doc_res = (
+                admin_client.table("user_documents")
+                .select("id,user_id,storage_path")
+                .eq("id", history_id)
+                .limit(1)
+                .execute()
+            )
+            if doc_res.data and len(doc_res.data) > 0:
+                doc = doc_res.data[0]
+                if str(doc.get("user_id")) != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Acceso denegado: no tienes permisos para acceder a este documento."
+                    )
+                storage_path = doc.get("storage_path")
                 if storage_path:
                     b_name, b_key = parse_storage_path(storage_path)
                     signed = admin_client.storage.from_(b_name).create_signed_url(b_key, expires_in=600)
@@ -2659,6 +2796,60 @@ async def download_file_by_history_id(
 
     # Fallback local para desarrollo y tests
     if APP_ENVIRONMENT != "production":
+        # 3. Comprobar UserDocument local en SQLite
+        db = SessionLocal()
+        try:
+            local_doc = db.query(UserDocument).filter(UserDocument.id == history_id).first()
+            if local_doc:
+                if str(local_doc.user_id) != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Acceso denegado: no tienes permisos para acceder a este documento."
+                    )
+                for candidate_name in [local_doc.filename, f"{local_doc.id}.pdf", f"{history_id}.pdf"]:
+                    local_cache = os.path.join(INPUT_DIR, user_id, candidate_name)
+                    if os.path.exists(local_cache):
+                        return FileResponse(path=local_cache, filename=local_doc.filename, media_type="application/pdf")
+        finally:
+            db.close()
+
+        # 4. Comprobar directorio de salida aislado del usuario
+        if user_id:
+            for candidate in [
+                os.path.join(OUTPUT_DIR, user_id, f"{history_id}.pdf"),
+                os.path.join(OUTPUT_DIR, user_id, history_id)
+            ]:
+                if os.path.exists(candidate):
+                    return FileResponse(
+                        path=candidate,
+                        filename=os.path.basename(candidate),
+                        media_type="application/pdf"
+                    )
+
+        # 5. Comprobar si el archivo solicitado existe en la carpeta de OTRO usuario
+        if os.path.exists(OUTPUT_DIR):
+            for entry in os.listdir(OUTPUT_DIR):
+                other_dir = os.path.join(OUTPUT_DIR, entry)
+                if os.path.isdir(other_dir) and entry != user_id:
+                    for c_name in [f"{history_id}.pdf", history_id]:
+                        if os.path.exists(os.path.join(other_dir, c_name)):
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail="Acceso denegado: el archivo pertenece a otro usuario."
+                            )
+
+        if os.path.exists(INPUT_DIR):
+            for entry in os.listdir(INPUT_DIR):
+                other_dir = os.path.join(INPUT_DIR, entry)
+                if os.path.isdir(other_dir) and entry != user_id:
+                    for c_name in [f"{history_id}.pdf", history_id]:
+                        if os.path.exists(os.path.join(other_dir, c_name)):
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail="Acceso denegado: el documento pertenece a otro usuario."
+                            )
+
+        # 6. Fallback legacy local (archivos no particionados generados en tests)
         for candidate in [
             os.path.join(OUTPUT_DIR, f"{history_id}.pdf"),
             os.path.join(OUTPUT_DIR, history_id)
@@ -2669,6 +2860,12 @@ async def download_file_by_history_id(
                     filename=os.path.basename(candidate),
                     media_type="application/pdf"
                 )
+
+    if is_valid_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado o documento no autorizado."
+        )
 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,

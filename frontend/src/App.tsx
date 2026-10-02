@@ -305,9 +305,8 @@ export const App: React.FC = () => {
         }
       } else if (event === 'SIGNED_OUT') {
         if (isMounted) {
+          clearUserWorkspaceState();
           setCurrentUser(null);
-          setActiveCommercialProfileId('');
-          sessionStorage.removeItem('active_commercial_profile_id');
         }
       }
     });
@@ -318,12 +317,48 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  const clearUserWorkspaceState = () => {
+    setTemplates([]);
+    setSelectedTemplate('');
+    setPages([]);
+    setCurrentPage(0);
+    setMappings([]);
+    setSelectedField(null);
+    setCompanyData({});
+    setCategorizedCompany(undefined);
+    setEmployerProfiles([]);
+    setGlobalSignature(null);
+    setActiveImage(null);
+    setResultModalData(null);
+    setActiveCommercialProfileId('');
+    sessionStorage.removeItem('active_commercial_profile_id');
+
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('autoform_active_template_') || key.startsWith('autoform_doc_'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      } catch (err) {
+        console.warn('[clearUserWorkspaceState] Error cleaning localStorage:', err);
+      }
+    }
+  };
 
   // When user is authenticated, load workspace data
   useEffect(() => {
-    if (!currentUser?.id) return;
+    if (!currentUser?.id) {
+      clearUserWorkspaceState();
+      return;
+    }
 
     async function initWorkspace() {
+      // Inmediatamente vaciar estado previo para evitar cruce de datos
+      clearUserWorkspaceState();
       try {
         setIsLoading(true);
         const [tplList, compData, catCompany, profiles, sig] = await Promise.all([
@@ -372,13 +407,18 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error(err);
     }
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error(err);
+    }
+    clearUserWorkspaceState();
     setCurrentUser(null);
-    setActiveCommercialProfileId('');
-    sessionStorage.removeItem('active_commercial_profile_id');
     showToast('Has cerrado sesión correctamente', 'info');
   };
 
   const handleAuthenticated = (user: AdminSessionUser) => {
+    clearUserWorkspaceState();
     setCurrentUser(user);
     if (user.id) {
       setActiveCommercialProfileId(user.id);

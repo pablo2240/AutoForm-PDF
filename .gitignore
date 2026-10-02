@@ -22,6 +22,7 @@ htmlcov/
 
 # Generated Outputs & Temporary Files
 output/*.pdf
+output/*/
 !output/.gitkeep
 backend/output/*.pdf
 backend/output/

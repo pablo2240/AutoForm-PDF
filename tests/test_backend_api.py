@@ -277,7 +277,7 @@ def test_upload_pdf_compensating_rollback_on_db_failure(monkeypatch):
     res = client.post("/api/upload-pdf", files={"file": (filename, pdf_bytes, "application/pdf")})
 
     assert res.status_code == 500
-    assert f"{TEST_COMPANY_ID}/{TEST_USER_ID}/{filename}" in removed_keys
+    assert any(k.startswith(f"user_documents/{TEST_USER_ID}/") for k in removed_keys)
     assert "prev-doc-123" in reactivated_ids
 
 if __name__ == "__main__":
