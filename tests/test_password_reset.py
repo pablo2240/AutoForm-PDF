@@ -215,6 +215,7 @@ def test_user_existing_and_smtp_success(setup_teardown, capsys, monkeypatch):
     user_info = setup_teardown
     email = user_info["email"]
 
+    monkeypatch.setenv("EMAIL_PROVIDER", "smtp")
     monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
     monkeypatch.setenv("SMTP_PORT", "587")
     monkeypatch.setenv("SMTP_USER", "autoform.soporte@gmail.com")
@@ -255,6 +256,7 @@ def test_missing_smtp_configuration_logs_error_and_returns_blind_response(setup_
     user_info = setup_teardown
     email = user_info["email"]
 
+    monkeypatch.setenv("EMAIL_PROVIDER", "smtp")
     monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
     monkeypatch.setenv("SMTP_PORT", "587")
     monkeypatch.setenv("SMTP_USER", "autoform.soporte@gmail.com")
@@ -283,6 +285,7 @@ def test_gmail_smtp_exception_logs_safe_traceback_and_returns_blind_response(set
     user_info = setup_teardown
     email = user_info["email"]
 
+    monkeypatch.setenv("EMAIL_PROVIDER", "smtp")
     monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
     monkeypatch.setenv("SMTP_PORT", "587")
     monkeypatch.setenv("SMTP_USER", "autoform.soporte@gmail.com")
@@ -310,7 +313,9 @@ def test_user_in_supabase_auth_without_commercial_profile(capsys, monkeypatch):
     orphan_id = str(uuid.uuid4())
     orphan_email = f"orphan.{uuid.uuid4().hex[:6]}@iaclatam.com"
 
+    monkeypatch.setenv("EMAIL_PROVIDER", "smtp")
     monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
+
     monkeypatch.setenv("SMTP_PORT", "587")
     monkeypatch.setenv("SMTP_USER", "autoform.soporte@gmail.com")
     monkeypatch.setenv("SMTP_PASSWORD", "mock_app_password_123")

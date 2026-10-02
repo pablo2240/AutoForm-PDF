@@ -162,48 +162,53 @@ export const App: React.FC = () => {
     }
   };
 
-  // Filter commercial profiles based on role:
-  // Non-admin (commercial) ONLY sees their own profile ("el perfil de uno y no de los demás")
-  // Admin sees all active commercial profiles
+  // Filter commercial profiles:
+  // Each authenticated user (including Kelly and Guillermo) ONLY sees their own profile.
   const visibleCommercialProfiles: CommercialProfilePublic[] = useMemo(() => {
     if (!currentUser) {
-      return commercialProfiles.filter((p: CommercialProfilePublic) => p.role !== 'admin');
+      return [];
     }
-    if (currentUser.role === 'admin') {
-      return commercialProfiles.filter((p: CommercialProfilePublic) => p.role !== 'admin');
-    }
-    // Usuario comercial autenticado: filtrar por ID o correo
-    const filtered = commercialProfiles.filter(
-      (p: CommercialProfilePublic) => 
-        p.id === currentUser.id || 
-        (p.email && currentUser.email && p.email.toLowerCase() === currentUser.email.toLowerCase())
-    );
-    // Garantía autoritativa: si el catálogo aún está cargando o viene vacío, usar datos de currentUser
-    if (filtered.length === 0 && currentUser.email) {
+
+    const normEmail = (currentUser.email || '').trim().toLowerCase();
+    const normName = (currentUser.profile_name || currentUser.display_name || `${currentUser.nombre || ''} ${currentUser.apellido || ''}`).trim().toLowerCase();
+
+    // Match user's own profile by ID, email or name
+    const filtered = commercialProfiles.filter((p: CommercialProfilePublic) => {
+      if (p.id && currentUser.id && p.id === currentUser.id) return true;
+      if (p.email && normEmail && p.email.trim().toLowerCase() === normEmail) return true;
+      if (p.profile_name && normName && p.profile_name.trim().toLowerCase() === normName) return true;
+      return false;
+    });
+
+    // Fallback autoritativo si el catálogo aún está cargando o no contiene el perfil
+    if (filtered.length === 0 && (currentUser.email || currentUser.id)) {
       const nombre = currentUser.nombre || '';
       const apellido = currentUser.apellido || '';
-      const fallbackName = currentUser.profile_name || currentUser.display_name || `${nombre} ${apellido}`.trim() || currentUser.email;
+      const fallbackName = currentUser.profile_name || currentUser.display_name || `${nombre} ${apellido}`.trim() || currentUser.email || 'Mi Perfil';
       return [{
-        id: currentUser.id || 'current_commercial',
+        id: currentUser.id || 'current_user_profile',
         profile_name: fallbackName,
         nombre: nombre || fallbackName,
         apellido: apellido,
-        cargo: currentUser.cargo || 'Comercial',
-        email: currentUser.email,
+        cargo: currentUser.cargo || (currentUser.role === 'admin' ? 'Administración' : 'Comercial'),
+        email: currentUser.email || '',
         celular: currentUser.celular || '',
         ciudad: currentUser.ciudad || '',
-        role: 'commercial',
+        role: currentUser.role || 'commercial',
         is_active: true
       }];
     }
+
     return filtered;
   }, [commercialProfiles, currentUser]);
 
-  // Auto-select commercial's own profile upon login/loading
+  // Auto-select user's own profile upon login/loading for everyone ("como defecto el perfil de cada uno para todos")
   useEffect(() => {
-    if (currentUser && currentUser.role !== 'admin' && visibleCommercialProfiles.length > 0) {
+    if (currentUser && visibleCommercialProfiles.length > 0) {
       const myProfile = visibleCommercialProfiles[0];
-      if (myProfile && (!activeCommercialProfileId || activeCommercialProfileId !== myProfile.id || activeCommercialProfileId === 'legal_rep_only')) {
+      const isCurrentSelectionValid = visibleCommercialProfiles.some((p) => p.id === activeCommercialProfileId) || activeCommercialProfileId === 'legal_rep_only';
+
+      if (!activeCommercialProfileId || !isCurrentSelectionValid) {
         setActiveCommercialProfileId(myProfile.id);
         sessionStorage.setItem('active_commercial_profile_id', myProfile.id);
       }
