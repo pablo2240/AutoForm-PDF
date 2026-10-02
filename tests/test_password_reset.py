@@ -6,7 +6,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
+import httpx
 from fastapi.testclient import TestClient
+from backend.email_service import send_password_reset_email_graph
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -386,4 +388,194 @@ def test_user_in_supabase_auth_without_commercial_profile(capsys, monkeypatch):
         db.query(CommercialProfile).filter(CommercialProfile.id == orphan_id).delete()
         db.commit()
         db.close()
+
+
+def test_microsoft_graph_success(setup_teardown, capsys, monkeypatch):
+    user_info = setup_teardown
+    email = user_info["email"]
+
+    monkeypatch.setenv("EMAIL_PROVIDER", "microsoft_graph")
+    monkeypatch.setenv("MS_TENANT_ID", "tenant-test-123")
+    monkeypatch.setenv("MS_CLIENT_ID", "client-test-456")
+    monkeypatch.setenv("MS_CLIENT_SECRET", "secret-test-789")
+    monkeypatch.setenv("MAIL_SENDER", "pablo.reyes@iaclatam.com")
+    monkeypatch.setenv("MAIL_SENDER_NAME", "AutoForm PDF - Seguridad")
+
+    def mock_post(url, **kwargs):
+        url_str = str(url)
+        if "oauth2/v2.0/token" in url_str:
+            assert kwargs["data"]["client_id"] == "client-test-456"
+            assert kwargs["data"]["client_secret"] == "secret-test-789"
+            assert kwargs["data"]["grant_type"] == "client_credentials"
+            return httpx.Response(200, json={"access_token": "mock-access-token-xyz", "expires_in": 3600}, request=httpx.Request("POST", url))
+        elif "/users/pablo.reyes@iaclatam.com/sendMail" in url_str:
+            assert kwargs["headers"]["Authorization"] == "Bearer mock-access-token-xyz"
+            msg = kwargs["json"]["message"]
+            assert msg["from"]["emailAddress"]["address"] == "pablo.reyes@iaclatam.com"
+            assert msg["toRecipients"][0]["emailAddress"]["address"] == email
+            assert "token=" in msg["body"]["content"]
+            return httpx.Response(202, request=httpx.Request("POST", url))
+        return httpx.Response(404, request=httpx.Request("POST", url))
+
+    with patch.object(httpx.Client, "post", side_effect=mock_post):
+        res = client.post("/api/auth/forgot-password", json={"email": email})
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+
+        out = capsys.readouterr().out
+        assert "[RESET] request_received" in out
+        assert "[RESET] user_found=true" in out
+        assert "[RESET] provider=microsoft_graph" in out
+        assert "[RESET] graph_configured=true" in out
+        assert "tenant=True, client_id=True, secret=True, sender=True" in out
+        assert "[RESET] email_sent=true" in out
+        # Verificaciones estrictas de seguridad: sin secretos ni tokens en logs
+        assert "secret-test-789" not in out
+        assert "mock-access-token-xyz" not in out
+        assert "/?token=" not in out
+
+
+def test_microsoft_graph_missing_credentials(setup_teardown, capsys, monkeypatch):
+    user_info = setup_teardown
+    email = user_info["email"]
+
+    monkeypatch.setenv("EMAIL_PROVIDER", "microsoft_graph")
+    monkeypatch.setenv("MS_TENANT_ID", "tenant-test-123")
+    monkeypatch.setenv("MS_CLIENT_ID", "client-test-456")
+    monkeypatch.setenv("MS_CLIENT_SECRET", "")
+    monkeypatch.setenv("MAIL_SENDER", "pablo.reyes@iaclatam.com")
+
+    res = client.post("/api/auth/forgot-password", json={"email": email})
+    assert res.status_code == 200
+    assert res.json()["status"] == "success"
+    assert "instrucciones de acceso" in res.json()["message"]
+
+    out = capsys.readouterr().out
+    assert "[RESET] request_received" in out
+    assert "[RESET] user_found=true" in out
+    assert "[RESET] provider=microsoft_graph" in out
+    assert "[RESET] graph_configured=false" in out
+    assert "secret=False" in out
+    assert "[RESET] [GRAPH_CONFIG_ERROR]" in out
+    assert "MS_CLIENT_SECRET" in out
+    assert "[RESET] graph_send_failed: RuntimeError" in out
+    assert "[RESET] email_sent=true" not in out
+
+
+def test_microsoft_graph_token_rejection(setup_teardown, capsys, monkeypatch):
+    user_info = setup_teardown
+    email = user_info["email"]
+
+    monkeypatch.setenv("EMAIL_PROVIDER", "microsoft_graph")
+    monkeypatch.setenv("MS_TENANT_ID", "tenant-test-123")
+    monkeypatch.setenv("MS_CLIENT_ID", "client-test-456")
+    monkeypatch.setenv("MS_CLIENT_SECRET", "invalid-secret-xyz")
+    monkeypatch.setenv("MAIL_SENDER", "pablo.reyes@iaclatam.com")
+
+    def mock_post(url, **kwargs):
+        return httpx.Response(
+            401,
+            json={"error": "invalid_client", "error_description": "AADSTS7000215: Invalid client secret provided"},
+            request=httpx.Request("POST", url)
+        )
+
+    with patch.object(httpx.Client, "post", side_effect=mock_post):
+        res = client.post("/api/auth/forgot-password", json={"email": email})
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+        assert "instrucciones de acceso" in res.json()["message"]
+
+        out = capsys.readouterr().out
+        assert "[RESET] request_received" in out
+        assert "[RESET] user_found=true" in out
+        assert "[RESET] provider=microsoft_graph" in out
+        assert "[RESET] graph_configured=true" in out
+        assert "[RESET] graph_send_failed: RuntimeError" in out
+        assert "invalid_client" in out
+        assert "invalid-secret-xyz" not in out
+        assert "[RESET] email_sent=true" not in out
+
+
+def test_microsoft_graph_sendmail_rejection(setup_teardown, capsys, monkeypatch):
+    user_info = setup_teardown
+    email = user_info["email"]
+
+    monkeypatch.setenv("EMAIL_PROVIDER", "microsoft_graph")
+    monkeypatch.setenv("MS_TENANT_ID", "tenant-test-123")
+    monkeypatch.setenv("MS_CLIENT_ID", "client-test-456")
+    monkeypatch.setenv("MS_CLIENT_SECRET", "valid-secret-123")
+    monkeypatch.setenv("MAIL_SENDER", "pablo.reyes@iaclatam.com")
+
+    def mock_post(url, **kwargs):
+        url_str = str(url)
+        if "oauth2/v2.0/token" in url_str:
+            return httpx.Response(200, json={"access_token": "valid-token-abc", "expires_in": 3600}, request=httpx.Request("POST", url))
+        elif "sendMail" in url_str:
+            return httpx.Response(
+                403,
+                json={"error": {"code": "ErrorAccessDenied", "message": "Access is denied. Check permissions."}},
+                request=httpx.Request("POST", url)
+            )
+        return httpx.Response(404, request=httpx.Request("POST", url))
+
+    with patch.object(httpx.Client, "post", side_effect=mock_post):
+        res = client.post("/api/auth/forgot-password", json={"email": email})
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+        assert "instrucciones de acceso" in res.json()["message"]
+
+        out = capsys.readouterr().out
+        assert "[RESET] request_received" in out
+        assert "[RESET] user_found=true" in out
+        assert "[RESET] provider=microsoft_graph" in out
+        assert "[RESET] graph_configured=true" in out
+        assert "[RESET] graph_send_failed: RuntimeError" in out
+        assert "ErrorAccessDenied" in out
+        assert "valid-secret-123" not in out
+        assert "[RESET] email_sent=true" not in out
+
+
+def test_microsoft_graph_network_timeout(setup_teardown, capsys, monkeypatch):
+    user_info = setup_teardown
+    email = user_info["email"]
+
+    monkeypatch.setenv("EMAIL_PROVIDER", "microsoft_graph")
+    monkeypatch.setenv("MS_TENANT_ID", "tenant-test-123")
+    monkeypatch.setenv("MS_CLIENT_ID", "client-test-456")
+    monkeypatch.setenv("MS_CLIENT_SECRET", "valid-secret-123")
+    monkeypatch.setenv("MAIL_SENDER", "pablo.reyes@iaclatam.com")
+
+    with patch.object(httpx.Client, "post", side_effect=httpx.TimeoutException("Read timed out after 10.0s")):
+        res = client.post("/api/auth/forgot-password", json={"email": email})
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+        assert "instrucciones de acceso" in res.json()["message"]
+
+        out = capsys.readouterr().out
+        assert "[RESET] graph_send_failed: RuntimeError" in out
+        assert "Timeout" in out
+        assert "[RESET] email_sent=true" not in out
+
+
+def test_microsoft_graph_local_simulation(capsys, monkeypatch):
+    monkeypatch.setenv("APP_ENVIRONMENT", "local")
+    monkeypatch.setenv("EMAIL_PROVIDER", "microsoft_graph")
+    monkeypatch.setenv("MS_TENANT_ID", "")
+    monkeypatch.setenv("MS_CLIENT_ID", "")
+    monkeypatch.setenv("MS_CLIENT_SECRET", "")
+    monkeypatch.setenv("MAIL_SENDER", "")
+
+    result = send_password_reset_email_graph(
+        recipient_email="local.user@iaclatam.com",
+        recipient_name="Usuario Local",
+        reset_link="http://localhost:5173/?token=simulated_token_123"
+    )
+    assert result is True
+
+    out = capsys.readouterr().out
+    assert "[DEV GRAPH EMAIL SIMULATION]" in out
+    assert "l********r@iaclatam.com" in out
+    assert "local.user@iaclatam.com" not in out
+
+
 

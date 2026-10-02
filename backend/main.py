@@ -33,7 +33,16 @@ from backend.pdf_filling_agent.visual_processor import VisualPDFProcessor, Visua
 from backend.db.session import get_db, SessionLocal
 from backend.db.models import CommercialProfile, PasswordResetToken, UserDocument
 from backend.db.auth import hash_password, verify_password, create_session_token, verify_session_token, SESSION_MAX_AGE_SECONDS
-from backend.email_service import send_password_reset_email, get_smtp_config, get_missing_smtp_vars, mask_email
+from backend.email_service import (
+    send_password_reset_email,
+    get_email_provider,
+    get_smtp_config,
+    get_missing_smtp_vars,
+    get_graph_config,
+    get_missing_graph_vars,
+    mask_email,
+    sanitize_safe_log
+)
 from backend.auth_supabase import (
     get_current_user,
     require_admin,
@@ -1509,74 +1518,149 @@ def forgot_password(dto: ForgotPasswordRequestDTO, request: Request, db = Depend
     user_id, display_name, canonical_email = user_info
     print("[RESET] user_found=true", flush=True)
 
-    # Verificar estado de configuración SMTP (solo presencia de variables, nunca secretos)
-    cfg = get_smtp_config()
-    has_host = bool(os.getenv("SMTP_HOST", "").strip())
-    has_port = bool(os.getenv("SMTP_PORT", "").strip())
-    has_user = bool(os.getenv("SMTP_USER", "").strip())
-    has_password = bool(os.getenv("SMTP_PASSWORD", "").strip())
-    missing_vars = get_missing_smtp_vars()
-    is_smtp_configured = len(missing_vars) == 0
+    provider = get_email_provider()
+    print(f"[RESET] provider={provider}", flush=True)
 
-    print(
-        f"[RESET] smtp_configured={str(is_smtp_configured).lower()} "
-        f"(host={has_host}, port={has_port}, user={has_user}, password={has_password})",
-        flush=True
-    )
+    if provider == "microsoft_graph":
+        cfg = get_graph_config()
+        has_tenant = bool(os.getenv("MS_TENANT_ID", "").strip())
+        has_client_id = bool(os.getenv("MS_CLIENT_ID", "").strip())
+        has_secret = bool(os.getenv("MS_CLIENT_SECRET", "").strip())
+        has_sender = bool(os.getenv("MAIL_SENDER", "").strip())
+        missing_vars = get_missing_graph_vars()
+        is_graph_configured = len(missing_vars) == 0
 
-    try:
-        if not is_smtp_configured:
-            print(f"[RESET] [SMTP_CONFIG_ERROR] Variables requeridas no configuradas: {', '.join(missing_vars)}", flush=True)
-            raise RuntimeError(f"Configuración SMTP incompleta. Faltan variables requeridas: {', '.join(missing_vars)}")
-
-        now_utc = datetime.now(timezone.utc)
-        # 1. Invalidar cualquier token activo previo para este usuario
-        db.query(PasswordResetToken).filter(
-            PasswordResetToken.user_id == user_id,
-            PasswordResetToken.used_at.is_(None)
-        ).update({"used_at": now_utc}, synchronize_session=False)
-
-        # 2. Generar token criptográfico y almacenar su hash SHA-256
-        raw_token = secrets.token_urlsafe(32)
-        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-        expires_at = now_utc + timedelta(minutes=15)
-
-        new_token_record = PasswordResetToken(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            token_hash=token_hash,
-            expires_at=expires_at,
-            request_ip=client_ip
+        print(
+            f"[RESET] graph_configured={str(is_graph_configured).lower()} "
+            f"(tenant={has_tenant}, client_id={has_client_id}, secret={has_secret}, sender={has_sender})",
+            flush=True
         )
-        db.add(new_token_record)
-        db.commit()
 
-        # 3. Construir enlace de restablecimiento
-        site_url = cfg["site_url"]
-        reset_link = f"{site_url}/?token={raw_token}"
-
-        # 4. Despacho síncrono del correo
-        send_password_reset_email(
-            recipient_email=canonical_email,
-            recipient_name=display_name,
-            reset_link=reset_link
-        )
-        print("[RESET] email_sent=true", flush=True)
-
-    except Exception as err:
         try:
-            db.rollback()
-            if 'new_token_record' in locals() and hasattr(new_token_record, 'id') and new_token_record.id:
-                db.query(PasswordResetToken).filter(PasswordResetToken.id == new_token_record.id).update(
-                    {"used_at": datetime.now(timezone.utc)}, synchronize_session=False
-                )
-                db.commit()
-        except Exception:
-            pass
+            if not is_graph_configured:
+                print(f"[RESET] [GRAPH_CONFIG_ERROR] Variables requeridas no configuradas: {', '.join(missing_vars)}", flush=True)
+                raise RuntimeError(f"Configuración Microsoft Graph incompleta. Faltan variables requeridas: {', '.join(missing_vars)}")
 
-        exc_type = type(err).__name__
-        tb_safe = traceback.format_exc()
-        print(f"[RESET] smtp_send_failed: {exc_type}: {str(err)}\n{tb_safe}", flush=True)
+            now_utc = datetime.now(timezone.utc)
+            # 1. Invalidar cualquier token activo previo para este usuario
+            db.query(PasswordResetToken).filter(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.used_at.is_(None)
+            ).update({"used_at": now_utc}, synchronize_session=False)
+
+            # 2. Generar token criptográfico y almacenar su hash SHA-256
+            raw_token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+            expires_at = now_utc + timedelta(minutes=15)
+
+            new_token_record = PasswordResetToken(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+                request_ip=client_ip
+            )
+            db.add(new_token_record)
+            db.commit()
+
+            # 3. Construir enlace de restablecimiento
+            site_url = cfg["site_url"]
+            reset_link = f"{site_url}/?token={raw_token}"
+
+            # 4. Despacho síncrono del correo vía Microsoft Graph
+            send_password_reset_email(
+                recipient_email=canonical_email,
+                recipient_name=display_name,
+                reset_link=reset_link
+            )
+            print("[RESET] email_sent=true", flush=True)
+
+        except Exception as err:
+            try:
+                db.rollback()
+                if 'new_token_record' in locals() and hasattr(new_token_record, 'id') and new_token_record.id:
+                    db.query(PasswordResetToken).filter(PasswordResetToken.id == new_token_record.id).update(
+                        {"used_at": datetime.now(timezone.utc)}, synchronize_session=False
+                    )
+                    db.commit()
+            except Exception:
+                pass
+
+            exc_type = type(err).__name__
+            tb_safe = traceback.format_exc()
+            safe_err = sanitize_safe_log(str(err), os.getenv("MS_CLIENT_SECRET", "").strip())
+            safe_tb = sanitize_safe_log(tb_safe, os.getenv("MS_CLIENT_SECRET", "").strip())
+            print(f"[RESET] graph_send_failed: {exc_type}: {safe_err}\n{safe_tb}", flush=True)
+
+    else:
+        # Soporte a SMTP corporativo
+        cfg = get_smtp_config()
+        has_host = bool(os.getenv("SMTP_HOST", "").strip())
+        has_port = bool(os.getenv("SMTP_PORT", "").strip())
+        has_user = bool(os.getenv("SMTP_USER", "").strip())
+        has_password = bool(os.getenv("SMTP_PASSWORD", "").strip())
+        missing_vars = get_missing_smtp_vars()
+        is_smtp_configured = len(missing_vars) == 0
+
+        print(
+            f"[RESET] smtp_configured={str(is_smtp_configured).lower()} "
+            f"(host={has_host}, port={has_port}, user={has_user}, password={has_password})",
+            flush=True
+        )
+
+        try:
+            if not is_smtp_configured:
+                print(f"[RESET] [SMTP_CONFIG_ERROR] Variables requeridas no configuradas: {', '.join(missing_vars)}", flush=True)
+                raise RuntimeError(f"Configuración SMTP incompleta. Faltan variables requeridas: {', '.join(missing_vars)}")
+
+            now_utc = datetime.now(timezone.utc)
+            # 1. Invalidar cualquier token activo previo para este usuario
+            db.query(PasswordResetToken).filter(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.used_at.is_(None)
+            ).update({"used_at": now_utc}, synchronize_session=False)
+
+            # 2. Generar token criptográfico y almacenar su hash SHA-256
+            raw_token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+            expires_at = now_utc + timedelta(minutes=15)
+
+            new_token_record = PasswordResetToken(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+                request_ip=client_ip
+            )
+            db.add(new_token_record)
+            db.commit()
+
+            # 3. Construir enlace de restablecimiento
+            site_url = cfg["site_url"]
+            reset_link = f"{site_url}/?token={raw_token}"
+
+            # 4. Despacho síncrono del correo
+            send_password_reset_email(
+                recipient_email=canonical_email,
+                recipient_name=display_name,
+                reset_link=reset_link
+            )
+            print("[RESET] email_sent=true", flush=True)
+
+        except Exception as err:
+            try:
+                db.rollback()
+                if 'new_token_record' in locals() and hasattr(new_token_record, 'id') and new_token_record.id:
+                    db.query(PasswordResetToken).filter(PasswordResetToken.id == new_token_record.id).update(
+                        {"used_at": datetime.now(timezone.utc)}, synchronize_session=False
+                    )
+                    db.commit()
+            except Exception:
+                pass
+
+            exc_type = type(err).__name__
+            tb_safe = traceback.format_exc()
+            print(f"[RESET] smtp_send_failed: {exc_type}: {str(err)}\n{tb_safe}", flush=True)
 
     return {
         "status": "success",

@@ -171,3 +171,35 @@ Para evitar sondeos continuos por polling, el conector registra suscripciones de
 > 1. **Cero almacenamiento en disco temporal no cifrado**: Las descargas desde Microsoft Graph deben procesarse en flujos de memoria (`MemoryStream` / buffers en RAM) o en volúmenes efímeros cifrados con eliminación atómica inmediata al finalizar el OCR.
 > 2. **Prohibición de Logs de Contenido**: Ningún nombre de archivo de cliente, contenido contractual, cláusula ni fragmento de texto puede registrarse en los logs de los conectores de Microsoft. Los logs solo deben registrar: `TenantID`, `SiteID`, `ItemCount`, `BytesReceived`, `DurationMs` y `CorrelationID`.
 > 3. **No Retención por Microsoft de Respuestas**: Las peticiones enviadas a Graph API son operaciones puras de lectura hacia el tenant del propio cliente. No se transmite información hacia terceros ni hacia servicios no aprobados.
+
+---
+
+## 8. Despacho Transaccional de Correos de Seguridad (Microsoft Graph Mail API)
+
+Para garantizar la máxima entregabilidad corporativa y mitigar bloqueos antispam asociados a remitentes genéricos o protocolos SMTP básicos, el backend FastAPI de AutoForm PDF utiliza Microsoft Graph API como transportador autorizado para la recuperación de contraseñas.
+
+### 8.1. Arquitectura de Despacho
+* **Mecanismo de Autenticación**: OAuth 2.0 Client Credentials Grant contra Microsoft Entra ID.
+  * **Endpoint de Token**: `POST https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token`
+  * **Scope**: `https://graph.microsoft.com/.default`
+* **Endpoint de Envío**: `POST https://graph.microsoft.com/v1.0/users/{MAIL_SENDER}/sendMail`
+* **Permiso Requerido en Entra ID**: `Mail.Send` (Tipo: *Application*) con Consentimiento del Administrador (*Admin Consent*).
+* **Buzón Remitente**: Estrictamente asignado a `MAIL_SENDER` (ej. `pablo.reyes@iaclatam.com`).
+
+### 8.2. Variables de Entorno del Servicio
+| Variable | Descripción | Ejemplo / Valor |
+|---|---|---|
+| `EMAIL_PROVIDER` | Proveedor activo de correo | `microsoft_graph` |
+| `MS_TENANT_ID` | Directory (Tenant) ID en Microsoft Entra ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `MS_CLIENT_ID` | Application (Client) ID del App Registration | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `MS_CLIENT_SECRET` | Secreto criptográfico generado en Entra ID | `[Almacenado de forma segura en Render/KeyVault]` |
+| `MAIL_SENDER` | Dirección del buzón autorizado para emitir el correo | `pablo.reyes@iaclatam.com` |
+| `MAIL_SENDER_NAME` | Nombre visible del remitente institucional | `AutoForm PDF - Seguridad` |
+
+### 8.3. Telemetría Segura en Render
+El sistema genera logs estructurados sin exponer PII, secretos, tokens Bearer ni enlaces con tokens:
+* `[RESET] provider=microsoft_graph`
+* `[RESET] graph_configured=true|false (tenant=..., client_id=..., secret=..., sender=...)`
+* `[RESET] email_sent=true`
+* `[RESET] graph_send_failed: <ExceptionType>: <DetalleSanitizado>`
+
