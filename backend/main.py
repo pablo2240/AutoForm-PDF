@@ -2938,7 +2938,8 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
     out_path = os.path.join(user_out_dir, out_filename)
     processor = VisualPDFProcessor(output_dir=user_out_dir)
     processor.apply_visual_placements(pdf_path, placements, output_path=out_path)
-    download_url = f"/api/download/{out_filename}"
+    token_param = f"?token={token}" if token else ""
+    download_url = f"/api/download/{out_filename}{token_param}"
 
     # Supabase Lifecycle & Storage Upload
     if history_id and user_client and supabase_user:
@@ -3062,7 +3063,8 @@ def ai_fill_pdf(req: AiFillRequest, user: Dict[str, Any] = Depends(get_current_u
         agent = PDFAgent(company_profile=company_data, commercial_profile=resolved_cp)
         output_path = agent.fill_pdf(pdf_path, instructions, output_dir=user_out_dir, mode="auto")
         out_filename = os.path.basename(output_path)
-        download_url = f"/api/download/{out_filename}"
+        token_param = f"?token={token}" if token else ""
+        download_url = f"/api/download/{out_filename}{token_param}"
 
         if history_id and user_client and supabase_user:
             company_id = supabase_user.get("app_metadata", {}).get("company_id")
@@ -3145,19 +3147,32 @@ async def download_file_by_history_id(
             detail="Sesión expirada o token inválido."
         )
 
-    user_id = str(user.get("sub") or user.get("id") or "")
-    if not user_id and user.get("email"):
-        db = SessionLocal()
-        try:
-            cp = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(user["email"])).first()
-            if cp:
-                user_id = str(cp.id)
-        finally:
-            db.close()
+    import urllib.parse
+    clean_history_id = urllib.parse.unquote(history_id).strip()
+
+    auth_user_id = str(user.get("sub") or user.get("id") or "")
+    email = (user.get("email") or "").lower()
+
+    valid_user_ids = set()
+    if auth_user_id:
+        valid_user_ids.add(auth_user_id)
+
+    db = SessionLocal()
+    try:
+        query = db.query(CommercialProfile).filter(CommercialProfile.is_active == True)
+        matching_profiles = []
+        if auth_user_id:
+            matching_profiles.extend(query.filter(CommercialProfile.id == auth_user_id).all())
+        if email:
+            matching_profiles.extend(query.filter(CommercialProfile.email.ilike(email)).all())
+        for prof in matching_profiles:
+            valid_user_ids.add(str(prof.id))
+    finally:
+        db.close()
 
     is_valid_uuid = False
     try:
-        uuid.UUID(str(history_id))
+        uuid.UUID(str(clean_history_id))
         is_valid_uuid = True
     except Exception:
         pass
@@ -3174,13 +3189,13 @@ async def download_file_by_history_id(
             hist_res = (
                 admin_client.table("form_fill_history")
                 .select("id,operator_user_id,output_storage_path,company_id")
-                .eq("id", history_id)
+                .eq("id", clean_history_id)
                 .limit(1)
                 .execute()
             )
             if hist_res.data and len(hist_res.data) > 0:
                 hist = hist_res.data[0]
-                if str(hist.get("operator_user_id")) != user_id:
+                if str(hist.get("operator_user_id")) not in valid_user_ids:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Acceso denegado: no tienes permisos para acceder a este archivo."
@@ -3197,13 +3212,13 @@ async def download_file_by_history_id(
             doc_res = (
                 admin_client.table("user_documents")
                 .select("id,user_id,storage_path")
-                .eq("id", history_id)
+                .eq("id", clean_history_id)
                 .limit(1)
                 .execute()
             )
             if doc_res.data and len(doc_res.data) > 0:
                 doc = doc_res.data[0]
-                if str(doc.get("user_id")) != user_id:
+                if str(doc.get("user_id")) not in valid_user_ids:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Acceso denegado: no tienes permisos para acceder a este documento."
@@ -3218,46 +3233,56 @@ async def download_file_by_history_id(
         except HTTPException:
             raise
         except Exception as e:
-            print(f"[WARN] Error fetching form_fill_history {history_id}: {e}")
+            print(f"[WARN] Error fetching form_fill_history {clean_history_id}: {e}")
 
     # Fallback local para desarrollo y tests
     if APP_ENVIRONMENT != "production":
         # 3. Comprobar UserDocument local en SQLite
         db = SessionLocal()
         try:
-            local_doc = db.query(UserDocument).filter(UserDocument.id == history_id).first()
+            local_doc = db.query(UserDocument).filter(
+                (UserDocument.id == clean_history_id) | (UserDocument.filename == clean_history_id)
+            ).first()
             if local_doc:
-                if str(local_doc.user_id) != user_id:
+                if str(local_doc.user_id) not in valid_user_ids:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Acceso denegado: no tienes permisos para acceder a este documento."
                     )
-                for candidate_name in [local_doc.filename, f"{local_doc.id}.pdf", f"{history_id}.pdf"]:
-                    local_cache = os.path.join(INPUT_DIR, user_id, candidate_name)
-                    if os.path.exists(local_cache):
-                        return FileResponse(path=local_cache, filename=local_doc.filename, media_type="application/pdf")
+                for uid in valid_user_ids:
+                    for candidate_name in [local_doc.filename, f"{local_doc.id}.pdf", f"{clean_history_id}.pdf", clean_history_id]:
+                        local_cache = os.path.join(INPUT_DIR, uid, candidate_name)
+                        if os.path.exists(local_cache) and os.path.isfile(local_cache):
+                            return FileResponse(path=local_cache, filename=local_doc.filename, media_type="application/pdf")
         finally:
             db.close()
 
-        # 4. Comprobar directorio de salida aislado del usuario
-        if user_id:
-            for candidate in [
-                os.path.join(OUTPUT_DIR, user_id, f"{history_id}.pdf"),
-                os.path.join(OUTPUT_DIR, user_id, history_id)
-            ]:
-                if os.path.exists(candidate):
+        search_names = [clean_history_id]
+        if not clean_history_id.lower().endswith(".pdf"):
+            search_names.append(f"{clean_history_id}.pdf")
+        else:
+            search_names.append(clean_history_id[:-4])
+
+        # 4. Comprobar directorio de salida aislado del usuario para todos sus IDs válidos
+        for uid in valid_user_ids:
+            for c_name in search_names:
+                candidate = os.path.join(OUTPUT_DIR, uid, c_name)
+                if os.path.exists(candidate) and os.path.isfile(candidate):
+                    download_name = os.path.basename(candidate)
+                    if not download_name.lower().endswith(".pdf"):
+                        download_name = f"{download_name}.pdf"
                     return FileResponse(
                         path=candidate,
-                        filename=os.path.basename(candidate),
+                        filename=download_name,
                         media_type="application/pdf"
                     )
 
-        # 5. Comprobar si el archivo solicitado existe en la carpeta de OTRO usuario
+        # 5. Comprobar si el archivo solicitado existe en la carpeta de OTRO usuario (aislamiento estricto)
         if os.path.exists(OUTPUT_DIR):
             for entry in os.listdir(OUTPUT_DIR):
                 other_dir = os.path.join(OUTPUT_DIR, entry)
-                if os.path.isdir(other_dir) and entry != user_id:
-                    for c_name in [f"{history_id}.pdf", history_id]:
+                if os.path.isdir(other_dir) and entry not in valid_user_ids:
+                    for c_name in search_names:
                         if os.path.exists(os.path.join(other_dir, c_name)):
                             raise HTTPException(
                                 status_code=status.HTTP_403_FORBIDDEN,
@@ -3267,8 +3292,8 @@ async def download_file_by_history_id(
         if os.path.exists(INPUT_DIR):
             for entry in os.listdir(INPUT_DIR):
                 other_dir = os.path.join(INPUT_DIR, entry)
-                if os.path.isdir(other_dir) and entry != user_id:
-                    for c_name in [f"{history_id}.pdf", history_id]:
+                if os.path.isdir(other_dir) and entry not in valid_user_ids:
+                    for c_name in search_names:
                         if os.path.exists(os.path.join(other_dir, c_name)):
                             raise HTTPException(
                                 status_code=status.HTTP_403_FORBIDDEN,
@@ -3276,14 +3301,15 @@ async def download_file_by_history_id(
                             )
 
         # 6. Fallback legacy local (archivos no particionados generados en tests)
-        for candidate in [
-            os.path.join(OUTPUT_DIR, f"{history_id}.pdf"),
-            os.path.join(OUTPUT_DIR, history_id)
-        ]:
-            if os.path.exists(candidate):
+        for c_name in search_names:
+            candidate = os.path.join(OUTPUT_DIR, c_name)
+            if os.path.exists(candidate) and os.path.isfile(candidate):
+                download_name = os.path.basename(candidate)
+                if not download_name.lower().endswith(".pdf"):
+                    download_name = f"{download_name}.pdf"
                 return FileResponse(
                     path=candidate,
-                    filename=os.path.basename(candidate),
+                    filename=download_name,
                     media_type="application/pdf"
                 )
 

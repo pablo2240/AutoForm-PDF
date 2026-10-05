@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Download, CheckCircle, FileText, Zap, AlertTriangle, ShieldCheck, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
-import { getDownloadUrl } from '../api';
+import { X, Download, CheckCircle, FileText, Zap, AlertTriangle, ShieldCheck, ChevronDown, ChevronUp, PlusCircle, Loader2 } from 'lucide-react';
+import { getDownloadUrl, downloadPdfFile } from '../api';
 import type { FillResultData } from '../types';
 
 interface ResultModalProps {
@@ -15,10 +15,26 @@ export const ResultModal: React.FC<ResultModalProps> = ({
   result,
 }) => {
   const [showAuditDetails, setShowAuditDetails] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
   if (!isOpen || !result) return null;
 
   const downloadUrl = result.download_url || getDownloadUrl(result.filename);
   const audit = result.audit_report;
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    setDownloadError(null);
+    try {
+      await downloadPdfFile(downloadUrl, result.filename);
+    } catch (err: any) {
+      console.error('[ResultModal] Error al descargar:', err);
+      setDownloadError(err.message || 'Error al descargar el archivo PDF.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -115,15 +131,35 @@ export const ResultModal: React.FC<ResultModalProps> = ({
             </div>
           )}
 
-          <div className="result-actions">
-            <a 
-              href={downloadUrl} 
-              download={result.filename}
+          {downloadError && (
+            <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '0.875rem', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <AlertTriangle size={16} className="text-danger" style={{ flexShrink: 0 }} />
+              <div>
+                <strong>Error al descargar:</strong> {downloadError}
+              </div>
+            </div>
+          )}
+
+          <div className="result-actions" style={{ marginTop: '1.25rem' }}>
+            <button 
+              type="button"
+              onClick={handleDownload}
+              disabled={isDownloading}
               className="btn btn-primary btn-large w-full"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: isDownloading ? 'wait' : 'pointer' }}
             >
-              <Download size={18} />
-              <span>Descargar PDF Lleno</span>
-            </a>
+              {isDownloading ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  <span>Descargando PDF...</span>
+                </>
+              ) : (
+                <>
+                  <Download size={18} />
+                  <span>Descargar PDF Lleno</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
 

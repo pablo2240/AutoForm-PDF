@@ -170,6 +170,86 @@ export function getDownloadUrl(filename: string): string {
   return `${API_BASE}/api/download/${encodeURIComponent(filename)}`;
 }
 
+/**
+ * Descarga de manera segura un archivo PDF generado.
+ * Si es una URL externa (ej. Supabase signed URL), descarga o abre directamente.
+ * Si es un endpoint del backend (/api/download/...), utiliza authFetch para adjuntar
+ * el Bearer token y credentials. Valida que el status sea 200 y que no retorne JSON de error,
+ * evitando que el navegador guarde JSONs de error como archivos PDF dañados.
+ */
+export async function downloadPdfFile(downloadUrl: string, filename: string): Promise<void> {
+  const isExternal = downloadUrl.startsWith('http://') || downloadUrl.startsWith('https://');
+  const isDirectSignedStorage = isExternal && (downloadUrl.includes('supabase.co') || downloadUrl.includes('/storage/v1/'));
+
+  if (isDirectSignedStorage) {
+    try {
+      const res = await fetch(downloadUrl);
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          const blob = await res.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(blobUrl);
+          return;
+        }
+      }
+    } catch {
+      // Fallback a enlace directo si fetch directo falla por CORS
+    }
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
+  const fullUrl = isExternal
+    ? downloadUrl
+    : `${API_BASE}${downloadUrl.startsWith('/') ? '' : '/'}${downloadUrl}`;
+
+  const res = await authFetch(fullUrl);
+  if (!res.ok) {
+    let errorMsg = `Error al descargar el PDF (HTTP ${res.status})`;
+    try {
+      const errJson = await res.json();
+      if (errJson.detail) errorMsg = errJson.detail;
+      else if (errJson.message) errorMsg = errJson.message;
+    } catch {
+      // ignore
+    }
+    throw new Error(errorMsg);
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const errJson = await res.json().catch(() => ({}));
+    throw new Error(errJson.detail || 'El servidor devolvió un error en lugar del archivo PDF.');
+  }
+
+  const blob = await res.blob();
+  if (blob.size === 0) {
+    throw new Error('El archivo PDF descargado está vacío.');
+  }
+
+  const blobUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(blobUrl);
+}
+
 export async function fetchGlobalSignature(): Promise<import('./types').GlobalSignature | null> {
   const res = await authFetch(`${API_BASE}/api/signature`);
   if (!res.ok) return null;

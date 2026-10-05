@@ -181,6 +181,9 @@ async def get_current_user(
         if auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1]
 
+    if not token and "token" in request.query_params:
+        token = request.query_params.get("token")
+
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -272,6 +275,8 @@ async def get_current_user(
 
     return {
         "id": str(profile.get("id") or user_id),
+        "auth_user_id": str(user_id),
+        "profile_id": str(profile.get("id")) if profile and profile.get("id") else str(user_id),
         "email": profile.get("email") or email,
         "company_id": str(profile.get("company_id") or "local_company"),
         "jwt_company_id": str(jwt_company_id) if jwt_company_id else None,
