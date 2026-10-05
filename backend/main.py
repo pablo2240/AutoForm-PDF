@@ -523,34 +523,46 @@ def read_root():
 
 @app.get("/api/company-data")
 def get_company_data():
+    default_data = {
+        "razon_social": "Ingeniería Asistida Por Computador S.A.S",
+        "nit": "8110047212",
+        "representante_legal": "Guillermo Humberto Cañón Sarria",
+        "representante_nombre": "Guillermo Humberto",
+        "representante_apellido": "Cañón Sarria",
+        "tipo_documento": "C.C",
+        "numero_cedula": "98555384",
+        "lugar_expedicion_rep": "Envigado",
+        "correo_rep": "guillermo.canon@iaclatam.com",
+        "celular_rep": "3104120217",
+        "ciudad": "Medellin",
+        "departamento": "Antioquia",
+        "pais": "Colombia",
+        "telefono": "2656868",
+        "direccion_principal": "Carrera 63 B # 32 E -25 OFC 206",
+        "pagina_web": "iaclatam.com",
+        "entidad_bancaria": "BANCOLOMBIA",
+        "numero_cuenta": "00300833888",
+        "tipo_cuenta": "Ahorros",
+        "total_activos": "16151175009",
+        "total_pasivos": "8831977528",
+        "total_patrimonio": "7319197482",
+        "total_ingresos_mensuales": "1110748257",
+        "total_egresos_mensuales": "975086377"
+    }
     path = os.path.join(DATA_DIR, "company_data.json")
     if not os.path.exists(path):
-        default_data = {
-            "razon_social": "Ingeniería Asistida Por Computador S.A.S",
-            "nit": "8110047212",
-            "representante_legal": "Guillermo Humberto Cañón Sarria",
-            "representante_nombre": "Guillermo Humberto",
-            "representante_apellido": "Cañón Sarria",
-            "tipo_documento": "C.C",
-            "numero_cedula": "98555384",
-            "lugar_expedicion_rep": "Envigado",
-            "correo_rep": "guillermo.canon@iaclatam.com",
-            "celular_rep": "3104120217",
-            "ciudad": "Medellin",
-            "departamento": "Antioquia",
-            "pais": "Colombia",
-            "telefono": "2656868",
-            "direccion_principal": "Carrera 63 B # 32 E -25 OFC 206",
-            "pagina_web": "iaclatam.com",
-            "entidad_bancaria": "BANCOLOMBIA",
-            "numero_cuenta": "00300833888",
-            "tipo_cuenta": "Ahorros"
-        }
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(default_data, f, indent=2)
+            json.dump(default_data, f, indent=2, ensure_ascii=False)
         return default_data
-    with open(path, "r", encoding="utf-8-sig") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+            if isinstance(data, dict) and len(data) > 0:
+                merged = {**default_data, **data}
+                return merged
+    except Exception:
+        pass
+    return default_data
 
 @app.post("/api/company-data")
 def update_company_data(data: Dict[str, Any]):
@@ -677,8 +689,13 @@ def get_categorized_company():
     """
     path = os.path.join(DATA_DIR, "categorized_company.json")
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8-sig") as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and any(len(v) > 0 for v in data.values() if isinstance(v, list)):
+                    return data
+        except Exception:
+            pass
 
     comp_path = os.path.join(DATA_DIR, "company_data.json")
     comp_data = {}
@@ -986,7 +1003,7 @@ async def auth_me(user: Dict[str, Any] = Depends(get_current_user)):
     }
 
 @app.get("/api/company")
-async def get_company_data(user: Dict[str, Any] = Depends(get_current_user)):
+async def get_company_data_rls(user: Dict[str, Any] = Depends(get_current_user)):
     """Retorna la información de la empresa correspondiente al usuario (vía RLS)."""
     try:
         res = user["user_client"].table("companies").select("*").eq("id", user["company_id"]).single().execute()

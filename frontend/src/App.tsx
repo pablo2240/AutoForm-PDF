@@ -43,7 +43,12 @@ import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
 import { Sidebar } from './components/Sidebar';
 import { PDFCanvas } from './components/PDFCanvas';
-import { DataManagerModal } from './components/data-manager/DataManagerModal';
+import { 
+  DataManagerModal, 
+  DEFAULT_INITIAL_COMPANY_CATEGORIES, 
+  flattenToCompanyData, 
+  categorizeFlatCompanyData 
+} from './components/data-manager/DataManagerModal';
 import { ResultModal } from './components/ResultModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { CommercialProfileAdminModal } from './components/CommercialProfileAdminModal';
@@ -62,14 +67,15 @@ interface ConfirmModalState {
 }
 
 const getActiveTemplateStorageKey = (userId?: string) => `autoform_active_template_${userId || 'default'}`;
+const INITIAL_COMPANY_DATA: CompanyData = flattenToCompanyData(DEFAULT_INITIAL_COMPANY_CATEGORIES);
 
 export const App: React.FC = () => {
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [pages, setPages] = useState<PDFPage[]>([]);
   const [currentPage, setCurrentPage] = useState<number>(0);
-  const [companyData, setCompanyData] = useState<CompanyData>({});
-  const [categorizedCompany, setCategorizedCompany] = useState<CategorizedCompanyData | undefined>(undefined);
+  const [companyData, setCompanyData] = useState<CompanyData>(INITIAL_COMPANY_DATA);
+  const [categorizedCompany, setCategorizedCompany] = useState<CategorizedCompanyData | undefined>(DEFAULT_INITIAL_COMPANY_CATEGORIES);
   const [employerProfiles, setEmployerProfiles] = useState<EmployerProfile[]>([]);
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [mappings, setMappings] = useState<MappingItem[]>([]);
@@ -329,8 +335,8 @@ export const App: React.FC = () => {
     setCurrentPage(0);
     setMappings([]);
     setSelectedField(null);
-    setCompanyData({});
-    setCategorizedCompany(undefined);
+    setCompanyData(INITIAL_COMPANY_DATA);
+    setCategorizedCompany(DEFAULT_INITIAL_COMPANY_CATEGORIES);
     setEmployerProfiles([]);
     setGlobalSignature(null);
     setActiveImage(null);
@@ -367,16 +373,34 @@ export const App: React.FC = () => {
       try {
         setIsLoading(true);
         const [tplList, compData, catCompany, profiles, sig] = await Promise.all([
-          fetchTemplates(),
-          fetchCompanyData(),
+          fetchTemplates().catch((err) => {
+            console.warn('[initWorkspace] Error al consultar plantillas:', err);
+            return [];
+          }),
+          fetchCompanyData().catch((err) => {
+            console.warn('[initWorkspace] Error al consultar datos de empresa:', err);
+            return {};
+          }),
           fetchCategorizedCompany().catch(() => undefined),
           fetchEmployerProfiles().catch(() => []),
           fetchGlobalSignature().catch(() => null),
         ]);
 
-        setTemplates(tplList);
-        setCompanyData({ ...compData });
-        if (catCompany) setCategorizedCompany(catCompany);
+        const resolvedCompanyData = (compData && Object.keys(compData).length > 0)
+          ? compData
+          : (catCompany && Object.keys(catCompany).length > 0)
+            ? flattenToCompanyData(catCompany)
+            : INITIAL_COMPANY_DATA;
+
+        const resolvedCategorizedCompany = (catCompany && Object.keys(catCompany).length > 0)
+          ? catCompany
+          : (compData && Object.keys(compData).length > 0)
+            ? categorizeFlatCompanyData(compData)
+            : DEFAULT_INITIAL_COMPANY_CATEGORIES;
+
+        setTemplates(tplList || []);
+        setCompanyData(resolvedCompanyData);
+        setCategorizedCompany(resolvedCategorizedCompany);
         setEmployerProfiles(profiles || []);
         setGlobalSignature(sig || null);
 
@@ -990,6 +1014,7 @@ export const App: React.FC = () => {
               return next;
             });
           }}
+          onOpenCompanyData={() => setIsCompanyModalOpen(true)}
         />
 
         {/* Center Canvas */}

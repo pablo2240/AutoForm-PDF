@@ -27,7 +27,7 @@ interface DataManagerModalProps {
 }
 
 // Initial fallback categorization helper
-function categorizeFlatCompanyData(data: CompanyData): CategorizedCompanyData {
+export function categorizeFlatCompanyData(data: CompanyData): CategorizedCompanyData {
   const result: CategorizedCompanyData = {
     id: [],
     contacto: [],
@@ -77,8 +77,8 @@ function categorizeFlatCompanyData(data: CompanyData): CategorizedCompanyData {
 // Flatten back to key-value record for form stamping
 export function flattenToCompanyData(
   categorized: CategorizedCompanyData,
-  profiles: EmployerProfile[],
-  signature: GlobalSignature | null
+  profiles: EmployerProfile[] = [],
+  signature: GlobalSignature | null = null
 ): CompanyData {
   const flat: CompanyData = {};
 

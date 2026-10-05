@@ -26,6 +26,7 @@ interface SidebarProps {
   isSignatureActive?: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onOpenCompanyData?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -40,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isSignatureActive,
   isCollapsed = false,
   onToggleCollapse,
+  onOpenCompanyData,
 }) => {
   const [activeTab, setActiveTab] = useState<'variables' | 'mapped'>('variables');
   const [searchTerm, setSearchTerm] = useState('');
@@ -244,7 +246,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {filteredKeys.length === 0 && !globalSignature && (
               <div className="empty-state">
                 <Info size={24} />
-                <p>No se encontraron variables con "{searchTerm}"</p>
+                {searchTerm ? (
+                  <p>No se encontraron variables con "{searchTerm}"</p>
+                ) : (
+                  <>
+                    <p>No hay variables registradas en este momento.</p>
+                    {onOpenCompanyData && (
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary btn-sm"
+                        style={{ marginTop: '8px', fontSize: '12px' }}
+                        onClick={onOpenCompanyData}
+                      >
+                        Gestionar datos de empresa
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </div>
