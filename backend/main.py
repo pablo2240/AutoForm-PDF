@@ -1958,10 +1958,23 @@ def update_commercial_profile(
     if dto.tipo_documento is not None: profile.tipo_documento = dto.tipo_documento
     if dto.documento_identidad is not None: profile.documento_identidad = dto.documento_identidad.strip()
     if dto.is_active is not None and current_user.role == "admin": profile.is_active = dto.is_active
-    if dto.role is not None and current_user.role == "admin": profile.role = dto.role
-    if dto.password: profile.password_hash = hash_password(dto.password)
-
-    profile.last_modified_by_ip = request.client.host if request.client else None
+    if dto.password:
+        profile.password_hash = hash_password(dto.password)
+        try:
+            admin_client = get_supabase_admin_client()
+            if admin_client:
+                try:
+                    admin_client.auth.admin.update_user_by_id(profile.id, {"password": dto.password})
+                except Exception:
+                    try:
+                        for u in admin_client.auth.admin.list_users(page=1, per_page=1000):
+                            if (u.email or "").lower() == profile.email.lower():
+                                admin_client.auth.admin.update_user_by_id(u.id, {"password": dto.password})
+                                break
+                    except Exception as e_supa:
+                        print(f"[WARN] Error actualizando clave en Supabase Auth: {e_supa}")
+        except Exception:
+            pass
     db.commit()
     db.refresh(profile)
     return CommercialProfileAdminDTO(**profile.to_admin_dict())
