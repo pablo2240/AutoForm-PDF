@@ -5,7 +5,8 @@ import type {
   CategorizedCompanyData, 
   CompanyFieldItem, 
   EmployerProfile,
-  GlobalSignature 
+  GlobalSignature,
+  CommercialProfilePublic
 } from '../../types';
 import { DataEntryPanel } from './DataEntryPanel';
 import { DataAccordionViewer } from './DataAccordionViewer';
@@ -18,6 +19,8 @@ interface DataManagerModalProps {
   initialCategorizedCompany?: CategorizedCompanyData;
   initialEmployerProfiles?: EmployerProfile[];
   globalSignature: GlobalSignature | null;
+  commercialProfiles?: CommercialProfilePublic[];
+  onCommercialProfileCreated?: () => void;
   onSaveData: (
     flatData: CompanyData, 
     categorized: CategorizedCompanyData, 
@@ -159,6 +162,8 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   initialCategorizedCompany,
   initialEmployerProfiles,
   globalSignature,
+  commercialProfiles = [],
+  onCommercialProfileCreated,
   onSaveData,
 }) => {
   const [categorizedCompany, setCategorizedCompany] = useState<CategorizedCompanyData>(() => {
@@ -353,6 +358,9 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
             <DataEntryPanel
               onSaveCompanyField={handleSaveCompanyField}
               onSaveEmployerProfile={handleSaveEmployerProfile}
+              commercialProfiles={commercialProfiles}
+              companyData={initialCompanyData}
+              onCommercialProfileCreated={onCommercialProfileCreated}
             />
           </div>
 

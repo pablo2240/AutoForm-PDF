@@ -8,6 +8,7 @@ import uuid
 import secrets
 import hashlib
 import traceback
+import unicodedata
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from sqlalchemy import func
@@ -15,7 +16,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -884,8 +885,8 @@ def resolve_commercial_profile(commercial_profile_id: Optional[str], token: Opti
     finally:
         db.close()
 
-def get_current_admin_user(request: Request, db = Depends(get_db)):
-    """Verifies HttpOnly cookie session or Authorization header for admin access."""
+def get_current_authenticated_profile(request: Request, db = Depends(get_db)) -> CommercialProfile:
+    """Verifies HttpOnly cookie session or Authorization header for authenticated user access."""
     token = request.cookies.get("admin_session")
     if not token:
         auth_header = request.headers.get("Authorization", "")
@@ -893,7 +894,7 @@ def get_current_admin_user(request: Request, db = Depends(get_db)):
             token = auth_header.split(" ", 1)[1]
 
     if not token:
-        raise HTTPException(status_code=401, detail="Sesión administrativa no encontrada o credenciales requeridas.")
+        raise HTTPException(status_code=401, detail="Sesión no encontrada o credenciales requeridas.")
 
     payload = None
     try:
@@ -909,9 +910,6 @@ def get_current_admin_user(request: Request, db = Depends(get_db)):
     if not payload:
         raise HTTPException(status_code=401, detail="Sesión expirada o token inválido.")
 
-    if payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Acceso denegado: se requieren permisos de administrador.")
-
     email = payload["email"]
     user = db.query(CommercialProfile).filter(
         CommercialProfile.email.ilike(email),
@@ -921,13 +919,19 @@ def get_current_admin_user(request: Request, db = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo.")
     return user
 
+def get_current_admin_user(request: Request, db = Depends(get_db)):
+    """Verifies HttpOnly cookie session or Authorization header for admin access."""
+    user = get_current_authenticated_profile(request, db)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Acceso denegado: se requieren permisos de administrador.")
+    return user
+
 @app.get("/api/commercial-profiles")
 def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
     """
     Retorna catálogo público de perfiles comerciales activos.
     Si se presenta un token de Supabase y la RPC retorna perfiles (> 0), los retorna respetando RLS.
-    Si no, consulta SQLite. Si el usuario autenticado es un asesor comercial (no admin),
-    retorna su propio perfil comercial para garantizar la visualización y preselección inmediata.
+    Si no, consulta SQLite y retorna todos los perfiles comerciales activos para selección y autollenado.
     """
     token = request.cookies.get("admin_session")
     auth_header = request.headers.get("Authorization", "")
@@ -952,33 +956,8 @@ def list_commercial_profiles_public(request: Request, db = Depends(get_db)):
         except Exception:
             pass
 
-    user_email = None
-    user_role = None
-
-    if token:
-        try:
-            supa_payload = decode_supabase_jwt(token)
-            user_email = (supa_payload.get("email") or "").lower()
-            user_role = (supa_payload.get("app_metadata") or {}).get("role") or supa_payload.get("role")
-        except Exception:
-            pass
-
-        if not user_email:
-            session_payload = verify_session_token(token)
-            if session_payload:
-                user_email = (session_payload.get("email") or "").lower()
-                user_role = session_payload.get("role")
-
     query = db.query(CommercialProfile).filter(CommercialProfile.is_active == True)
-
-    # Si es comercial (no admin) y tenemos su email, retornamos su perfil
-    if user_role and user_role != "admin" and user_email:
-        user_rows = query.filter(CommercialProfile.email.ilike(user_email)).all()
-        if user_rows:
-            return [CommercialProfilePublicDTO(**r.to_public_dict()) for r in user_rows]
-
-    # Para administradores o usuarios generales
-    rows = query.all()
+    rows = query.order_by(CommercialProfile.profile_name.asc()).all()
     return [CommercialProfilePublicDTO(**r.to_public_dict()) for r in rows]
 
 # ==============================================================================
@@ -1870,7 +1849,7 @@ def reset_password(dto: ResetPasswordRequestDTO, db = Depends(get_db)):
 @app.get("/api/auth/check")
 def admin_check(request: Request, db = Depends(get_db)):
     try:
-        user = get_current_admin_user(request, db)
+        user = get_current_authenticated_profile(request, db)
         return {
             "authenticated": True,
             "id": str(user.id),
@@ -1891,9 +1870,7 @@ def admin_logout(response: Response):
     return {"status": "success", "message": "Sesión cerrada"}
 
 @app.get("/api/admin/commercial-profiles", response_model=List[CommercialProfileAdminDTO])
-def list_commercial_profiles_admin(current_user: CommercialProfile = Depends(get_current_admin_user), db = Depends(get_db)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Solo administradores tienen acceso a la gestión de responsables comerciales.")
+def list_commercial_profiles_admin(current_user: CommercialProfile = Depends(get_current_authenticated_profile), db = Depends(get_db)):
     rows = db.query(CommercialProfile).order_by(CommercialProfile.created_at.desc()).all()
     return [CommercialProfileAdminDTO(**r.to_admin_dict()) for r in rows]
 
@@ -1901,18 +1878,16 @@ def list_commercial_profiles_admin(current_user: CommercialProfile = Depends(get
 def create_commercial_profile(
     dto: CommercialProfileCreateDTO,
     request: Request,
-    current_user: CommercialProfile = Depends(get_current_admin_user),
+    current_user: CommercialProfile = Depends(get_current_authenticated_profile),
     db = Depends(get_db)
 ):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Solo administradores pueden registrar nuevos perfiles comerciales.")
-
     existing = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(dto.email.strip())).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Ya existe un perfil con el correo {dto.email}")
 
     client_ip = request.client.host if request.client else None
     pwd_hash = hash_password(dto.password) if dto.password else None
+    assigned_role = dto.role if (current_user.role == "admin" and dto.role) else "commercial"
     new_profile = CommercialProfile(
         profile_name=dto.profile_name.strip(),
         nombre=dto.nombre.strip(),
@@ -1923,7 +1898,7 @@ def create_commercial_profile(
         ciudad=dto.ciudad.strip() if dto.ciudad else None,
         tipo_documento=dto.tipo_documento or "C.C",
         documento_identidad=dto.documento_identidad.strip() if dto.documento_identidad else None,
-        role=dto.role or "commercial",
+        role=assigned_role or "commercial",
         password_hash=pwd_hash,
         last_modified_by_ip=client_ip
     )
@@ -1937,7 +1912,7 @@ def update_commercial_profile(
     profile_id: str,
     dto: CommercialProfileUpdateDTO,
     request: Request,
-    current_user: CommercialProfile = Depends(get_current_admin_user),
+    current_user: CommercialProfile = Depends(get_current_authenticated_profile),
     db = Depends(get_db)
 ):
     profile = db.query(CommercialProfile).filter(CommercialProfile.id == profile_id).first()
@@ -1995,6 +1970,182 @@ def delete_commercial_profile(
     return {"status": "success", "message": f"Perfil {profile.profile_name} desactivado."}
 
 
+def normalize_form_tokens(text: str) -> Set[str]:
+    if not text:
+        return set()
+    t = text.lower()
+    if t.endswith(".pdf"):
+        t = t[:-4]
+    t = t.replace("\ufffd", " ")
+    t = unicodedata.normalize("NFKD", t)
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    tokens = set(re.findall(r"[a-z0-9]+", t))
+    return {tok for tok in tokens if len(tok) > 1 or tok.isdigit()}
+
+
+def match_template_score(tokens_a: Set[str], tokens_b: Set[str]) -> float:
+    if not tokens_a or not tokens_b:
+        return 0.0
+    matches = 0
+    for ta in tokens_a:
+        for tb in tokens_b:
+            if ta == tb or (len(ta) >= 5 and len(tb) >= 5 and (ta.startswith(tb) or tb.startswith(ta))):
+                matches += 1
+                break
+    return matches / max(len(tokens_a), len(tokens_b))
+
+
+def resolve_or_provision_template_version(
+    template_code: str,
+    filename: Optional[str] = None,
+    company_id: Optional[str] = None,
+    admin_client: Optional[Any] = None,
+    user_id: Optional[str] = None,
+    page_count: int = 1,
+    is_acroform: bool = False,
+) -> Dict[str, Any]:
+    """
+    Resuelve el template_id institucional y template_version_id publicado para una plantilla dada.
+    Soporta:
+      1. Búsqueda exacta y coincidencia semántica/difusa tolerante a tildes, códigos y codificaciones.
+      2. Si la plantilla existe en pdf_templates, obtiene la última versión 'published' en pdf_template_versions.
+      3. Si no existe y se cuenta con admin_client y company_id, auto-aprovisiona la plantilla y su versión publicada.
+    """
+    default_result = {
+        "is_institutional": False,
+        "pdf_template_id": None,
+        "template_version_id": None,
+        "version": 1,
+    }
+
+    if not admin_client or not company_id or company_id == "local_company":
+        return default_result
+
+    clean_name = filename[:-4] if (filename and filename.lower().endswith(".pdf")) else (filename or template_code or "")
+
+    try:
+        res = (
+            admin_client.table("pdf_templates")
+            .select("id, codigo, nombre, is_active")
+            .eq("company_id", company_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        db_templates = res.data or []
+
+        matched_template = None
+        best_score = 0.0
+
+        # 1. Intentar coincidencia exacta directa
+        for t in db_templates:
+            t_cod = t.get("codigo") or ""
+            t_nom = t.get("nombre") or ""
+            if template_code in (t_cod, t_nom) or clean_name in (t_cod, t_nom):
+                matched_template = t
+                best_score = 1.0
+                break
+
+        # 2. Coincidencia tokenizada / semántica tolerante a acentos y reemplazos Unicode
+        if not matched_template and db_templates:
+            code_tokens = normalize_form_tokens(template_code)
+            name_tokens = normalize_form_tokens(clean_name)
+            target_tokens = code_tokens | name_tokens
+
+            for t in db_templates:
+                t_cod = t.get("codigo") or ""
+                t_nom = t.get("nombre") or ""
+                c_score = match_template_score(target_tokens, normalize_form_tokens(t_cod))
+                n_score = match_template_score(target_tokens, normalize_form_tokens(t_nom))
+                score = max(c_score, n_score)
+                if score > best_score:
+                    best_score = score
+                    matched_template = t
+
+            if best_score < 0.6:
+                matched_template = None
+
+        # 3. Si encontramos plantilla existente, resolver su versión publicada
+        if matched_template:
+            t_id = matched_template["id"]
+            v_res = (
+                admin_client.table("pdf_template_versions")
+                .select("id, version, status, is_active")
+                .eq("template_id", t_id)
+                .eq("status", "published")
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if v_res.data:
+                ver = v_res.data[0]
+                return {
+                    "is_institutional": True,
+                    "pdf_template_id": t_id,
+                    "template_version_id": ver["id"],
+                    "version": ver.get("version", 1),
+                }
+
+            # Si existe la plantilla pero su versión no está publicada, buscar versión activa
+            v_active = (
+                admin_client.table("pdf_template_versions")
+                .select("id, version, status")
+                .eq("template_id", t_id)
+                .eq("is_active", True)
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if v_active.data:
+                ver = v_active.data[0]
+                admin_client.table("pdf_template_versions").update({"status": "published"}).eq("id", ver["id"]).execute()
+                return {
+                    "is_institutional": True,
+                    "pdf_template_id": t_id,
+                    "template_version_id": ver["id"],
+                    "version": ver.get("version", 1),
+                }
+
+        # 4. Si no existe en pdf_templates, auto-aprovisionar para el usuario/compañía
+        safe_code = re.sub(r"[^A-Za-z0-9_-]", "_", clean_name)[:100].upper()
+        if not safe_code:
+            safe_code = f"TMPL_{uuid.uuid4().hex[:8].upper()}"
+
+        new_tpl = admin_client.table("pdf_templates").insert({
+            "company_id": company_id,
+            "codigo": safe_code,
+            "nombre": clean_name[:150] or safe_code,
+            "is_active": True
+        }).execute()
+
+        if new_tpl.data and len(new_tpl.data) > 0:
+            new_tpl_id = new_tpl.data[0]["id"]
+            created_by_uuid = user_id if (user_id and len(user_id) == 36) else None
+            new_ver = admin_client.table("pdf_template_versions").insert({
+                "template_id": new_tpl_id,
+                "version": 1,
+                "filename": filename or f"{clean_name}.pdf",
+                "storage_path": f"{company_id}/templates/{new_tpl_id}/v1/{filename or clean_name + '.pdf'}",
+                "page_count": page_count,
+                "is_acroform": is_acroform,
+                "is_active": True,
+                "status": "published",
+                "created_by": created_by_uuid
+            }).execute()
+
+            if new_ver.data and len(new_ver.data) > 0:
+                return {
+                    "is_institutional": False,
+                    "pdf_template_id": new_tpl_id,
+                    "template_version_id": new_ver.data[0]["id"],
+                    "version": 1,
+                }
+
+    except Exception as e:
+        print(f"[WARN] Error in resolve_or_provision_template_version: {e}")
+
+    return default_result
+
+
 @app.get("/api/templates")
 def list_templates(user: Dict[str, Any] = Depends(get_current_user)):
     user_id = str(user["id"])
@@ -2045,16 +2196,27 @@ def list_templates(user: Dict[str, Any] = Depends(get_current_user)):
         filename = active_doc.get("filename", f"{template_code}.pdf")
         size_kb = float(active_doc.get("size_kb") or 0.0)
 
+        res_info = resolve_or_provision_template_version(
+            template_code=template_code,
+            filename=filename,
+            company_id=company_id,
+            admin_client=admin_client,
+            user_id=user_id,
+            page_count=1,
+            is_acroform=False
+        )
+
         templates.append({
             "id": template_code,
             "document_id": doc_id,
-            "template_id": doc_id,
+            "template_id": res_info.get("pdf_template_id") or doc_id,
             "template_code": template_code,
             "filename": filename,
             "size_kb": size_kb,
             "is_active": True,
-            "template_version_id": None,
-            "version": 1
+            "template_version_id": res_info.get("template_version_id"),
+            "version": res_info.get("version", 1),
+            "is_institutional": res_info.get("is_institutional", False)
         })
         active_slot = {
             "template_id": template_code,
@@ -2285,39 +2447,30 @@ async def upload_pdf(
     except Exception as e:
         print(f"[WARN] Error writing user local cache: {e}")
 
-    # 7. Vinculación pasiva con plantillas institucionales (ADR-0011 Sección 8)
-    is_institutional = False
-    institutional_id = None
-    if admin_client and company_id:
-        try:
-            tmpl_res = (
-                admin_client.table("pdf_templates")
-                .select("id,codigo,nombre")
-                .eq("company_id", company_id)
-                .eq("codigo", template_code)
-                .eq("is_active", True)
-                .limit(1)
-                .execute()
-            )
-            if tmpl_res.data:
-                is_institutional = True
-                institutional_id = tmpl_res.data[0]["id"]
-        except Exception as e:
-            print(f"[WARN] Error checking institutional template: {e}")
+    # 7. Vinculación autoritativa con plantillas institucionales o aprovisionamiento (ADR-0011)
+    res_info = resolve_or_provision_template_version(
+        template_code=template_code,
+        filename=file.filename,
+        company_id=company_id,
+        admin_client=admin_client,
+        user_id=user_id,
+        page_count=page_count,
+        is_acroform=is_acroform
+    )
 
     # 8. Respuesta al frontend
     return {
         "status": "success",
         "template_id": template_code,
         "document_id": new_doc_id,
-        "pdf_template_id": institutional_id,
-        "template_version_id": None,
-        "version": 1,
+        "pdf_template_id": res_info.get("pdf_template_id"),
+        "template_version_id": res_info.get("template_version_id"),
+        "version": res_info.get("version", 1),
         "filename": file.filename,
         "size_kb": size_kb,
         "page_count": page_count,
         "is_acroform": is_acroform,
-        "is_institutional": is_institutional,
+        "is_institutional": res_info.get("is_institutional", False),
         "is_active": True
     }
 
@@ -2613,8 +2766,25 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
     company_id = str(user.get("company_id") or "local_company")
     user_client = user.get("user_client")
 
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception as e:
+        print(f"[WARN] generate_pdf admin_client error: {e}")
+
+    target_version_id = req.template_version_id
+    if not target_version_id and admin_client and company_id and company_id != "local_company":
+        res_info = resolve_or_provision_template_version(
+            template_code=req.template_id,
+            filename=None,
+            company_id=company_id,
+            admin_client=admin_client,
+            user_id=user_id
+        )
+        target_version_id = res_info.get("template_version_id")
+
     if APP_ENVIRONMENT == "production":
-        if not req.template_version_id:
+        if not target_version_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="En entorno de producción se exige template_version_id para registrar el ciclo de llenado."
@@ -2625,18 +2795,20 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
 
     history_id = None
     user_client = None
-    if supabase_user and req.template_version_id:
+    if token and supabase_user and target_version_id:
         try:
             user_client = get_supabase_user_client(token)
             comm_prof_id = None if req.commercial_profile_id in ("legal_rep_only", None, "null", "None") else req.commercial_profile_id
             start_res = user_client.rpc("start_form_fill", {
-                "p_template_version_id": req.template_version_id,
+                "p_template_version_id": target_version_id,
                 "p_commercial_profile_id": comm_prof_id,
                 "p_metadata": {"is_temporary": req.is_temporary, "template_id": req.template_id}
             }).execute()
             history_id = start_res.data
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
+            if APP_ENVIRONMENT == "production":
+                raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
+            print(f"[WARN] start_form_fill failed in {APP_ENVIRONMENT}: {e}")
 
     if APP_ENVIRONMENT == "production" and not history_id:
         raise HTTPException(status_code=500, detail="Fallo al registrar historial de llenado en Supabase.")
@@ -2827,39 +2999,50 @@ def ai_fill_pdf(req: AiFillRequest, user: Dict[str, Any] = Depends(get_current_u
     company_id = str(user.get("company_id") or "local_company")
     user_client = user.get("user_client")
 
-    if APP_ENVIRONMENT == "production":
-        if not req.template_version_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="En entorno de producción se exige template_version_id para registrar el ciclo de autollenado."
-            )
-
     # 0. Enforce conscious selection and resolve commercial profile (ADR-0008)
     resolved_cp = resolve_commercial_profile(req.commercial_profile_id, token=token)
-
-    history_id = None
-    user_client = None
-    if supabase_user and req.template_version_id:
-        try:
-            user_client = get_supabase_user_client(token)
-            comm_prof_id = None if req.commercial_profile_id in ("legal_rep_only", None, "null", "None") else req.commercial_profile_id
-            start_res = user_client.rpc("start_form_fill", {
-                "p_template_version_id": req.template_version_id,
-                "p_commercial_profile_id": comm_prof_id,
-                "p_metadata": {"mode": "ai-fill", "template_id": req.template_id}
-            }).execute()
-            history_id = start_res.data
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
-
-    if APP_ENVIRONMENT == "production" and not history_id:
-        raise HTTPException(status_code=500, detail="Fallo al registrar historial de autollenado en Supabase.")
 
     # 1. Locate input PDF (strictly owner-isolated)
     template_id = req.template_id
     pdf_path = resolve_user_pdf_path(user_id, template_id, company_id=company_id)
     if not pdf_path or not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail=f"Input PDF '{template_id}' not found")
+
+    admin_client = None
+    try:
+        admin_client = get_supabase_admin_client()
+    except Exception as e:
+        print(f"[WARN] ai_fill admin_client error: {e}")
+
+    target_version_id = req.template_version_id
+    if not target_version_id and admin_client and company_id and company_id != "local_company":
+        res_info = resolve_or_provision_template_version(
+            template_code=req.template_id,
+            filename=None,
+            company_id=company_id,
+            admin_client=admin_client,
+            user_id=user_id
+        )
+        target_version_id = res_info.get("template_version_id")
+
+    history_id = None
+    if token and supabase_user and target_version_id:
+        try:
+            user_client = get_supabase_user_client(token)
+            comm_prof_id = None if req.commercial_profile_id in ("legal_rep_only", None, "null", "None") else req.commercial_profile_id
+            start_res = user_client.rpc("start_form_fill", {
+                "p_template_version_id": target_version_id,
+                "p_commercial_profile_id": comm_prof_id,
+                "p_metadata": {"mode": "ai-fill", "template_id": req.template_id}
+            }).execute()
+            history_id = start_res.data
+        except Exception as e:
+            if APP_ENVIRONMENT == "production":
+                raise HTTPException(status_code=400, detail=f"Error al iniciar ciclo de llenado en Supabase: {str(e)}")
+            print(f"[WARN] start_form_fill failed in {APP_ENVIRONMENT}: {e}")
+
+    if APP_ENVIRONMENT == "production" and not history_id:
+        raise HTTPException(status_code=500, detail="Fallo al registrar historial de autollenado en Supabase.")
 
     # 2. Load company data (enforcing Supabase in production)
     company_data = load_company_data_for_generation(supabase_user, user_client)

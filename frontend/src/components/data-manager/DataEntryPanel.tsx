@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import type { CompanyCategory, CompanyFieldItem, EmployerProfile, CustomFieldItem } from '../../types';
+import { createCommercialProfile } from '../../api';
+import type { 
+  CompanyCategory, 
+  CompanyFieldItem, 
+  EmployerProfile, 
+  CustomFieldItem,
+  CommercialProfilePublic,
+  CompanyData
+} from '../../types';
 import { 
   Building2, 
   UserPlus, 
@@ -8,12 +16,16 @@ import {
   Save, 
   Sparkles, 
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  UserCheck
 } from 'lucide-react';
 
 interface DataEntryPanelProps {
   onSaveCompanyField: (field: Omit<CompanyFieldItem, 'id'>) => void;
   onSaveEmployerProfile: (profile: Omit<EmployerProfile, 'id'>) => void;
+  commercialProfiles?: CommercialProfilePublic[];
+  companyData?: CompanyData;
+  onCommercialProfileCreated?: () => void;
 }
 
 const CATEGORY_OPTIONS: { id: CompanyCategory; label: string; icon: string }[] = [
@@ -35,6 +47,9 @@ const SUGGESTED_COMPANY_FIELDS: Record<CompanyCategory, string[]> = {
 export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
   onSaveCompanyField,
   onSaveEmployerProfile,
+  commercialProfiles = [],
+  companyData = {},
+  onCommercialProfileCreated,
 }) => {
   // Mode: 'company' | 'profile'
   const [recordType, setRecordType] = useState<'company' | 'profile'>('company');
@@ -45,6 +60,8 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
   const [companyFieldValue, setCompanyFieldValue] = useState<string>('');
 
   // State for Option B: Employer Profile
+  const [selectedResponsableId, setSelectedResponsableId] = useState<string>('');
+  const [syncAsCommercial, setSyncAsCommercial] = useState<boolean>(true);
   const [profileName, setProfileName] = useState<string>('');
   const [nombre, setNombre] = useState<string>('');
   const [apellido, setApellido] = useState<string>('');
@@ -58,6 +75,68 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
     setFeedback({ message, type });
     setTimeout(() => setFeedback(null), 3000);
+  };
+
+  const handleResponsableChange = (responsableId: string) => {
+    setSelectedResponsableId(responsableId);
+    if (!responsableId) {
+      return;
+    }
+
+    if (responsableId === 'legal_rep') {
+      const repNombre = String(companyData['representante_nombre'] || 'Guillermo Humberto');
+      const repApellido = String(companyData['representante_apellido'] || 'Cañón Sarria');
+      const repFull = String(companyData['representante_legal'] || `${repNombre} ${repApellido}`.trim());
+      const repEmail = String(companyData['correo_rep'] || companyData['email'] || 'guillermo.canon@iaclatam.com');
+      const repCel = String(companyData['celular_rep'] || companyData['telefono'] || '3104120217');
+      const repCedula = String(companyData['numero_cedula'] || '98555384');
+      const repTipoDoc = String(companyData['tipo_documento'] || 'C.C');
+      const repCiudad = String(companyData['lugar_expedicion_rep'] || companyData['ciudad'] || 'Envigado');
+
+      setProfileName(`Representante Legal (${repFull})`);
+      setNombre(repNombre);
+      setApellido(repApellido);
+      setEmail(repEmail);
+      setCelular(repCel);
+
+      const fields: { key: string; value: string }[] = [
+        { key: 'Cargo', value: 'Representante Legal' },
+        { key: 'Tipo Documento', value: repTipoDoc },
+        { key: 'Cédula', value: repCedula },
+      ];
+      if (repCiudad) {
+        fields.push({ key: 'Ciudad Expedición', value: repCiudad });
+      }
+      setCustomFields(fields);
+      showNotification(`Datos del Representante Legal (${repFull}) cargados. Puedes editarlos antes de guardar.`);
+      return;
+    }
+
+    const found = commercialProfiles.find((p) => p.id === responsableId);
+    if (found) {
+      const pName = found.profile_name || `${found.nombre || ''} ${found.apellido || ''}`.trim() || 'Responsable Comercial';
+      setProfileName(pName);
+      setNombre(found.nombre || '');
+      setApellido(found.apellido || '');
+      setEmail(found.email || '');
+      setCelular(found.celular || '');
+
+      const fields: { key: string; value: string }[] = [];
+      if (found.cargo) {
+        fields.push({ key: 'Cargo', value: found.cargo });
+      }
+      if (found.tipo_documento && found.documento_identidad) {
+        fields.push({ key: 'Tipo Documento', value: found.tipo_documento });
+        fields.push({ key: 'Documento', value: found.documento_identidad });
+      } else if (found.documento_identidad) {
+        fields.push({ key: 'Documento', value: found.documento_identidad });
+      }
+      if (found.ciudad) {
+        fields.push({ key: 'Ciudad', value: found.ciudad });
+      }
+      setCustomFields(fields);
+      showNotification(`Datos de ${pName} cargados. Puedes editarlos antes de guardar.`);
+    }
   };
 
   // Handle Submit Option A (Company)
@@ -86,7 +165,7 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
   };
 
   // Handle Submit Option B (Employer Profile)
-  const handleProfileSubmit = (e: React.FormEvent) => {
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanProfileName = profileName.trim();
 
@@ -117,14 +196,40 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
       customFields: filteredCustomFields,
     });
 
+    if (syncAsCommercial) {
+      const emailValue = email.trim().toLowerCase() || `${cleanProfileName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}@iaclatam.com`;
+      const cargoField = filteredCustomFields.find(f => f.key.toLowerCase().includes('cargo'));
+      const docField = filteredCustomFields.find(f => f.key.toLowerCase().includes('cedula') || f.key.toLowerCase().includes('documento'));
+
+      try {
+        await createCommercialProfile({
+          profile_name: cleanProfileName,
+          nombre: nombre.trim() || cleanProfileName,
+          apellido: apellido.trim() || '',
+          cargo: cargoField?.value || 'Comercial',
+          email: emailValue,
+          celular: celular.trim() || '3000000000',
+          documento_identidad: docField?.value || '',
+          role: 'commercial',
+          is_active: true,
+        });
+        if (onCommercialProfileCreated) {
+          onCommercialProfileCreated();
+        }
+      } catch (err: any) {
+        console.warn('[DataEntryPanel] Perfil comercial ya existía o fallo de sincronización:', err);
+      }
+    }
+
     // Reset Form
+    setSelectedResponsableId('');
     setProfileName('');
     setNombre('');
     setApellido('');
     setEmail('');
     setCelular('');
     setCustomFields([]);
-    showNotification(`Perfil "${cleanProfileName}" creado exitosamente.`);
+    showNotification(`Perfil "${cleanProfileName}" creado${syncAsCommercial ? ' y agregado como seleccionador en la barra' : ''}.`);
   };
 
   const handleAddCustomField = () => {
@@ -256,6 +361,41 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
       ) : (
         /* OPTION B: Employer Profile Form */
         <form onSubmit={handleProfileSubmit} className="entry-form-container">
+          {/* Selector de Responsable Existente */}
+          <div className="form-group responsable-select-group">
+            <label className="form-label" htmlFor="select-responsable">
+              <span className="responsable-badge-label">
+                <UserCheck size={15} />
+                Seleccionar Responsable Existente
+              </span>
+            </label>
+            <select
+              id="select-responsable"
+              className="form-input form-select highlight-select"
+              value={selectedResponsableId}
+              onChange={(e) => handleResponsableChange(e.target.value)}
+            >
+              <option value="">-- Seleccionar responsable o ingresar manual --</option>
+              <optgroup label="Representación Legal Corporativa">
+                <option value="legal_rep">
+                  ⚖️ Representante Legal ({companyData['representante_legal'] || 'Guillermo Humberto Cañón Sarria'})
+                </option>
+              </optgroup>
+              {commercialProfiles && commercialProfiles.length > 0 && (
+                <optgroup label="Responsables Comerciales Registrados">
+                  {commercialProfiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      👤 {p.profile_name} ({p.cargo || 'Comercial'})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <span className="form-help-text">
+              Autocompleta nombre, contacto y cargo desde la base corporativa o comercial.
+            </span>
+          </div>
+
           <div className="form-group">
             <label className="form-label" htmlFor="profile-name">
               Nombre del Perfil <span className="req">*</span>
@@ -360,6 +500,26 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
                 </button>
               </div>
             ))}
+          </div>
+
+          {/* Sincronización automática como seleccionador */}
+          <div className="form-group sync-commercial-group">
+            <label className="checkbox-sync-container">
+              <input
+                type="checkbox"
+                checked={syncAsCommercial}
+                onChange={(e) => setSyncAsCommercial(e.target.checked)}
+              />
+              <div className="sync-text-group">
+                <span className="sync-title">
+                  <UserPlus size={14} className="sync-icon" />
+                  Agregar como seleccionador en la barra superior (sin cuenta activa)
+                </span>
+                <span className="sync-sub">
+                  Aparecerá en el selector de Carlos y demás usuarios para diligenciar formularios, sin necesidad de contraseña.
+                </span>
+              </div>
+            </label>
           </div>
 
           <button

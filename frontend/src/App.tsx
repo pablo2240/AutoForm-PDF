@@ -169,54 +169,65 @@ export const App: React.FC = () => {
   };
 
   // Filter commercial profiles:
-  // Each authenticated user (including Kelly and Guillermo) ONLY sees their own profile.
+  // Shows all active commercial profiles for corporation/incorporation workflow,
+  // ensuring the authenticated user's profile is always included.
   const visibleCommercialProfiles: CommercialProfilePublic[] = useMemo(() => {
     if (!currentUser) {
       return [];
     }
 
+    const activeProfiles = commercialProfiles.filter((p: CommercialProfilePublic) => p.is_active !== false);
+
     const normEmail = (currentUser.email || '').trim().toLowerCase();
-    const normName = (currentUser.profile_name || currentUser.display_name || `${currentUser.nombre || ''} ${currentUser.apellido || ''}`).trim().toLowerCase();
+    const hasCurrentUser = activeProfiles.some((p) => 
+      (p.id && currentUser.id && p.id === currentUser.id) ||
+      (p.email && normEmail && p.email.trim().toLowerCase() === normEmail)
+    );
 
-    // Match user's own profile by ID, email or name
-    const filtered = commercialProfiles.filter((p: CommercialProfilePublic) => {
-      if (p.id && currentUser.id && p.id === currentUser.id) return true;
-      if (p.email && normEmail && p.email.trim().toLowerCase() === normEmail) return true;
-      if (p.profile_name && normName && p.profile_name.trim().toLowerCase() === normName) return true;
-      return false;
-    });
-
-    // Fallback autoritativo si el catálogo aún está cargando o no contiene el perfil
-    if (filtered.length === 0 && (currentUser.email || currentUser.id)) {
+    if (!hasCurrentUser && (currentUser.email || currentUser.id)) {
       const nombre = currentUser.nombre || '';
       const apellido = currentUser.apellido || '';
       const fallbackName = currentUser.profile_name || currentUser.display_name || `${nombre} ${apellido}`.trim() || currentUser.email || 'Mi Perfil';
-      return [{
-        id: currentUser.id || 'current_user_profile',
-        profile_name: fallbackName,
-        nombre: nombre || fallbackName,
-        apellido: apellido,
-        cargo: currentUser.cargo || (currentUser.role === 'admin' ? 'Administración' : 'Comercial'),
-        email: currentUser.email || '',
-        celular: currentUser.celular || '',
-        ciudad: currentUser.ciudad || '',
-        role: currentUser.role || 'commercial',
-        is_active: true
-      }];
+      return [
+        {
+          id: currentUser.id || 'current_user_profile',
+          profile_name: fallbackName,
+          nombre: nombre || fallbackName,
+          apellido: apellido,
+          cargo: currentUser.cargo || (currentUser.role === 'admin' ? 'Administración' : 'Comercial'),
+          email: currentUser.email || '',
+          celular: currentUser.celular || '',
+          ciudad: currentUser.ciudad || '',
+          role: currentUser.role || 'commercial',
+          is_active: true
+        },
+        ...activeProfiles
+      ];
     }
 
-    return filtered;
+    return activeProfiles;
   }, [commercialProfiles, currentUser]);
 
-  // Auto-select user's own profile upon login/loading for everyone ("como defecto el perfil de cada uno para todos")
+  // Auto-select user's own profile by default upon login/loading ("como defecto el perfil de cada uno para todos")
   useEffect(() => {
     if (currentUser && visibleCommercialProfiles.length > 0) {
-      const myProfile = visibleCommercialProfiles[0];
+      const normEmail = (currentUser.email || '').trim().toLowerCase();
+      const normName = (currentUser.profile_name || currentUser.display_name || `${currentUser.nombre || ''} ${currentUser.apellido || ''}`).trim().toLowerCase();
+
+      // Encontrar el perfil del usuario activo para asignarlo como valor por defecto
+      const myProfile = visibleCommercialProfiles.find((p) => 
+        (p.id && currentUser.id && p.id === currentUser.id) ||
+        (p.email && normEmail && p.email.trim().toLowerCase() === normEmail) ||
+        (p.profile_name && normName && p.profile_name.trim().toLowerCase() === normName)
+      ) || visibleCommercialProfiles[0];
+
       const isCurrentSelectionValid = visibleCommercialProfiles.some((p) => p.id === activeCommercialProfileId) || activeCommercialProfileId === 'legal_rep_only';
 
       if (!activeCommercialProfileId || !isCurrentSelectionValid) {
-        setActiveCommercialProfileId(myProfile.id);
-        sessionStorage.setItem('active_commercial_profile_id', myProfile.id);
+        if (myProfile) {
+          setActiveCommercialProfileId(myProfile.id);
+          sessionStorage.setItem('active_commercial_profile_id', myProfile.id);
+        }
       }
     }
   }, [currentUser, visibleCommercialProfiles, activeCommercialProfileId]);
@@ -523,7 +534,17 @@ export const App: React.FC = () => {
       const res = await uploadPdfTemplate(file);
       setIsTemporarySession(isTemp);
       
-      const updatedTemplates = await fetchTemplates();
+      let updatedTemplates = await fetchTemplates().catch(() => []);
+      if (updatedTemplates.length === 0 && res.template_id) {
+        updatedTemplates = [{
+          id: res.template_id,
+          filename: res.filename,
+          size_kb: 0,
+          template_id: res.pdf_template_id || res.template_id,
+          template_version_id: res.template_version_id,
+          version: res.version || 1,
+        }];
+      }
       setTemplates(updatedTemplates);
       setSelectedTemplate(res.template_id);
       const storageKey = getActiveTemplateStorageKey(currentUser?.id);
@@ -759,18 +780,14 @@ export const App: React.FC = () => {
           (t: TemplateInfo) => t.id === selectedTemplate
       );
 
-      if (!selectedTemplateInfo?.template_version_id) {
-          throw new Error(
-              'La plantilla seleccionada no tiene una versión registrada en Supabase.'
-          );
-      }
+      const templateVersionId = selectedTemplateInfo?.template_version_id || undefined;
 
       const res = await generateFilledPdf(
           selectedTemplate,
           mappings,
           isTemp,
           activeCommercialProfileId,
-          selectedTemplateInfo.template_version_id
+          templateVersionId
       );
       
       setResultModalData({
@@ -812,16 +829,12 @@ export const App: React.FC = () => {
           (t) => t.id === selectedTemplate
       );
 
-      if (!selectedTemplateInfo?.template_version_id) {
-          throw new Error(
-              'La plantilla seleccionada no tiene una versión registrada en Supabase.'
-          );
-      }
+      const templateVersionId = selectedTemplateInfo?.template_version_id || undefined;
 
       const res = await aiFillPdf(
           selectedTemplate,
           activeCommercialProfileId,
-          selectedTemplateInfo.template_version_id
+          templateVersionId
       );
 
       setResultModalData({
@@ -960,9 +973,7 @@ export const App: React.FC = () => {
         activeCommercialProfileId={activeCommercialProfileId}
         onSelectCommercialProfile={handleSelectCommercialProfile}
         onOpenCommercialProfileAdmin={() => {
-          if (currentUser?.role === 'admin') {
-            setIsCommercialAdminModalOpen(true);
-          }
+          setIsCommercialAdminModalOpen(true);
         }}
         isLoadingCommercialProfiles={isLoadingCommercialProfiles}
         currentUser={currentUser}
@@ -1055,6 +1066,8 @@ export const App: React.FC = () => {
         initialCategorizedCompany={categorizedCompany}
         initialEmployerProfiles={employerProfiles}
         globalSignature={globalSignature}
+        commercialProfiles={visibleCommercialProfiles}
+        onCommercialProfileCreated={loadCommercialProfiles}
         onSaveData={handleSaveCompanyData}
       />
 

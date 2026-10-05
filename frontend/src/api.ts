@@ -51,7 +51,14 @@ export async function fetchTemplates(): Promise<TemplateInfo[]> {
   return data.templates;
 }
 
-export async function uploadPdfTemplate(file: File): Promise<{ template_id: string; filename: string }> {
+export async function uploadPdfTemplate(file: File): Promise<{
+  template_id: string;
+  filename: string;
+  template_version_id?: string;
+  pdf_template_id?: string;
+  version?: number;
+  is_institutional?: boolean;
+}> {
   const formData = new FormData();
   formData.append('file', file);
   const res = await authFetch(`${API_BASE}/api/upload-pdf`, {

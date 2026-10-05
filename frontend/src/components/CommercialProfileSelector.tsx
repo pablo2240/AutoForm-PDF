@@ -17,7 +17,6 @@ export const CommercialProfileSelector: React.FC<CommercialProfileSelectorProps>
   onSelectProfile,
   onOpenAdminModal,
   isLoading = false,
-  isAdmin = false,
 }) => {
   const isUnselected = !selectedProfileId;
 
@@ -60,16 +59,14 @@ export const CommercialProfileSelector: React.FC<CommercialProfileSelectorProps>
         )}
       </div>
 
-      {isAdmin && (
-        <button
-          type="button"
-          className="btn btn-secondary btn-icon-only btn-manage-profiles"
-          onClick={onOpenAdminModal}
-          title="Gestionar perfiles comerciales (Administración)"
-        >
-          <Settings size={15} />
-        </button>
-      )}
+      <button
+        type="button"
+        className="btn btn-secondary btn-icon-only btn-manage-profiles"
+        onClick={onOpenAdminModal}
+        title="Gestionar y agregar perfiles de responsables"
+      >
+        <Settings size={15} />
+      </button>
     </div>
   );
 };

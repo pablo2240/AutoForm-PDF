@@ -37,6 +37,8 @@ export interface CommercialProfilePublic {
   email: string;
   celular: string;
   ciudad?: string;
+  tipo_documento?: string;
+  documento_identidad?: string;
   role?: string;
   is_active: boolean;
 }
