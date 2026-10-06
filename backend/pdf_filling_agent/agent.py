@@ -479,9 +479,8 @@ class PDFAgent:
         if not profile:
             return {}
 
-        nit_val = str(profile.get("nit", "")).strip()
-        nit_base = nit_val[:-1] if len(nit_val) == 10 and nit_val.isdigit() else nit_val
-        nit_dv = nit_val[-1] if len(nit_val) == 10 and nit_val.isdigit() else "2"
+        nit_base, nit_dv = self._split_nit(profile)
+        nit_val = nit_base + nit_dv  # NIT as one token (company_data.json format), for forms without a DV box
         
         rep_full = str(profile.get("representante_legal", "Guillermo Humberto Cañón Sarria")).strip()
         rep_nombre = str(profile.get("representante_nombre", "Guillermo Humberto")).strip()
@@ -496,16 +495,8 @@ class PDFAgent:
 
         # ADR-0008: Commercial profile resolution
         cp = self.commercial_profile
-        if not cp and (profile.get("kelly_delgado_email") or profile.get("kelly_delgado_nombre")):
-            cp = {
-                "nombre": profile.get("kelly_delgado_nombre", "Kelly Yohana"),
-                "apellido": profile.get("kelly_delgado_apellido", "Delgado Macea"),
-                "profile_name": profile.get("kelly_delgado_nombre_completo", "Kelly Yohana Delgado Macea"),
-                "email": profile.get("kelly_delgado_email", "kelly.delgado@iaclatam.com"),
-                "celular": str(profile.get("kelly_delgado_celular", "3014750760")).replace(" ", ""),
-                "cargo": "Especialista Comercial / Licitaciones",
-                "documento_identidad": ""
-            }
+        if not cp:
+            cp = self._legal_rep_as_contact(profile)
         cp_nombre = f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() if cp else ""
         if not cp_nombre and cp:
             cp_nombre = cp.get("profile_name", "")
@@ -1013,7 +1004,7 @@ class PDFAgent:
             elif (
                 (
                     re.search(r'\b(numero\s+id|nro\s+id|no\s+id|num\s+id|numero\s+de\s+id|cedula|numero\s+de\s+documento|no\s+documento|no\s+identificacion|identificacion\s+no|tipo\s+de\s+identificacion\s+no)\b', eval_target) or 
-                    (eval_target.endswith(" no") and "res" not in eval_target and "municipio" not in eval_target and not eval_target.endswith(" no no"))
+                    (eval_target.endswith(" no") and "res" not in eval_target and "municipio" not in eval_target and not eval_target.endswith(" no no") and not re.search(r'\bsi\s+no$', eval_target))
                 )
                 and ("tipo" not in eval_target or "no" in eval_target or "numero" in eval_target)
                 and "res" not in eval_target
@@ -1227,6 +1218,36 @@ class PDFAgent:
         return mappings, force_blank_fields
 
 
+    @staticmethod
+    def _legal_rep_as_contact(profile: Dict[str, Any]) -> Dict[str, Any]:
+        """ADR-0008: with 'legal_rep_only' (no commercial profile) the legal representative is the contact."""
+        rep_full = str(profile.get("representante_legal") or "").strip()
+        return {
+            "nombre": str(profile.get("representante_nombre") or rep_full).strip(),
+            "apellido": str(profile.get("representante_apellido") or "").strip(),
+            "profile_name": rep_full,
+            "email": profile.get("correo_rep") or "",
+            "celular": str(profile.get("celular_rep") or "").replace(" ", ""),
+            "cargo": "Representante Legal",
+            "documento_identidad": "",
+        }
+
+    @staticmethod
+    def _split_nit(profile: Dict[str, Any]) -> tuple:
+        """(base, dv) from any NIT format: '8110047212', '811004721-2', or nit_digits + dv. DV is '' when unknown."""
+        raw = str(profile.get("nit") or "").strip()
+        digits = re.sub(r"\D", "", raw)
+        explicit_dv = re.sub(r"\D", "", str(profile.get("dv") or ""))
+        if explicit_dv:
+            base = re.sub(r"\D", "", str(profile.get("nit_digits") or "")) or (digits[:-len(explicit_dv)] if digits.endswith(explicit_dv) and len(digits) > len(explicit_dv) + 5 else digits)
+            return base, explicit_dv
+        if re.search(r"\d\s*-\s*\d$", raw):
+            base, dv = re.split(r"\s*-\s*", raw)[-2:]
+            return re.sub(r"\D", "", base), re.sub(r"\D", "", dv)
+        if len(digits) == 10:
+            return digits[:-1], digits[-1]
+        return digits, ""
+
     def _reference_context(self, rich_widgets: List[Dict[str, Any]], n_pages: int) -> Dict[str, Any]:
         """Classify the form against the reference library. Optional and never fatal: {} disables few-shot."""
         try:
@@ -1259,11 +1280,13 @@ class PDFAgent:
         doc = fitz.open(pdf_path)
         rich_widgets = self._extract_rich_acro_widgets(doc)
 
-        cp = self.commercial_profile
-        com_nombre = (f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() or cp.get("profile_name", "")) if cp else "Kelly Yohana Delgado Macea"
-        com_email = (cp.get("email") if cp else "") or "kelly.delgado@iaclatam.com"
-        com_celular = (str(cp.get("celular", "")).replace(" ", "") if cp else "") or "3014750760"
-        com_cargo = (cp.get("cargo") if cp else "") or "Especialista Comercial / Licitaciones"
+        legal_rep_only = not self.commercial_profile
+        cp = self.commercial_profile or self._legal_rep_as_contact(self.company_profile)
+        com_nombre = f"{cp.get('nombre', '')} {cp.get('apellido', '')}".strip() or cp.get("profile_name", "")
+        com_email = cp.get("email") or ""
+        com_celular = str(cp.get("celular", "")).replace(" ", "")
+        com_cargo = cp.get("cargo") or ""
+        contact_who = "los datos del Representante Legal (modo sólo representante legal, sin responsable comercial)" if legal_rep_only else "SIEMPRE los datos del Contacto Comercial en sesión"
         
         # 1. Deterministic high-confidence matches from dictionary
         deterministic_matches, det_force_blank = self._deterministic_acroform_match(rich_widgets)
@@ -1343,7 +1366,7 @@ CRITICAL RULES — READ CAREFULLY:
     - Si el formulario solicita 'NÚMERO DE IDENTIFICACIÓN' en contexto corporativo / Persona Jurídica / Información General, registrar el NIT de la empresa ({self.company_profile.get('nit')}), NUNCA la cédula del representante legal.
     - CONDICIÓN DE SUPRESIÓN TRANSVERSAL: Todo campo de 'LUGAR Y FECHA DE EXPEDICIÓN' o 'EXPEDICIÓN' en la sección corporativa / persona jurídica DEBE PERMANECER ESTRICTAMENTE VACÍO (no aplica expedición personal para el NIT).
 15. LUGAR Y FECHA DE EXPEDICIÓN DEL REPRESENTANTE LEGAL: En campos combinados 'LUGAR Y FECHA DE EXPEDICIÓN' del Representante Legal, asignar: '{self.company_profile.get('lugar_expedicion_rep', 'Envigado')} {self.company_profile.get('fecha_expedicion_rep', '26-06-1989')}'.
-16. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: Encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...' asignan SIEMPRE los datos del Contacto Comercial en sesión ({com_nombre}, {com_email}, {com_celular}, {com_cargo}), NUNCA los del Representante Legal.
+16. ENRUTAMIENTO DE CONTACTO COMERCIAL / CONTRAPARTE: Encabezados descriptivos tipo 'Relacione o indique a continuación la información del contacto o los datos de la persona que está a cargo de este proceso de relacionamiento o de contratación...' asignan {contact_who} ({com_nombre}, {com_email}, {com_celular}, {com_cargo}){'' if legal_rep_only else ', NUNCA los del Representante Legal'}.
 18. CAMPOS DE PERSONA NATURAL (PN): Dejar COMPLETAMENTE VACÍOS los campos etiquetados con 'Nombres y apellidos PN' o que contengan la sigla 'PN'. No escribir información allí cuando la entidad diligenciada es Persona Jurídica.
 19. FILAS SECUNDARIAS EN TABLAS: En cuadrículas o tablas (como el Anexo de Composición Accionaria), diligenciar ÚNICAMENTE la Fila 1. NUNCA diligenciar filas secundarias (dejar completamente vacías sin repetir la razón social).
 20. REGLA DE CONSISTENCIA CONTEXTUAL DE IDENTIFICACIÓN: Si en una fila o bloque se diligenció Persona Jurídica ('{self.company_profile.get('razon_social')}'), el campo subsiguiente de 'Identificación (NIT/CC)' asocia estrictamente el NIT ({self.company_profile.get('nit')}). Si se diligenció una persona natural ('{self.company_profile.get('representante_legal', 'Guillermo Humberto Cañón Sarria')}'), asocia su cédula de ciudadanía ({self.company_profile.get('numero_cedula', '98555384')}).

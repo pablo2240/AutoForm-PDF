@@ -26,7 +26,7 @@ def make_form(path, labels, section="1. INFORMACIÓN GENERAL"):
         page.insert_text((195 - fitz.get_text_length(text, fontsize=10), y + 12), text, fontsize=10)
         w = fitz.Widget()
         w.field_type = fitz.PDF_WIDGET_TYPE_TEXT
-        w.field_name = f"Text{i}"
+        w.field_name = f"Campo{i}"
         w.rect = fitz.Rect(220, y, 500, y + 16)
         page.add_widget(w)
         y += 34
