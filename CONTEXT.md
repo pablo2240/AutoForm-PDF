@@ -74,7 +74,7 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Blind Anti-Enumeration Response**: API design standard returning identical confirmation messages regardless of whether the requested email address exists in the system, preventing external user enumeration.
 
 ### Reference Library, Semantic Search & Dynamic Few-Shot (ADR-0013)
-- **Reference Library (`referencias/pdf/<familia>/`)**: Folder of example forms that is the source of truth for reusable knowledge. `sync` mirrors it into a derived SQLite cache (SHA-256 change detection); the sub-folder name is the form family unless `referencias/manifest.json` overrides it.
+- **Reference Library (`docs/referencias/`)**: Folder of example forms that is the source of truth for reusable knowledge. `sync` mirrors it into a derived SQLite cache (SHA-256 change detection); the sub-folder name is the form family unless `docs/referencias/manifest.json` overrides it.
 - **Reference Field**: A label found in a reference form together with its provenance (document, page, rect, section, neighbours, example value) and, when known, its master-model concept.
 - **Master-Model Concept**: A key of `FIELD_SYNONYMS` / `company_data.json` (`nit`, `razon_social`, ...). Also indexed as the built-in pseudo-document `__modelo_maestro__`.
 - **Embedder**: Replaceable label-to-vector provider. `HashingEmbedder` (local, free) by default; `EMBEDDING_PROVIDER=azure|openai` for real semantic embeddings.

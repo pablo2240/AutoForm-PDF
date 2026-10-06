@@ -1,9 +1,9 @@
 """
 ReferenceLibrary: the single entry point of the knowledge layer.
 
-    referencias/pdf/<familia>/*.pdf  ->  extract  ->  labels + vectors (SQLite)  ->  search / classify / few-shot
+    docs/referencias/[<familia>/]*.pdf  ->  extract  ->  labels + vectors (SQLite)  ->  search / classify / few-shot
 
-`referencias/pdf` is the source of truth; `sync()` mirrors it into the database (new, changed
+`docs/referencias` is the source of truth; `sync()` mirrors it into the database (new, changed
 and removed files are detected by SHA-256), so growing from 5 to thousands of forms means
 dropping files in the folder, with no code changes.
 """
@@ -22,8 +22,8 @@ from .extractor import EXTRACTOR_VERSION, ExtractedForm, extract_reference, form
 from .store import Store
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-DEFAULT_REFERENCES_DIR = os.path.join(PROJECT_ROOT, "referencias", "pdf")
-DEFAULT_MANIFEST = os.path.join(PROJECT_ROOT, "referencias", "manifest.json")
+DEFAULT_REFERENCES_DIR = os.path.join(PROJECT_ROOT, "docs", "referencias")
+DEFAULT_MANIFEST = os.path.join(PROJECT_ROOT, "docs", "referencias", "manifest.json")
 DEFAULT_DB = os.path.join(PROJECT_ROOT, "backend", "data", "reference_library", "library.db")
 
 MASTER_MODEL_ID = "__modelo_maestro__"
@@ -147,7 +147,7 @@ class ReferenceLibrary:
         self.store.update_concepts(updates)
 
     def sync(self, force: bool = False) -> Dict[str, Any]:
-        """Mirror `referencias/pdf` into the database. Idempotent and cheap when nothing changed."""
+        """Mirror `docs/referencias` into the database. Idempotent and cheap when nothing changed."""
         with self._lock:
             os.makedirs(self.references_dir, exist_ok=True)
             manifest = self._manifest()

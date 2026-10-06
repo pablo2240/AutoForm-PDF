@@ -28,7 +28,7 @@ from backend.pdf_filling_agent.reference_library import ReferenceLibrary  # noqa
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("sync", help="mirror referencias/pdf into the database")
+    s = sub.add_parser("sync", help="mirror docs/referencias into the database")
     s.add_argument("--force", action="store_true", help="re-process every document")
     a = sub.add_parser("add", help="copy a PDF into the library and process it")
     a.add_argument("pdf")

@@ -6,7 +6,7 @@ labels       unique normalised label text + its vector (dedupes across documents
              vector matrix grows with *distinct vocabulary*, not with the number of forms)
 occurrences  every appearance of a label: document, page, rect, section, context, concept
 
-The database is a derived cache: it can be deleted and rebuilt from `referencias/pdf`.
+The database is a derived cache: it can be deleted and rebuilt from `docs/referencias`.
 """
 
 import json
