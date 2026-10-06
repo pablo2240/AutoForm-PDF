@@ -3269,14 +3269,29 @@ def get_mapping(
 
     return {"template_id": template_id, "page_width": 0, "page_height": 0, "mappings": []}
 
+def supabase_company_id(user: Optional[Dict[str, Any]]) -> Optional[str]:
+    """company_id uuid de la sesión, o None (p. ej. sesión local con 'local_company').
+
+    get_current_user lo expone como `company_id` (perfil autoritativo) y `jwt_company_id`;
+    `app_metadata` solo existe en payloads JWT crudos.
+    """
+    user = user or {}
+    for candidate in (user.get("company_id"), user.get("jwt_company_id"), (user.get("app_metadata") or {}).get("company_id")):
+        try:
+            return str(uuid.UUID(str(candidate)))
+        except ValueError:
+            continue
+    return None
+
+
 def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], user_client: Optional[Any]) -> Dict[str, Any]:
     """
     Carga la información corporativa para la generación del formulario.
     En producción: EXIGE consulta autoritativa a Supabase bajo RLS y prohíbe el uso de company_data.json.
     En local/staging: Intenta consulta a Supabase si hay sesión y recurre a company_data.json como fallback.
     """
-    company_id = (supabase_user or {}).get("app_metadata", {}).get("company_id")
-    
+    company_id = supabase_company_id(supabase_user)
+
     if APP_ENVIRONMENT == "production":
         if not supabase_user or not user_client:
             raise HTTPException(
@@ -3284,7 +3299,7 @@ def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], us
                 detail="Se requiere sesión activa y válida en entorno productivo."
             )
         if not company_id:
-            raise HTTPException(status_code=403, detail="Usuario carece de company_id en app_metadata.")
+            raise HTTPException(status_code=403, detail="Usuario carece de un company_id Supabase válido.")
 
     if user_client and company_id:
         try:
@@ -3379,6 +3394,21 @@ def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], us
         raise HTTPException(status_code=404, detail="Company data not found")
     with open(company_data_path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
+
+def generated_pdf_storage_path(user: Dict[str, Any], history_id: str) -> str:
+    """Ruta `{company_id}/{auth_uid}/{history_id}.pdf` exigida por las políticas de Storage (carpetas uuid).
+
+    get_current_user no expone `sub` ni `app_metadata`: usa `company_id` y `auth_user_id`.
+    """
+    company_id = user.get("company_id")
+    auth_uid = user.get("auth_user_id") or user.get("id")
+    for part in (company_id, auth_uid):
+        try:
+            uuid.UUID(str(part))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Sesión sin company_id/usuario Supabase válidos para almacenar el PDF generado.")
+    return f"{company_id}/{auth_uid}/{history_id}.pdf"
+
 
 @app.post("/api/generate")
 def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_current_user)):
@@ -3595,9 +3625,7 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
 
     # Supabase Lifecycle & Storage Upload
     if history_id and user_client and supabase_user:
-        company_id = supabase_user.get("app_metadata", {}).get("company_id")
-        user_id = supabase_user.get("sub")
-        storage_path = f"{company_id}/{user_id}/{history_id}.pdf"
+        storage_path = generated_pdf_storage_path(supabase_user, history_id)
         try:
             with open(out_path, "rb") as f:
                 pdf_bytes = f.read()
@@ -3719,9 +3747,7 @@ def ai_fill_pdf(req: AiFillRequest, user: Dict[str, Any] = Depends(get_current_u
         download_url = f"/api/download/{out_filename}{token_param}"
 
         if history_id and user_client and supabase_user:
-            company_id = supabase_user.get("app_metadata", {}).get("company_id")
-            user_id = supabase_user.get("sub")
-            storage_path = f"{company_id}/{user_id}/{history_id}.pdf"
+            storage_path = generated_pdf_storage_path(supabase_user, history_id)
             with open(output_path, "rb") as f:
                 pdf_bytes = f.read()
             user_client.storage.from_("generated-pdfs").upload(
