@@ -131,7 +131,7 @@ export async function generateFilledPdf(
     body: JSON.stringify({
       template_id: templateId,
       template_version_id: templateVersionId || undefined,
-      mappings: mappings && mappings.length > 0 ? mappings : undefined,
+      mappings: mappings !== undefined ? mappings : undefined,
       is_temporary: isTemporary,
       commercial_profile_id: payloadCommercialId,
     }),

@@ -45,8 +45,8 @@ export function categorizeFlatCompanyData(data: CompanyData): CategorizedCompany
   const financieroKeys = ['activo', 'activos', 'pasivo', 'pasivos', 'patrimonio', 'ingreso', 'ingresos', 'egreso', 'egresos'];
 
   Object.entries(data).forEach(([key, val]) => {
-    const valueStr = String(val || '').trim();
-    if (!valueStr) return;
+    if (val === undefined || val === null) return;
+    const valueStr = String(val).trim();
 
     const lowerKey = key.toLowerCase();
     const label = key

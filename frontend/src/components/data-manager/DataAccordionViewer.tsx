@@ -84,8 +84,8 @@ export const DataAccordionViewer: React.FC<DataAccordionViewerProps> = ({
   };
 
   const handleSaveEditCompanyField = (id: string) => {
-    if (!editCompanyLabel.trim() || !editCompanyValue.trim()) {
-      alert('El nombre del campo y el valor no pueden estar vacíos.');
+    if (!editCompanyLabel.trim()) {
+      alert('El nombre del campo no puede estar vacío.');
       return;
     }
     onUpdateCompanyField(activeCompanyTab, id, editCompanyLabel.trim(), editCompanyValue.trim());

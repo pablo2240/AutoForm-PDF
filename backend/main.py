@@ -540,36 +540,44 @@ def sync_company_data_to_supabase(data: Dict[str, Any]):
             company_id = "8cb5378d-b9a7-4e2e-aa36-2718371731a6"
 
         comp_update = {}
-        if "razon_social" in data and data["razon_social"]:
-            comp_update["razon_social"] = data["razon_social"]
-        if "nit" in data and data["nit"]:
-            nit_raw = str(data["nit"]).replace("-", "").strip()
-            if len(nit_raw) == 10 and not data.get("dv"):
-                comp_update["nit"] = nit_raw[:9]
-                comp_update["dv"] = nit_raw[9:]
+        if "razon_social" in data:
+            comp_update["razon_social"] = str(data["razon_social"] or "")
+        if "nit" in data:
+            nit_val = str(data["nit"] or "").strip()
+            if nit_val:
+                nit_raw = nit_val.replace("-", "").strip()
+                if len(nit_raw) == 10 and not data.get("dv"):
+                    comp_update["nit"] = nit_raw[:9]
+                    comp_update["dv"] = nit_raw[9:]
+                else:
+                    comp_update["nit"] = nit_val.split("-")[0].strip()
             else:
-                comp_update["nit"] = str(data["nit"]).split("-")[0].strip()
-        if "dv" in data and data["dv"]:
-            comp_update["dv"] = str(data["dv"]).strip()
-        if "ciudad" in data and data["ciudad"]:
-            comp_update["ciudad"] = data["ciudad"]
-        if "departamento" in data and data["departamento"]:
-            comp_update["departamento"] = data["departamento"]
-        if "pais" in data and data["pais"]:
-            comp_update["pais"] = data["pais"]
-        if "direccion_principal" in data and data["direccion_principal"]:
-            comp_update["direccion_principal"] = data["direccion_principal"]
-        if "telefono" in data and data["telefono"]:
-            comp_update["telefono"] = str(data["telefono"])
-        if "pagina_web" in data and data["pagina_web"]:
-            comp_update["pagina_web"] = data["pagina_web"]
+                comp_update["nit"] = ""
+        if "dv" in data:
+            comp_update["dv"] = str(data["dv"] or "").strip()
+        if "ciudad" in data:
+            comp_update["ciudad"] = str(data["ciudad"] or "")
+        if "departamento" in data:
+            comp_update["departamento"] = str(data["departamento"] or "")
+        if "pais" in data:
+            comp_update["pais"] = str(data["pais"] or "")
+        if "direccion_principal" in data:
+            comp_update["direccion_principal"] = str(data["direccion_principal"] or "")
+        if "telefono" in data:
+            comp_update["telefono"] = str(data["telefono"] or "")
+        if "pagina_web" in data:
+            comp_update["pagina_web"] = str(data["pagina_web"] or "")
 
         for num_f in ["total_activos", "total_pasivos", "total_patrimonio", "total_ingresos_mensuales", "total_egresos_mensuales"]:
-            if num_f in data and data[num_f]:
-                try:
-                    comp_update[num_f] = float(str(data[num_f]).replace(",", "").replace("$", "").strip())
-                except Exception:
-                    pass
+            if num_f in data:
+                val = data[num_f]
+                if val is not None and str(val).strip() != "":
+                    try:
+                        comp_update[num_f] = float(str(val).replace(",", "").replace("$", "").strip())
+                    except Exception:
+                        pass
+                else:
+                    comp_update[num_f] = None
 
         if comp_update:
             try:
@@ -578,22 +586,22 @@ def sync_company_data_to_supabase(data: Dict[str, Any]):
                 print(f"[WARN] Error actualizando tabla companies en Supabase: {e_comp}")
 
         leg_update = {}
-        if "representante_legal" in data and data["representante_legal"]:
-            leg_update["nombre_completo"] = data["representante_legal"]
-        if "representante_nombre" in data and data["representante_nombre"]:
-            leg_update["nombres"] = data["representante_nombre"]
-        if "representante_apellido" in data and data["representante_apellido"]:
-            leg_update["apellidos"] = data["representante_apellido"]
-        if "tipo_documento" in data and data["tipo_documento"]:
-            leg_update["tipo_documento"] = data["tipo_documento"]
-        if "numero_cedula" in data and data["numero_cedula"]:
-            leg_update["numero_documento"] = str(data["numero_cedula"])
-        if "lugar_expedicion_rep" in data and data["lugar_expedicion_rep"]:
-            leg_update["lugar_expedicion"] = data["lugar_expedicion_rep"]
-        if "correo_rep" in data and data["correo_rep"]:
-            leg_update["email"] = data["correo_rep"]
-        if "celular_rep" in data and data["celular_rep"]:
-            leg_update["celular"] = str(data["celular_rep"])
+        if "representante_legal" in data:
+            leg_update["nombre_completo"] = str(data["representante_legal"] or "")
+        if "representante_nombre" in data:
+            leg_update["nombres"] = str(data["representante_nombre"] or "")
+        if "representante_apellido" in data:
+            leg_update["apellidos"] = str(data["representante_apellido"] or "")
+        if "tipo_documento" in data:
+            leg_update["tipo_documento"] = str(data["tipo_documento"] or "")
+        if "numero_cedula" in data:
+            leg_update["numero_documento"] = str(data["numero_cedula"] or "")
+        if "lugar_expedicion_rep" in data:
+            leg_update["lugar_expedicion"] = str(data["lugar_expedicion_rep"] or "")
+        if "correo_rep" in data:
+            leg_update["email"] = str(data["correo_rep"] or "")
+        if "celular_rep" in data:
+            leg_update["celular"] = str(data["celular_rep"] or "")
 
         if leg_update:
             try:
@@ -602,12 +610,12 @@ def sync_company_data_to_supabase(data: Dict[str, Any]):
                 print(f"[WARN] Error actualizando legal_representatives en Supabase: {e_leg}")
 
         bank_update = {}
-        if "entidad_bancaria" in data and data["entidad_bancaria"]:
-            bank_update["entidad_bancaria"] = data["entidad_bancaria"]
-        if "tipo_cuenta" in data and data["tipo_cuenta"]:
-            bank_update["tipo_cuenta"] = data["tipo_cuenta"]
-        if "numero_cuenta" in data and data["numero_cuenta"]:
-            bank_update["numero_cuenta"] = str(data["numero_cuenta"])
+        if "entidad_bancaria" in data:
+            bank_update["entidad_bancaria"] = str(data["entidad_bancaria"] or "")
+        if "tipo_cuenta" in data:
+            bank_update["tipo_cuenta"] = str(data["tipo_cuenta"] or "")
+        if "numero_cuenta" in data:
+            bank_update["numero_cuenta"] = str(data["numero_cuenta"] or "")
 
         if bank_update:
             try:
@@ -676,44 +684,47 @@ def get_company_data():
             comp_res = admin_client.table("companies").select("*").eq("id", company_id).single().execute()
             if comp_res.data:
                 c = comp_res.data
-                if c.get("razon_social"): merged["razon_social"] = c["razon_social"]
-                if c.get("nit"):
+                if c.get("razon_social") and saved_data.get("razon_social") != "": merged["razon_social"] = c["razon_social"]
+                if c.get("nit") and saved_data.get("nit") != "":
                     nit_val = str(c["nit"])
                     dv_val = str(c.get("dv") or "")
                     merged["nit"] = f"{nit_val}{dv_val}" if dv_val else nit_val
-                if c.get("ciudad"): merged["ciudad"] = c["ciudad"]
-                if c.get("departamento"): merged["departamento"] = c["departamento"]
-                if c.get("pais"): merged["pais"] = c["pais"]
-                if c.get("direccion_principal"): merged["direccion_principal"] = c["direccion_principal"]
-                if c.get("telefono"): merged["telefono"] = str(c["telefono"])
-                if c.get("pagina_web"): merged["pagina_web"] = c["pagina_web"]
-                if c.get("total_activos") is not None: merged["total_activos"] = str(int(c["total_activos"]))
-                if c.get("total_pasivos") is not None: merged["total_pasivos"] = str(int(c["total_pasivos"]))
-                if c.get("total_patrimonio") is not None: merged["total_patrimonio"] = str(int(c["total_patrimonio"]))
-                if c.get("total_ingresos_mensuales") is not None: merged["total_ingresos_mensuales"] = str(int(c["total_ingresos_mensuales"]))
-                if c.get("total_egresos_mensuales") is not None: merged["total_egresos_mensuales"] = str(int(c["total_egresos_mensuales"]))
+                if c.get("ciudad") and saved_data.get("ciudad") != "": merged["ciudad"] = c["ciudad"]
+                if c.get("departamento") and saved_data.get("departamento") != "": merged["departamento"] = c["departamento"]
+                if c.get("pais") and saved_data.get("pais") != "": merged["pais"] = c["pais"]
+                if c.get("direccion_principal") and saved_data.get("direccion_principal") != "": merged["direccion_principal"] = c["direccion_principal"]
+                if c.get("telefono") and saved_data.get("telefono") != "": merged["telefono"] = str(c["telefono"])
+                if c.get("pagina_web") and saved_data.get("pagina_web") != "": merged["pagina_web"] = c["pagina_web"]
+                for num_k in ["total_activos", "total_pasivos", "total_patrimonio", "total_ingresos_mensuales", "total_egresos_mensuales"]:
+                    if c.get(num_k) is not None and saved_data.get(num_k) != "":
+                        merged[num_k] = str(int(c[num_k]))
 
             leg_res = admin_client.table("legal_representatives").select("*").eq("company_id", company_id).eq("es_principal", True).execute()
             if leg_res.data and len(leg_res.data) > 0:
                 l = leg_res.data[0]
-                if l.get("nombre_completo"): merged["representante_legal"] = l["nombre_completo"]
-                if l.get("nombres"): merged["representante_nombre"] = l["nombres"]
-                if l.get("apellidos"): merged["representante_apellido"] = l["apellidos"]
-                if l.get("tipo_documento"): merged["tipo_documento"] = l["tipo_documento"]
-                if l.get("numero_cedula"): merged["numero_cedula"] = str(l["numero_documento"])
-                if l.get("lugar_expedicion"): merged["lugar_expedicion_rep"] = l["lugar_expedicion"]
-                if l.get("fecha_expedicion"): merged["fecha_expedicion_rep"] = str(l["fecha_expedicion"])
-                if l.get("email"): merged["correo_rep"] = l["email"]
-                if l.get("celular"): merged["celular_rep"] = str(l["celular"])
+                if l.get("nombre_completo") and saved_data.get("representante_legal") != "": merged["representante_legal"] = l["nombre_completo"]
+                if l.get("nombres") and saved_data.get("representante_nombre") != "": merged["representante_nombre"] = l["nombres"]
+                if l.get("apellidos") and saved_data.get("representante_apellido") != "": merged["representante_apellido"] = l["apellidos"]
+                if l.get("tipo_documento") and saved_data.get("tipo_documento") != "": merged["tipo_documento"] = l["tipo_documento"]
+                if l.get("numero_cedula") and saved_data.get("numero_cedula") != "": merged["numero_cedula"] = str(l["numero_documento"])
+                if l.get("lugar_expedicion") and saved_data.get("lugar_expedicion_rep") != "": merged["lugar_expedicion_rep"] = l["lugar_expedicion"]
+                if l.get("fecha_expedicion") and saved_data.get("fecha_expedicion_rep") != "": merged["fecha_expedicion_rep"] = str(l["fecha_expedicion"])
+                if l.get("email") and saved_data.get("correo_rep") != "": merged["correo_rep"] = l["email"]
+                if l.get("celular") and saved_data.get("celular_rep") != "": merged["celular_rep"] = str(l["celular"])
 
             bank_res = admin_client.table("company_bank_accounts").select("*").eq("company_id", company_id).eq("es_principal", True).execute()
             if bank_res.data and len(bank_res.data) > 0:
                 b = bank_res.data[0]
-                if b.get("entidad_bancaria"): merged["entidad_bancaria"] = b["entidad_bancaria"]
-                if b.get("tipo_cuenta"): merged["tipo_cuenta"] = b["tipo_cuenta"]
-                if b.get("numero_cuenta"): merged["numero_cuenta"] = str(b["numero_cuenta"])
+                if b.get("entidad_bancaria") and saved_data.get("entidad_bancaria") != "": merged["entidad_bancaria"] = b["entidad_bancaria"]
+                if b.get("tipo_cuenta") and saved_data.get("tipo_cuenta") != "": merged["tipo_cuenta"] = b["tipo_cuenta"]
+                if b.get("numero_cuenta") and saved_data.get("numero_cuenta") != "": merged["numero_cuenta"] = str(b["numero_cuenta"])
     except Exception as e_load_supa:
         print(f"[WARN] Error cargando datos corporativos desde Supabase: {e_load_supa}")
+
+    # Preservar explícitamente cualquier clave que el usuario haya dejado en blanco en saved_data
+    for k, v in saved_data.items():
+        if v == "":
+            merged[k] = ""
 
     # Guardar en cache local para acceso sin conexión
     try:
@@ -853,7 +864,7 @@ def get_categorized_company():
         try:
             with open(path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
-                if isinstance(data, dict) and any(len(v) > 0 for v in data.values() if isinstance(v, list)):
+                if isinstance(data, dict):
                     return data
         except Exception:
             pass
@@ -3118,7 +3129,9 @@ def delete_template(
     for mp in [
         os.path.join(DATA_DIR, f"{user_id}_{map_code}_mapping.json"),
         os.path.join(DATA_DIR, f"{user_id}_{doc_id}_mapping.json"),
-        os.path.join(DATA_DIR, f"{map_code}_mapping.json")
+        os.path.join(DATA_DIR, f"{user_id}_{template_id}_mapping.json"),
+        os.path.join(DATA_DIR, f"{map_code}_mapping.json"),
+        os.path.join(DATA_DIR, f"{template_id}_mapping.json")
     ]:
         if os.path.exists(mp):
             try:
@@ -3174,18 +3187,39 @@ def save_mapping(
     is_admin = user.get("role") == "admin"
 
     # Enforce document ownership: raises 403 if document belongs to another user
-    resolve_user_document(user_id, mapping.template_id, is_admin=is_admin, company_id=company_id)
+    doc = resolve_user_document(user_id, mapping.template_id, is_admin=is_admin, company_id=company_id)
+    doc_id = str(doc.get("id")) if doc else None
+    template_code = doc.get("template_code") if doc else None
 
-    path = os.path.join(DATA_DIR, f"{user_id}_{mapping.template_id}_mapping.json")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(mapping.model_dump_json(indent=2))
+    # Paths to persist user-isolated mapping
+    paths_to_write = {
+        os.path.join(DATA_DIR, f"{user_id}_{mapping.template_id}_mapping.json")
+    }
+    if template_code:
+        paths_to_write.add(os.path.join(DATA_DIR, f"{user_id}_{template_code}_mapping.json"))
+    if doc_id:
+        paths_to_write.add(os.path.join(DATA_DIR, f"{user_id}_{doc_id}_mapping.json"))
+
+    content_json = mapping.model_dump_json(indent=2)
+    for p in paths_to_write:
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(content_json)
+
     # Keep legacy format for backward compatibility
-    legacy_path = os.path.join(DATA_DIR, f"{mapping.template_id}_mapping.json")
-    try:
-        with open(legacy_path, "w", encoding="utf-8") as f:
-            f.write(mapping.model_dump_json(indent=2))
-    except Exception:
-        pass
+    legacy_paths = {
+        os.path.join(DATA_DIR, f"{mapping.template_id}_mapping.json")
+    }
+    if template_code:
+        legacy_paths.add(os.path.join(DATA_DIR, f"{template_code}_mapping.json"))
+    if doc_id:
+        legacy_paths.add(os.path.join(DATA_DIR, f"{doc_id}_mapping.json"))
+
+    for lp in legacy_paths:
+        try:
+            with open(lp, "w", encoding="utf-8") as f:
+                f.write(content_json)
+        except Exception:
+            pass
     return {"status": "success", "message": "Mapping saved successfully"}
 
 @app.get("/api/mapping/{template_id}")
@@ -3198,16 +3232,39 @@ def get_mapping(
     is_admin = user.get("role") == "admin"
 
     # Enforce document ownership: raises 403 if document belongs to another user
-    resolve_user_document(user_id, template_id, is_admin=is_admin, company_id=company_id)
+    doc = resolve_user_document(user_id, template_id, is_admin=is_admin, company_id=company_id)
+    doc_id = str(doc.get("id")) if doc else None
+    template_code = doc.get("template_code") if doc else None
 
-    user_path = os.path.join(DATA_DIR, f"{user_id}_{template_id}_mapping.json")
-    legacy_path = os.path.join(DATA_DIR, f"{template_id}_mapping.json")
-    path = user_path if os.path.exists(user_path) else legacy_path
+    user_candidates = [
+        os.path.join(DATA_DIR, f"{user_id}_{template_id}_mapping.json")
+    ]
+    if template_code:
+        user_candidates.append(os.path.join(DATA_DIR, f"{user_id}_{template_code}_mapping.json"))
+    if doc_id:
+        user_candidates.append(os.path.join(DATA_DIR, f"{user_id}_{doc_id}_mapping.json"))
 
-    if not os.path.exists(path):
-        return {"template_id": template_id, "page_width": 0, "page_height": 0, "mappings": []}
-    with open(path, "r", encoding="utf-8-sig") as f:
-        return json.load(f)
+    # If ANY user-specific mapping file exists, load it directly and NEVER fall back to legacy!
+    for u_path in user_candidates:
+        if os.path.exists(u_path):
+            with open(u_path, "r", encoding="utf-8-sig") as f:
+                return json.load(f)
+
+    # Only if NO user-specific mapping exists at all, check legacy paths
+    legacy_candidates = [
+        os.path.join(DATA_DIR, f"{template_id}_mapping.json")
+    ]
+    if template_code:
+        legacy_candidates.append(os.path.join(DATA_DIR, f"{template_code}_mapping.json"))
+    if doc_id:
+        legacy_candidates.append(os.path.join(DATA_DIR, f"{doc_id}_mapping.json"))
+
+    for l_path in legacy_candidates:
+        if os.path.exists(l_path):
+            with open(l_path, "r", encoding="utf-8-sig") as f:
+                return json.load(f)
+
+    return {"template_id": template_id, "page_width": 0, "page_height": 0, "mappings": []}
 
 def load_company_data_for_generation(supabase_user: Optional[Dict[str, Any]], user_client: Optional[Any]) -> Dict[str, Any]:
     """
@@ -3327,6 +3384,7 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
     user_id = str(user["id"])
     company_id = str(user.get("company_id") or "local_company")
     user_client = user.get("user_client")
+    is_admin = user.get("role") == "admin"
 
     admin_client = None
     try:
@@ -3417,15 +3475,44 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
 
     # 2. Get mappings (from request or from saved JSON)
     mappings = []
-    if req.mappings is not None and len(req.mappings) > 0:
+    if req.mappings is not None:
         mappings = [m.model_dump() for m in req.mappings]
     else:
-        user_mapping_path = os.path.join(DATA_DIR, f"{user_id}_{req.template_id}_mapping.json")
-        legacy_mapping_path = os.path.join(DATA_DIR, f"{req.template_id}_mapping.json")
-        mapping_path = user_mapping_path if os.path.exists(user_mapping_path) else legacy_mapping_path
-        if not os.path.exists(mapping_path):
+        doc = resolve_user_document(user_id, req.template_id, is_admin=is_admin, company_id=company_id)
+        doc_id = str(doc.get("id")) if doc else None
+        template_code = doc.get("template_code") if doc else None
+
+        user_candidates = [
+            os.path.join(DATA_DIR, f"{user_id}_{req.template_id}_mapping.json")
+        ]
+        if template_code:
+            user_candidates.append(os.path.join(DATA_DIR, f"{user_id}_{template_code}_mapping.json"))
+        if doc_id:
+            user_candidates.append(os.path.join(DATA_DIR, f"{user_id}_{doc_id}_mapping.json"))
+
+        found_path = None
+        for u_path in user_candidates:
+            if os.path.exists(u_path):
+                found_path = u_path
+                break
+
+        if not found_path:
+            legacy_candidates = [
+                os.path.join(DATA_DIR, f"{req.template_id}_mapping.json")
+            ]
+            if template_code:
+                legacy_candidates.append(os.path.join(DATA_DIR, f"{template_code}_mapping.json"))
+            if doc_id:
+                legacy_candidates.append(os.path.join(DATA_DIR, f"{doc_id}_mapping.json"))
+            for l_path in legacy_candidates:
+                if os.path.exists(l_path):
+                    found_path = l_path
+                    break
+
+        if not found_path or not os.path.exists(found_path):
             raise HTTPException(status_code=404, detail=f"No mappings found for template {req.template_id}")
-        with open(mapping_path, "r", encoding="utf-8") as f:
+
+        with open(found_path, "r", encoding="utf-8-sig") as f:
             mapping_data = json.load(f)
             mappings = mapping_data.get("mappings", [])
 
@@ -3464,7 +3551,7 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
                 )
         else:
             custom_text = style.get("custom_text")
-            if custom_text is not None and custom_text != "":
+            if custom_text is not None:
                 value = custom_text
             else:
                 value = effective_data.get(field_key, "")
@@ -3491,7 +3578,7 @@ def generate_pdf(req: GenerateRequest, user: Dict[str, Any] = Depends(get_curren
                     )
                 )
 
-    if not placements:
+    if not placements and req.mappings is None and not mappings:
         raise HTTPException(status_code=400, detail="No matching fields or images to place onto PDF")
 
     user_out_dir = os.path.join(OUTPUT_DIR, user_id)

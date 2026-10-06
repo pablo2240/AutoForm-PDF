@@ -562,7 +562,7 @@ export const PDFCanvas: React.FC<PDFCanvasProps> = ({
             const widthPct = (x1_pct - x0_pct) * 100;
             const heightPct = (y1_pct - y0_pct) * 100;
 
-            const hasCustomText = item.style?.custom_text != null && item.style.custom_text !== '';
+            const hasCustomText = item.style?.custom_text !== undefined && item.style.custom_text !== null;
             const companyVal = companyData[item.field_key];
             const hasCompanyVal = companyVal != null && companyVal !== '';
             
