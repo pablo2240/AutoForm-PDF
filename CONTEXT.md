@@ -73,6 +73,14 @@ This document defines the core concepts and vocabulary used across the **AutoFor
 - **Consistent Dual-Auth Synchronization with Error Logging and Retry**: Orchestration pattern where Supabase Auth is updated first as primary source of truth. If updating local `password_hash` in PostgreSQL encounters a transient failure, it is recorded as pending synchronization with high-severity logging, ensuring legacy logins do not accept stale passwords.
 - **Blind Anti-Enumeration Response**: API design standard returning identical confirmation messages regardless of whether the requested email address exists in the system, preventing external user enumeration.
 
+### Reference Library, Semantic Search & Dynamic Few-Shot (ADR-0013)
+- **Reference Library (`referencias/pdf/<familia>/`)**: Folder of example forms that is the source of truth for reusable knowledge. `sync` mirrors it into a derived SQLite cache (SHA-256 change detection); the sub-folder name is the form family unless `referencias/manifest.json` overrides it.
+- **Reference Field**: A label found in a reference form together with its provenance (document, page, rect, section, neighbours, example value) and, when known, its master-model concept.
+- **Master-Model Concept**: A key of `FIELD_SYNONYMS` / `company_data.json` (`nit`, `razon_social`, ...). Also indexed as the built-in pseudo-document `__modelo_maestro__`.
+- **Embedder**: Replaceable label-to-vector provider. `HashingEmbedder` (local, free) by default; `EMBEDDING_PROVIDER=azure|openai` for real semantic embeddings.
+- **Form Classification**: Content-based (never file-name-based) estimate of the family a new form belongs to, with per-family shares. Below the confidence gate the form is *unknown* and uses general analysis plus semantic search.
+- **Dynamic Few-Shot**: Per-chunk block of the top-k most similar reference fields for the fields the deterministic matcher left unresolved. Hints for the LLM; `FillingValidator` still has the last word.
+
 ### Cross-Account Data Isolation & User Workspace Storage (ADR-0011)
 - **User Workspace (Espacio de Trabajo de Usuario)**: The strictly isolated, session-scoped execution environment belonging to a single authenticated operator (`auth.uid()`). Completely eliminates global server filesystem state (`/input`, `active_slot.json`).
   _Avoid_: Global workspace, shared slot, public templates directory.

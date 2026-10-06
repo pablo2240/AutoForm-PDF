@@ -54,6 +54,9 @@ from backend.auth_supabase import (
 
 app = FastAPI(title="AutoForm PDF API")
 
+from backend.reference_api import router as reference_library_router
+app.include_router(reference_library_router)
+
 def resolve_cors_origins(app_env: Optional[str] = None, raw_origins: Optional[str] = None) -> list[str]:
     """
     Resolves and enforces CORS origins based on the execution environment.

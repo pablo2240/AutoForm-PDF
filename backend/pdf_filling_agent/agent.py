@@ -31,6 +31,8 @@ from .pdf_processor import PDFProcessor
 from .visual_processor import VisualPDFProcessor, VisualPlacement, PageImage
 from .field_dictionary import FIELD_SYNONYMS, IGNORE_RULES, get_dictionary_context
 from .validator import FillingValidator
+from .form_analysis import extract_rich_acro_widgets, normalize_label
+from .reference_library import get_default_library, build_fewshot, format_fewshot_block
 
 
 class FieldMapping(BaseModel):
@@ -172,6 +174,7 @@ class PDFAgent:
         self.visual_processor = VisualPDFProcessor()
         self.validator = FillingValidator()
         self.last_audit_report: Optional[Dict[str, Any]] = None
+        self.reference_library = None  # resolved lazily by _reference_context
 
         # Load company profile
         if company_profile is not None:
@@ -465,156 +468,10 @@ class PDFAgent:
 
     def _extract_rich_acro_widgets(self, doc: fitz.Document) -> List[Dict[str, Any]]:
         """Extract all widgets with their precise visual labels from the PDF pages."""
-        rich_widgets = []
-        for pno in range(len(doc)):
-            page = doc[pno]
-            widgets = list(page.widgets())
-            if not widgets:
-                continue
-            words = page.get_text("words")
-            blocks = page.get_text("blocks")
-            
-            # Identify section candidates on this page
-            section_candidates = []
-            for b in blocks:
-                txt = b[4].strip().replace("\n", " ")
-                norm_b = self._normalize_label(txt)
-                if len(txt) > 3 and (
-                    re.match(r'^\d+(\.\d+)*\.?\s*[A-ZÁÉÍÓÚÑ]', txt) or
-                    any(norm_b.startswith(h) or h in norm_b for h in [
-                        "anexo",
-                        "anexos",
-                        "apendice",
-                        "firma del representante legal",
-                        "habeas data",
-                        "manifiesto de cumplimiento",
-                        "datos de contacto",
-                        "datos contacto",
-                        "ariba",
-                        "informacion general",
-                        "datos representante legal",
-                        "datos del representante legal",
-                        "datos contacto comercial",
-                        "declaracion de prevencion",
-                        "anexos obligatorios",
-                        "informacion referente a los accionistas",
-                        "miembros de la junta directiva",
-                        "informacion de revisores fiscales",
-                        "referencias bancarias",
-                        "datos de contacto del contratante",
-                        "composicion de capital",
-                        "tipo de actividad",
-                        "relacione o indique a continuacion",
-                        "datos de la persona que esta a cargo",
-                        "proceso de relacionamiento",
-                        "relacionamiento o de contratacion",
-                        "persona que esta a cargo"
-                    ])
-                ):
-                    section_candidates.append((b[1], b[3], txt))
-            section_candidates.sort(key=lambda x: x[0])
-            
-            for w in widgets:
-                wr = w.rect
-                attr_label = getattr(w, 'field_label', '') or ''
-                if re.match(r'^(celda|cell|textfield|datetimefield|field|fila|row|tabla|table|texto|independiente|listabotonesradio)\d*$', attr_label.strip(), re.IGNORECASE) or re.match(r'^\d+\.?$', attr_label.strip()):
-                    attr_label = ""
-                
-                # Words immediately above the widget strictly overlapping its column width (up to 35pt for table column headers)
-                # Allows up to 4pt vertical overlap for descenders, and excludes words separated by an intervening widget in the same column
-                cands = [wd for wd in words if wd[1] <= wr.y0 + 2 and wr.y0 - wd[3] >= -4 and (wr.y0 - wd[1]) < 35 and (wd[2] >= wr.x0 - 4 and wd[0] <= wr.x1 + 4)]
-                cands = [wd for wd in cands if not any(other.field_name != w.field_name and (other.rect.x0 <= wr.x1 and other.rect.x1 >= wr.x0) and (wd[1] < other.rect.y0 and other.rect.y0 < wr.y0 - 2) for other in widgets)]
-                if cands:
-                    cands_sorted = sorted(cands, key=lambda x: (round(x[1] / 6), x[0]))
-                    above_str = " ".join(wd[4] for wd in cands_sorted)
-                else:
-                    above_str = ""
-                
-                # Words to the left on the same horizontal baseline band
-                left_words = [nw[4] for nw in sorted([wd for wd in words if abs(wd[1] - wr.y0) < 10 and wd[2] <= wr.x0 + 2 and (wr.x0 - wd[2]) < 130], key=lambda x: (x[1], x[0]))]
-                left_str = " ".join(left_words)
-                
-                # Closest preceding section header
-                section_header = ""
-                for cand_y0, cand_y1, cand_txt in section_candidates:
-                    if cand_y0 <= wr.y0 + 5:
-                        section_header = cand_txt
-                
-                # Pre-filled status (strict detection so pre-existing values are never overwritten)
-                val = w.field_value
-                val_str = str(val).strip() if val is not None else ""
-                is_prefilled = bool(val_str and val_str not in ["Off", "0", "None"])
-                
-                is_table_cell = bool(re.search(r'(?:tabla|fila|cell|celda|grid|table|row)[\d_\[]', w.field_name, re.IGNORECASE))
-                label = attr_label or (above_str if (is_table_cell and above_str) else (left_str or above_str)) or w.field_name
-                rich_widgets.append({
-                    "widget": w,
-                    "field_name": w.field_name,
-                    "field_type": w.field_type_string,
-                    "rect": wr,
-                    "attr_label": attr_label,
-                    "left_text": left_str,
-                    "above_text": above_str,
-                    "label": label,
-                    "section": section_header,
-                    "page": pno,
-                    "is_prefilled": is_prefilled,
-                    "current_value": val_str,
-                    "is_secondary_row": False
-                })
-
-        # Identify table secondary rows across widgets
-        for rw in rich_widgets:
-            fn = rw["field_name"]
-            wr = rw["rect"]
-            sec_norm = self._normalize_label(rw.get("section", ""))
-            
-            # 1. Explicit row indices in field name: Fila1[1], Row[2], Item[3]
-            m_brk = re.search(r'(?:Fila|Row|Item|Tabla\d*)\[(\d+)\]', fn, re.IGNORECASE)
-            if m_brk and int(m_brk.group(1)) > 0:
-                rw["is_secondary_row"] = True
-                continue
-            m_num = re.search(r'(?:fila|row|item)(\d+)', fn, re.IGNORECASE)
-            if m_num and int(m_num.group(1)) > 1:
-                rw["is_secondary_row"] = True
-                continue
-            if re.search(r'(?:accionistas|junta|revisor|patente|publicacion|profesionales|vinculo|contrat)[\w\s]*_([2-9]|\d{2,})$', fn, re.IGNORECASE):
-                rw["is_secondary_row"] = True
-                continue
-            # Table/list secondary rows with explicit numerical suffixes (e.g. 'beneficiario final 2', 'Tipo Ident. 2', 'número de identificación 2')
-            if re.search(r'(?:beneficiario|accionista|socio|miembro|directivo|tipo\s+ident\.?|identificaci[oó]n)[\w\s\.]*?\s+([2-9]|\d{2,})$', fn, re.IGNORECASE):
-                rw["is_secondary_row"] = True
-                continue
-                
-            # 2. Table grid sections with unindexed cell IDs (e.g. Composición Accionaria in F-UC 01)
-            is_composicion_sec = any(k in sec_norm for k in [
-                "composicion accionaria", "anexo de composicion", "socios con participacion"
-            ])
-            if is_composicion_sec and (wr.y0 > 235 or (fn.isdigit() and int(fn) not in [1, 2, 38, 57])):
-                rw["is_secondary_row"] = True
-                continue
-
-        # Cross-widget counterpart detection (e.g. SI/NO pairs or Radio options where one is already answered)
-        prefilled_names = {rw["field_name"] for rw in rich_widgets if rw["is_prefilled"]}
-        for rw in rich_widgets:
-            fn = rw["field_name"]
-            if not rw["is_prefilled"]:
-                m_no = re.match(r'^NO(\d+)$', fn, re.IGNORECASE)
-                m_si = re.match(r'^SI(\d+)$', fn, re.IGNORECASE)
-                if m_no and f"SI{m_no.group(1)}" in prefilled_names:
-                    rw["is_prefilled"] = True
-                elif m_si and f"NO{m_si.group(1)}" in prefilled_names:
-                    rw["is_prefilled"] = True
-                elif re.match(r'^OP\d+$', fn, re.IGNORECASE) and any(re.match(r'^OP\d+$', pn, re.IGNORECASE) for pn in prefilled_names):
-                    rw["is_prefilled"] = True
-
-        return rich_widgets
+        return extract_rich_acro_widgets(doc)
 
     def _normalize_label(self, text: str) -> str:
-        if not text:
-            return ""
-        text = unicodedata.normalize('NFKD', str(text)).encode('ASCII', 'ignore').decode('utf-8')
-        return re.sub(r'[^a-zA-Z0-9\s]', ' ', text).lower().strip()
+        return normalize_label(text)
 
     def _deterministic_acroform_match(self, rich_widgets: List[Dict[str, Any]]) -> Dict[str, str]:
         """Deterministic mapping based on company profile and synonyms dictionary."""
@@ -1370,6 +1227,33 @@ class PDFAgent:
         return mappings, force_blank_fields
 
 
+    def _reference_context(self, rich_widgets: List[Dict[str, Any]], n_pages: int) -> Dict[str, Any]:
+        """Classify the form against the reference library. Optional and never fatal: {} disables few-shot."""
+        try:
+            self.reference_library = self.reference_library or get_default_library()
+            if self.reference_library is None or not rich_widgets:
+                return {}
+            cls = self.reference_library.classify_widgets(rich_widgets, n_pages)
+            print(f"[INFO] Reference library: strategy={cls.strategy} family={cls.family} confidence={cls.confidence}")
+            return {"classification": cls, "examples_used": 0}
+        except Exception as ex:
+            print(f"[WARN] Reference library classification skipped: {ex}")
+            return {}
+
+    def _reference_fewshot_block(self, chunk: List[Dict[str, Any]], resolved: set, ref_ctx: Dict[str, Any]) -> str:
+        """Dynamic few-shot hints for the chunk fields the deterministic matcher did not resolve."""
+        if not ref_ctx:
+            return ""
+        try:
+            pending = [w for w in chunk if w["field_name"] not in resolved]
+            cls = ref_ctx["classification"]
+            examples = build_fewshot(self.reference_library, pending, family=cls.family)
+            ref_ctx["examples_used"] += len(examples)
+            return format_fewshot_block(examples, family=cls.family, confidence=cls.confidence)
+        except Exception as ex:
+            print(f"[WARN] Reference few-shot skipped: {ex}")
+            return ""
+
     def _fill_acroform(self, pdf_path: str, fields: Dict[str, str], user_instructions: str) -> str:
         """Fill an interactive PDF form with AcroForm widgets using rich label extraction + LLM + dictionary hybrid."""
         doc = fitz.open(pdf_path)
@@ -1384,6 +1268,10 @@ class PDFAgent:
         # 1. Deterministic high-confidence matches from dictionary
         deterministic_matches, det_force_blank = self._deterministic_acroform_match(rich_widgets)
         print(f"[INFO] Deterministic AcroForm matches found: {len(deterministic_matches)}, force-blank: {det_force_blank}")
+
+        # 1b. Reference knowledge: form family + few-shot source (optional, never fatal)
+        ref_ctx = self._reference_context(rich_widgets, len(doc))
+        resolved_fields = set(deterministic_matches) | set(det_force_blank)
 
 
         # 2. LLM enriched page-by-page mapping
@@ -1409,10 +1297,11 @@ class PDFAgent:
                     for f in chunk
                 ])
                 
+                ref_block = self._reference_fewshot_block(chunk, resolved_fields, ref_ctx)
                 prompt = f"""
 Given the following interactive PDF form fields on Page {pno + 1}:
 {fields_text}
-
+{ref_block}
 Company Profile Data:
 {json.dumps(dict(self.company_profile, comercial_responsable=self.commercial_profile) if self.commercial_profile else self.company_profile, ensure_ascii=False, indent=2)}
 
@@ -1529,6 +1418,12 @@ CRITICAL RULES — READ CAREFULLY:
 
         # ADR-0005: Generate structured UNFILLED_FIELDS_AUDIT report
         self.last_audit_report = self.validator.generate_audit_report(rich_widgets, final_field_values)
+        if ref_ctx:
+            cls = ref_ctx["classification"]
+            self.last_audit_report["reference_library"] = {
+                "strategy": cls.strategy, "family": cls.family, "confidence": cls.confidence,
+                "shares": cls.shares, "fewshot_examples": ref_ctx["examples_used"],
+            }
         print(f"[INFO] Audit Report: {self.last_audit_report['filled']} filled, {len(self.last_audit_report['unfilled'])} unfilled (missing in JSON), {len(self.last_audit_report['blocked'])} blocked (Negative Zones)")
 
         doc.close()
@@ -1828,4 +1723,4 @@ Example:
         rich_widgets = self._extract_rich_acro_widgets(doc)
         field_values = self._deterministic_acroform_match(rich_widgets)
         doc.close()
-        return self.pdf_processor.fill_pdf(pdf_path, field_values)
+        return self.pdf_processor.fill_pdf(pdf_path, field_values)
