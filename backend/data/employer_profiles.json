@@ -1,11 +1,122 @@
 [
   {
-    "id": "prof-kelly-delgado",
+    "id": "fb2d7a25-c057-48ec-a04b-152272b3c245",
     "profileName": "Kelly Delgado",
     "nombre": "Kelly Yohana",
     "apellido": "Delgado Macea",
-    "email": "Kelly.Delgado@iaclatam.com",
+    "cargo": "Administración",
+    "email": "kelly.delgado@iaclatam.com",
     "celular": "301 4750760",
+    "customFields": []
+  },
+  {
+    "id": "53ac8522-38f6-46d8-86ee-1cad3d0b66c4",
+    "profileName": "Pepito Perez",
+    "nombre": "Pepito",
+    "apellido": "Perez",
+    "cargo": "Asesor Financiero",
+    "email": "pepito.perez@iaclatam.com",
+    "celular": "3247032353",
+    "customFields": []
+  },
+  {
+    "id": "b17987eb-cafb-4f03-a4b2-f9fdeaba9061",
+    "profileName": "Santiago Giraldo",
+    "nombre": "Santiago",
+    "apellido": "Giraldo",
+    "cargo": "Analista IA",
+    "email": "santiago.giraldo@iaclatam.com",
+    "celular": "3156785334",
+    "customFields": []
+  },
+  {
+    "id": "912a7787-974b-4811-b8e8-e77c786718fb",
+    "profileName": "Guillermo Humberto Cañón Sarria",
+    "nombre": "Guillermo Humberto",
+    "apellido": "Cañón Sarria",
+    "cargo": "Representante Legal / Gerente General",
+    "email": "guillermo.canon@iaclatam.com",
+    "celular": "3104120217",
+    "customFields": []
+  },
+  {
+    "id": "d061fba6-b4f7-41af-a394-1c367c240c59",
+    "profileName": "carlos pepe",
+    "nombre": "carlos",
+    "apellido": "pepe",
+    "cargo": "Asesor Financiero",
+    "email": "carlos.pepe@iaclatam.com",
+    "celular": "3247032352",
+    "customFields": []
+  },
+  {
+    "id": "c3a6cee5-63b1-4c3f-8550-e9c86eac8987",
+    "profileName": "Pablo Reyes",
+    "nombre": "Pablo",
+    "apellido": "Reyes",
+    "cargo": "Practicante",
+    "email": "pablo.reyes@iaclatam.com",
+    "celular": "3247032353",
+    "customFields": []
+  },
+  {
+    "id": "40628d8a-8d85-454e-8850-da87a67595f5",
+    "profileName": "Carlos Test 6296e7",
+    "nombre": "Carlos",
+    "apellido": "Test 6296e7",
+    "cargo": "Líder de Soporte Técnico",
+    "email": "test_sync_emp_6296e7@iaclatam.com",
+    "celular": "3119876543",
+    "customFields": []
+  },
+  {
+    "id": "069763a2-6540-4866-9e91-0f25bd1c1abb",
+    "profileName": "Melisa Comercial e8f3ff",
+    "nombre": "Melisa",
+    "apellido": "Comercial e8f3ff",
+    "cargo": "Gerente de Cuentas Estratégicas",
+    "email": "test_sync_comm_e8f3ff@iaclatam.com",
+    "celular": "3201234567",
+    "customFields": []
+  },
+  {
+    "id": "30dead65-1f01-43d6-b2b7-169986fd6b06",
+    "profileName": "Nuevo Colega Comercial",
+    "nombre": "Nuevo",
+    "apellido": "Colega",
+    "cargo": "Consultor Comercial",
+    "email": "test_access_created_491f5d@iaclatam.com",
+    "celular": "3109876543",
+    "customFields": []
+  },
+  {
+    "id": "0ff0d8b5-0e1d-4bab-804c-962d96f8287f",
+    "profileName": "Intento de Admin",
+    "nombre": "Intento",
+    "apellido": "Admin",
+    "cargo": "Director",
+    "email": "test_access_unpriv_993f0a@iaclatam.com",
+    "celular": "3109876543",
+    "customFields": []
+  },
+  {
+    "id": "d0132ca8-d790-46ed-8f99-37af56c8b8fa",
+    "profileName": "Carlos Test 3530d6",
+    "nombre": "Carlos",
+    "apellido": "Test 3530d6",
+    "cargo": "Líder de Soporte Técnico",
+    "email": "test_sync_emp_3530d6@iaclatam.com",
+    "celular": "3119876543",
+    "customFields": []
+  },
+  {
+    "id": "5b5e5c17-2f1f-41b5-a448-14c73483a61a",
+    "profileName": "Melisa Comercial 15117e",
+    "nombre": "Melisa",
+    "apellido": "Comercial 15117e",
+    "cargo": "Gerente de Cuentas Estratégicas",
+    "email": "test_sync_comm_15117e@iaclatam.com",
+    "celular": "3201234567",
     "customFields": []
   }
 ]

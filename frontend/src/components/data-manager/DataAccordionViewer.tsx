@@ -13,7 +13,8 @@ import {
   Inbox,
   Pencil,
   Check,
-  X
+  X,
+  Briefcase
 } from 'lucide-react';
 
 interface DataAccordionViewerProps {
@@ -315,6 +316,7 @@ export const DataAccordionViewer: React.FC<DataAccordionViewerProps> = ({
                       <h4 className="accordion-main-title">👤 {profile.profileName}</h4>
                       <span className="accordion-sub-meta">
                         {[profile.nombre, profile.apellido].filter(Boolean).join(' ') || 'Sin nombre completo'}
+                        {profile.cargo ? ` • ${profile.cargo}` : ''}
                         {profile.email ? ` • ${profile.email}` : ''}
                       </span>
                     </div>
@@ -383,6 +385,16 @@ export const DataAccordionViewer: React.FC<DataAccordionViewerProps> = ({
                             />
                           </div>
                           <div className="form-group">
+                            <label className="form-label subtle">Cargo / Puesto</label>
+                            <input
+                              type="text"
+                              className="form-input mini"
+                              value={editProfileForm.cargo || ''}
+                              onChange={(e) => setEditProfileForm(prev => prev ? ({ ...prev, cargo: e.target.value }) : null)}
+                              placeholder="Cargo / Puesto"
+                            />
+                          </div>
+                          <div className="form-group">
                             <label className="form-label subtle">Correo / Gmail</label>
                             <input
                               type="email"
@@ -437,6 +449,12 @@ export const DataAccordionViewer: React.FC<DataAccordionViewerProps> = ({
                             <div className="profile-detail-cell">
                               <span className="detail-label">Apellido</span>
                               <span className="detail-value">{profile.apellido}</span>
+                            </div>
+                          )}
+                          {profile.cargo && (
+                            <div className="profile-detail-cell">
+                              <span className="detail-label"><Briefcase size={12} /> Cargo / Puesto</span>
+                              <span className="detail-value">{profile.cargo}</span>
                             </div>
                           )}
                           {profile.email && (

@@ -98,6 +98,7 @@ export function flattenToCompanyData(
     if (p.nombre) flat[`${prefix}_nombre`] = p.nombre;
     if (p.apellido) flat[`${prefix}_apellido`] = p.apellido;
     if (p.nombre && p.apellido) flat[`${prefix}_nombre_completo`] = `${p.nombre} ${p.apellido}`;
+    if (p.cargo) flat[`${prefix}_cargo`] = p.cargo;
     if (p.email) flat[`${prefix}_email`] = p.email;
     if (p.celular) flat[`${prefix}_celular`] = p.celular;
 

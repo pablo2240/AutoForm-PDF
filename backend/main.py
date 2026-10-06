@@ -522,6 +522,101 @@ def hex_to_rgb_tuple(hex_color: Optional[str]) -> Tuple[float, float, float]:
 def read_root():
     return {"message": "AutoForm PDF API is running", "version": "1.2.0"}
 
+def sync_company_data_to_supabase(data: Dict[str, Any]):
+    """Sincroniza cambios en datos corporativos con las tablas de Supabase (companies, legal_representatives, company_bank_accounts)."""
+    try:
+        admin_client = get_supabase_admin_client()
+        if not admin_client:
+            return
+        company_id = os.getenv("DEFAULT_COMPANY_ID")
+        if not company_id:
+            try:
+                c_res = admin_client.table("companies").select("id").eq("is_active", True).limit(1).execute()
+                if c_res.data and len(c_res.data) > 0:
+                    company_id = c_res.data[0]["id"]
+            except Exception:
+                pass
+        if not company_id:
+            company_id = "8cb5378d-b9a7-4e2e-aa36-2718371731a6"
+
+        comp_update = {}
+        if "razon_social" in data and data["razon_social"]:
+            comp_update["razon_social"] = data["razon_social"]
+        if "nit" in data and data["nit"]:
+            nit_raw = str(data["nit"]).replace("-", "").strip()
+            if len(nit_raw) == 10 and not data.get("dv"):
+                comp_update["nit"] = nit_raw[:9]
+                comp_update["dv"] = nit_raw[9:]
+            else:
+                comp_update["nit"] = str(data["nit"]).split("-")[0].strip()
+        if "dv" in data and data["dv"]:
+            comp_update["dv"] = str(data["dv"]).strip()
+        if "ciudad" in data and data["ciudad"]:
+            comp_update["ciudad"] = data["ciudad"]
+        if "departamento" in data and data["departamento"]:
+            comp_update["departamento"] = data["departamento"]
+        if "pais" in data and data["pais"]:
+            comp_update["pais"] = data["pais"]
+        if "direccion_principal" in data and data["direccion_principal"]:
+            comp_update["direccion_principal"] = data["direccion_principal"]
+        if "telefono" in data and data["telefono"]:
+            comp_update["telefono"] = str(data["telefono"])
+        if "pagina_web" in data and data["pagina_web"]:
+            comp_update["pagina_web"] = data["pagina_web"]
+
+        for num_f in ["total_activos", "total_pasivos", "total_patrimonio", "total_ingresos_mensuales", "total_egresos_mensuales"]:
+            if num_f in data and data[num_f]:
+                try:
+                    comp_update[num_f] = float(str(data[num_f]).replace(",", "").replace("$", "").strip())
+                except Exception:
+                    pass
+
+        if comp_update:
+            try:
+                admin_client.table("companies").update(comp_update).eq("id", company_id).execute()
+            except Exception as e_comp:
+                print(f"[WARN] Error actualizando tabla companies en Supabase: {e_comp}")
+
+        leg_update = {}
+        if "representante_legal" in data and data["representante_legal"]:
+            leg_update["nombre_completo"] = data["representante_legal"]
+        if "representante_nombre" in data and data["representante_nombre"]:
+            leg_update["nombres"] = data["representante_nombre"]
+        if "representante_apellido" in data and data["representante_apellido"]:
+            leg_update["apellidos"] = data["representante_apellido"]
+        if "tipo_documento" in data and data["tipo_documento"]:
+            leg_update["tipo_documento"] = data["tipo_documento"]
+        if "numero_cedula" in data and data["numero_cedula"]:
+            leg_update["numero_documento"] = str(data["numero_cedula"])
+        if "lugar_expedicion_rep" in data and data["lugar_expedicion_rep"]:
+            leg_update["lugar_expedicion"] = data["lugar_expedicion_rep"]
+        if "correo_rep" in data and data["correo_rep"]:
+            leg_update["email"] = data["correo_rep"]
+        if "celular_rep" in data and data["celular_rep"]:
+            leg_update["celular"] = str(data["celular_rep"])
+
+        if leg_update:
+            try:
+                admin_client.table("legal_representatives").update(leg_update).eq("company_id", company_id).eq("es_principal", True).execute()
+            except Exception as e_leg:
+                print(f"[WARN] Error actualizando legal_representatives en Supabase: {e_leg}")
+
+        bank_update = {}
+        if "entidad_bancaria" in data and data["entidad_bancaria"]:
+            bank_update["entidad_bancaria"] = data["entidad_bancaria"]
+        if "tipo_cuenta" in data and data["tipo_cuenta"]:
+            bank_update["tipo_cuenta"] = data["tipo_cuenta"]
+        if "numero_cuenta" in data and data["numero_cuenta"]:
+            bank_update["numero_cuenta"] = str(data["numero_cuenta"])
+
+        if bank_update:
+            try:
+                admin_client.table("company_bank_accounts").update(bank_update).eq("company_id", company_id).eq("es_principal", True).execute()
+            except Exception as e_bank:
+                print(f"[WARN] Error actualizando company_bank_accounts en Supabase: {e_bank}")
+    except Exception as e:
+        print(f"[WARN] Fallo general sincronizando empresa con Supabase: {e}")
+
 @app.get("/api/company-data")
 def get_company_data():
     default_data = {
@@ -551,25 +646,90 @@ def get_company_data():
         "total_egresos_mensuales": "975086377"
     }
     path = os.path.join(DATA_DIR, "company_data.json")
-    if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(default_data, f, indent=2, ensure_ascii=False)
-        return default_data
+    saved_data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                content = json.load(f)
+                if isinstance(content, dict):
+                    saved_data = content
+        except Exception:
+            pass
+
+    merged = {**default_data, **saved_data}
+
+    # Enriquecer autoritativamente desde Supabase si está disponible
     try:
-        with open(path, "r", encoding="utf-8-sig") as f:
-            data = json.load(f)
-            if isinstance(data, dict) and len(data) > 0:
-                merged = {**default_data, **data}
-                return merged
+        admin_client = get_supabase_admin_client()
+        if admin_client:
+            company_id = os.getenv("DEFAULT_COMPANY_ID")
+            if not company_id:
+                try:
+                    c_res = admin_client.table("companies").select("id").eq("is_active", True).limit(1).execute()
+                    if c_res.data and len(c_res.data) > 0:
+                        company_id = c_res.data[0]["id"]
+                except Exception:
+                    pass
+            if not company_id:
+                company_id = "8cb5378d-b9a7-4e2e-aa36-2718371731a6"
+
+            comp_res = admin_client.table("companies").select("*").eq("id", company_id).single().execute()
+            if comp_res.data:
+                c = comp_res.data
+                if c.get("razon_social"): merged["razon_social"] = c["razon_social"]
+                if c.get("nit"):
+                    nit_val = str(c["nit"])
+                    dv_val = str(c.get("dv") or "")
+                    merged["nit"] = f"{nit_val}{dv_val}" if dv_val else nit_val
+                if c.get("ciudad"): merged["ciudad"] = c["ciudad"]
+                if c.get("departamento"): merged["departamento"] = c["departamento"]
+                if c.get("pais"): merged["pais"] = c["pais"]
+                if c.get("direccion_principal"): merged["direccion_principal"] = c["direccion_principal"]
+                if c.get("telefono"): merged["telefono"] = str(c["telefono"])
+                if c.get("pagina_web"): merged["pagina_web"] = c["pagina_web"]
+                if c.get("total_activos") is not None: merged["total_activos"] = str(int(c["total_activos"]))
+                if c.get("total_pasivos") is not None: merged["total_pasivos"] = str(int(c["total_pasivos"]))
+                if c.get("total_patrimonio") is not None: merged["total_patrimonio"] = str(int(c["total_patrimonio"]))
+                if c.get("total_ingresos_mensuales") is not None: merged["total_ingresos_mensuales"] = str(int(c["total_ingresos_mensuales"]))
+                if c.get("total_egresos_mensuales") is not None: merged["total_egresos_mensuales"] = str(int(c["total_egresos_mensuales"]))
+
+            leg_res = admin_client.table("legal_representatives").select("*").eq("company_id", company_id).eq("es_principal", True).execute()
+            if leg_res.data and len(leg_res.data) > 0:
+                l = leg_res.data[0]
+                if l.get("nombre_completo"): merged["representante_legal"] = l["nombre_completo"]
+                if l.get("nombres"): merged["representante_nombre"] = l["nombres"]
+                if l.get("apellidos"): merged["representante_apellido"] = l["apellidos"]
+                if l.get("tipo_documento"): merged["tipo_documento"] = l["tipo_documento"]
+                if l.get("numero_cedula"): merged["numero_cedula"] = str(l["numero_documento"])
+                if l.get("lugar_expedicion"): merged["lugar_expedicion_rep"] = l["lugar_expedicion"]
+                if l.get("fecha_expedicion"): merged["fecha_expedicion_rep"] = str(l["fecha_expedicion"])
+                if l.get("email"): merged["correo_rep"] = l["email"]
+                if l.get("celular"): merged["celular_rep"] = str(l["celular"])
+
+            bank_res = admin_client.table("company_bank_accounts").select("*").eq("company_id", company_id).eq("es_principal", True).execute()
+            if bank_res.data and len(bank_res.data) > 0:
+                b = bank_res.data[0]
+                if b.get("entidad_bancaria"): merged["entidad_bancaria"] = b["entidad_bancaria"]
+                if b.get("tipo_cuenta"): merged["tipo_cuenta"] = b["tipo_cuenta"]
+                if b.get("numero_cuenta"): merged["numero_cuenta"] = str(b["numero_cuenta"])
+    except Exception as e_load_supa:
+        print(f"[WARN] Error cargando datos corporativos desde Supabase: {e_load_supa}")
+
+    # Guardar en cache local para acceso sin conexión
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(merged, f, indent=2, ensure_ascii=False)
     except Exception:
         pass
-    return default_data
+
+    return merged
 
 @app.post("/api/company-data")
 def update_company_data(data: Dict[str, Any]):
     path = os.path.join(DATA_DIR, "company_data.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    sync_company_data_to_supabase(data)
     return {"status": "success", "message": "Company data saved successfully"}
 
 @app.get("/api/signature")
@@ -755,40 +915,347 @@ def update_categorized_company(payload: Dict[str, Any]):
         json.dump(payload, f, indent=2, ensure_ascii=False)
     return {"status": "success", "message": "Categorized company data saved successfully"}
 
+def sync_profile_to_supabase_and_local(
+    profile_data: Dict[str, Any],
+    db: Optional[Any] = None,
+    client_ip: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Sincroniza un perfil de empleador/comercial tanto en Supabase (Auth + public.profiles)
+    como en la base de datos local relacional SQLite (CommercialProfile).
+    Garantiza persistencia definitiva con campo cargo entre reinicios y cambios de entorno.
+    """
+    email = str(profile_data.get("email") or "").strip().lower()
+    nombre = str(profile_data.get("nombre") or "").strip()
+    apellido = str(profile_data.get("apellido") or "").strip()
+    cargo = str(profile_data.get("cargo") or "").strip()
+    celular = str(profile_data.get("celular") or "").strip()
+    profile_name = str(
+        profile_data.get("profileName")
+        or profile_data.get("profile_name")
+        or f"{nombre} {apellido}".strip()
+    ).strip()
+    ciudad = str(profile_data.get("ciudad") or "").strip()
+    tipo_documento = str(profile_data.get("tipo_documento") or "C.C").strip()
+    documento_identidad = profile_data.get("documento_identidad")
+    if documento_identidad:
+        documento_identidad = str(documento_identidad).strip()
+    role = str(profile_data.get("role") or "commercial").strip()
+    raw_id = profile_data.get("id")
+    profile_id = str(raw_id).strip() if raw_id else None
+    password = profile_data.get("password")
+
+    if not profile_name:
+        profile_name = f"{nombre} {apellido}".strip() or email or "Usuario"
+
+    if not cargo:
+        cargo = "Asesor Comercial"
+
+    auth_user_id = None
+    close_db_here = False
+    if db is None:
+        try:
+            db = SessionLocal()
+            close_db_here = True
+        except Exception:
+            db = None
+
+    # 1. Sincronización en Supabase
+    try:
+        admin_client = get_supabase_admin_client()
+        if admin_client:
+            resolved_company_id = os.getenv("DEFAULT_COMPANY_ID")
+            if not resolved_company_id:
+                try:
+                    c_res = admin_client.table("companies").select("id").eq("is_active", True).limit(1).execute()
+                    if c_res.data and len(c_res.data) > 0:
+                        resolved_company_id = c_res.data[0]["id"]
+                except Exception:
+                    pass
+            if not resolved_company_id:
+                resolved_company_id = "8cb5378d-b9a7-4e2e-aa36-2718371731a6"
+
+            # Buscar usuario existente en Supabase Auth por email o ID
+            if email:
+                try:
+                    all_users = admin_client.auth.admin.list_users(page=1, per_page=1000)
+                    for u in all_users:
+                        if (u.email or "").lower() == email:
+                            auth_user_id = str(u.id)
+                            break
+                except Exception as e_list:
+                    print(f"[WARN] Error listando usuarios en Supabase Auth: {e_list}")
+
+            if not auth_user_id and profile_id and len(profile_id) == 36:
+                try:
+                    u_res = admin_client.auth.admin.get_user_by_id(profile_id)
+                    u_obj = getattr(u_res, "user", None) or u_res
+                    if u_obj:
+                        auth_user_id = str(getattr(u_obj, "id", None) or (u_obj.get("id") if isinstance(u_obj, dict) else None))
+                except Exception:
+                    pass
+
+            # Si no existe en Supabase Auth y tiene email corporativo válido, crearlo
+            if not auth_user_id and email and ("@iaclatam.com" in email or "@iac.com.co" in email):
+                temp_pwd = password or f"SmartForm{secrets.token_hex(4)}!"
+                auth_payload = {
+                    "email": email,
+                    "password": temp_pwd,
+                    "email_confirm": True,
+                    "app_metadata": {
+                        "company_id": resolved_company_id,
+                        "role": role if role in ("admin", "commercial") else "commercial",
+                        "cargo": cargo,
+                        "tipo_documento": tipo_documento
+                    },
+                    "user_metadata": {
+                        "nombre": nombre,
+                        "apellido": apellido,
+                        "cargo": cargo,
+                        "celular": celular,
+                        "ciudad": ciudad,
+                        "tipo_documento": tipo_documento,
+                        "documento_identidad": documento_identidad
+                    }
+                }
+                try:
+                    new_user_res = admin_client.auth.admin.create_user(auth_payload)
+                    u_created = getattr(new_user_res, "user", None) or new_user_res
+                    auth_user_id = str(getattr(u_created, "id", None) or (u_created.get("id") if isinstance(u_created, dict) else None))
+                except Exception as e_create:
+                    print(f"[WARN] No se pudo crear usuario en Supabase Auth para {email}: {e_create}")
+
+            # Upsert o update directo en public.profiles
+            supa_uid = auth_user_id or (profile_id if (profile_id and len(profile_id) == 36) else None)
+            if supa_uid:
+                prof_record = {
+                    "id": supa_uid,
+                    "company_id": resolved_company_id,
+                    "email": email,
+                    "nombre": nombre,
+                    "apellido": apellido,
+                    "display_name": profile_name,
+                    "cargo": cargo,
+                    "celular": celular,
+                    "tipo_documento": tipo_documento,
+                    "role": role if role in ("admin", "commercial") else "commercial",
+                    "is_active": True
+                }
+                if ciudad:
+                    prof_record["ciudad"] = ciudad
+                if documento_identidad:
+                    prof_record["documento_identidad"] = documento_identidad
+                try:
+                    admin_client.table("profiles").upsert(prof_record).execute()
+                except Exception as e_upsert:
+                    print(f"[WARN] Error en upsert de public.profiles en Supabase: {e_upsert}")
+            elif email:
+                try:
+                    admin_client.table("profiles").update({
+                        "cargo": cargo,
+                        "display_name": profile_name,
+                        "nombre": nombre,
+                        "apellido": apellido,
+                        "celular": celular
+                    }).eq("email", email).execute()
+                except Exception:
+                    pass
+    except Exception as e_supa_general:
+        print(f"[WARN] Error general sincronizando perfil con Supabase: {e_supa_general}")
+
+    # 2. Sincronización en SQLite (CommercialProfile)
+    final_id = auth_user_id or profile_id or str(uuid.uuid4())
+    if db is not None:
+        try:
+            existing_cp = None
+            if email:
+                existing_cp = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(email)).first()
+            if not existing_cp and final_id:
+                existing_cp = db.query(CommercialProfile).filter(CommercialProfile.id == final_id).first()
+
+            if existing_cp:
+                existing_cp.profile_name = profile_name
+                if nombre: existing_cp.nombre = nombre
+                if apellido: existing_cp.apellido = apellido
+                if cargo: existing_cp.cargo = cargo
+                if celular: existing_cp.celular = celular
+                if ciudad: existing_cp.ciudad = ciudad
+                if tipo_documento: existing_cp.tipo_documento = tipo_documento
+                if documento_identidad: existing_cp.documento_identidad = documento_identidad
+                existing_cp.is_active = True
+                if client_ip: existing_cp.last_modified_by_ip = client_ip
+                final_id = existing_cp.id
+            else:
+                new_cp = CommercialProfile(
+                    id=final_id,
+                    profile_name=profile_name,
+                    nombre=nombre or profile_name,
+                    apellido=apellido or "",
+                    cargo=cargo,
+                    email=email,
+                    celular=celular or "3000000000",
+                    ciudad=ciudad or None,
+                    tipo_documento=tipo_documento or "C.C",
+                    documento_identidad=documento_identidad,
+                    role=role if role in ("admin", "commercial") else "commercial",
+                    is_active=True,
+                    last_modified_by_ip=client_ip
+                )
+                db.add(new_cp)
+                final_id = new_cp.id
+            db.commit()
+        except Exception as e_db:
+            db.rollback()
+            print(f"[WARN] Error guardando perfil en SQLite: {e_db}")
+        finally:
+            if close_db_here:
+                db.close()
+
+    return {
+        "id": final_id,
+        "profileName": profile_name,
+        "nombre": nombre,
+        "apellido": apellido,
+        "cargo": cargo,
+        "email": email,
+        "celular": celular,
+        "customFields": profile_data.get("customFields") or []
+    }
+
 @app.get("/api/employer-profiles")
-def get_employer_profiles():
+def get_employer_profiles(db = Depends(get_db)):
     path = os.path.join(DATA_DIR, "employer_profiles.json")
+    profiles_dict: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Leer archivo local si existe
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8-sig") as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                saved = json.load(f)
+                if isinstance(saved, list):
+                    for p in saved:
+                        key = (p.get("email") or p.get("id") or "").strip().lower()
+                        if key:
+                            profiles_dict[key] = p
+        except Exception as e:
+            print(f"[WARN] Error leyendo employer_profiles.json: {e}")
 
-    comp_path = os.path.join(DATA_DIR, "company_data.json")
-    comp_data = {}
-    if os.path.exists(comp_path):
-        with open(comp_path, "r", encoding="utf-8-sig") as f:
-            comp_data = json.load(f)
+    # 2. Sincronizar desde Supabase public.profiles (persistencia autoritativa en la nube)
+    try:
+        admin_client = get_supabase_admin_client()
+        if admin_client:
+            res = admin_client.table("profiles").select("*").eq("is_active", True).execute()
+            if res.data:
+                for row in res.data:
+                    email_key = (row.get("email") or str(row.get("id", ""))).strip().lower()
+                    if not email_key:
+                        continue
+                    disp_name = row.get("display_name") or f"{row.get('nombre', '')} {row.get('apellido', '')}".strip()
+                    cargo_val = row.get("cargo") or ""
+                    if email_key in profiles_dict:
+                        existing = profiles_dict[email_key]
+                        if not existing.get("cargo") and cargo_val:
+                            existing["cargo"] = cargo_val
+                        if not existing.get("nombre") and row.get("nombre"):
+                            existing["nombre"] = row.get("nombre")
+                        if not existing.get("apellido") and row.get("apellido"):
+                            existing["apellido"] = row.get("apellido")
+                        if not existing.get("celular") and row.get("celular"):
+                            existing["celular"] = row.get("celular")
+                        existing["id"] = str(row["id"])
+                        if not existing.get("profileName"):
+                            existing["profileName"] = disp_name
+                    else:
+                        profiles_dict[email_key] = {
+                            "id": str(row["id"]),
+                            "profileName": disp_name,
+                            "nombre": row.get("nombre") or "",
+                            "apellido": row.get("apellido") or "",
+                            "cargo": cargo_val,
+                            "email": row.get("email") or "",
+                            "celular": row.get("celular") or "",
+                            "customFields": []
+                        }
+    except Exception as e_supa:
+        print(f"[WARN] Error cargando perfiles desde Supabase: {e_supa}")
 
-    default_profiles = []
-    if "kelly_delgado_nombre" in comp_data or "kelly_delgado_email" in comp_data:
-        default_profiles.append({
-            "id": "prof-kelly-delgado",
-            "profileName": "Kelly Delgado",
-            "nombre": comp_data.get("kelly_delgado_nombre", "Kelly Yohana"),
-            "apellido": comp_data.get("kelly_delgado_apellido", "Delgado Macea"),
-            "email": comp_data.get("kelly_delgado_email", "Kelly.Delgado@iaclatam.com"),
-            "celular": comp_data.get("kelly_delgado_celular", "301 4750760"),
-            "customFields": []
-        })
+    # 3. Sincronizar desde SQLite CommercialProfile
+    close_db_local = False
+    active_db = db
+    if active_db is None:
+        try:
+            active_db = SessionLocal()
+            close_db_local = True
+        except Exception:
+            active_db = None
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(default_profiles, f, indent=2, ensure_ascii=False)
-    return default_profiles
+    if active_db is not None:
+        try:
+            sqlite_profiles = active_db.query(CommercialProfile).filter(CommercialProfile.is_active == True).all()
+            for sp in sqlite_profiles:
+                email_key = (sp.email or sp.id or "").strip().lower()
+                if not email_key:
+                    continue
+                if email_key in profiles_dict:
+                    existing = profiles_dict[email_key]
+                    if not existing.get("cargo") and sp.cargo:
+                        existing["cargo"] = sp.cargo
+                else:
+                    profiles_dict[email_key] = {
+                        "id": str(sp.id),
+                        "profileName": sp.profile_name,
+                        "nombre": sp.nombre or "",
+                        "apellido": sp.apellido or "",
+                        "cargo": sp.cargo or "",
+                        "email": sp.email or "",
+                        "celular": sp.celular or "",
+                        "customFields": []
+                    }
+        except Exception as e_db:
+            print(f"[WARN] Error cargando perfiles desde SQLite: {e_db}")
+        finally:
+            if close_db_local:
+                active_db.close()
+
+    # 4. Asegurar que perfiles conocidos tengan cargo representativo
+    for key, p in profiles_dict.items():
+        em = (p.get("email") or "").lower()
+        if "guillermo.canon" in em and not p.get("cargo"):
+            p["cargo"] = "Representante Legal / Gerente General"
+        elif "kelly.delgado" in em and not p.get("cargo"):
+            p["cargo"] = "Administración"
+
+    result = list(profiles_dict.values())
+
+    # 5. Guardar unificación en cache local para reinicios rápidos
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+    except Exception as e_save:
+        print(f"[WARN] Error actualizando cache de employer_profiles.json: {e_save}")
+
+    return result
 
 @app.post("/api/employer-profiles")
-def update_employer_profiles(payload: List[Dict[str, Any]]):
+def update_employer_profiles(
+    payload: List[Dict[str, Any]],
+    request: Request = None,
+    db = Depends(get_db)
+):
     path = os.path.join(DATA_DIR, "employer_profiles.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+    client_ip = request.client.host if (request and request.client) else None
+
+    synced_list = []
+    for item in payload:
+        synced = sync_profile_to_supabase_and_local(item, db=db, client_ip=client_ip)
+        synced_list.append(synced)
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(synced_list, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[WARN] Error guardando employer_profiles.json: {e}")
+
     return {"status": "success", "message": "Employer profiles saved successfully"}
 
 # ---------------------------------------------------------------------------
@@ -1886,25 +2353,53 @@ def create_commercial_profile(
         raise HTTPException(status_code=400, detail=f"Ya existe un perfil con el correo {dto.email}")
 
     client_ip = request.client.host if request.client else None
-    pwd_hash = hash_password(dto.password) if dto.password else None
     assigned_role = dto.role if (current_user.role == "admin" and dto.role) else "commercial"
-    new_profile = CommercialProfile(
-        profile_name=dto.profile_name.strip(),
-        nombre=dto.nombre.strip(),
-        apellido=dto.apellido.strip(),
-        cargo=dto.cargo.strip(),
-        email=dto.email.strip().lower(),
-        celular=dto.celular.strip(),
-        ciudad=dto.ciudad.strip() if dto.ciudad else None,
-        tipo_documento=dto.tipo_documento or "C.C",
-        documento_identidad=dto.documento_identidad.strip() if dto.documento_identidad else None,
-        role=assigned_role or "commercial",
-        password_hash=pwd_hash,
-        last_modified_by_ip=client_ip
-    )
-    db.add(new_profile)
-    db.commit()
-    db.refresh(new_profile)
+
+    profile_data = {
+        "profile_name": dto.profile_name.strip(),
+        "nombre": dto.nombre.strip(),
+        "apellido": dto.apellido.strip(),
+        "cargo": dto.cargo.strip(),
+        "email": dto.email.strip().lower(),
+        "celular": dto.celular.strip(),
+        "ciudad": dto.ciudad.strip() if dto.ciudad else None,
+        "tipo_documento": dto.tipo_documento or "C.C",
+        "documento_identidad": dto.documento_identidad.strip() if dto.documento_identidad else None,
+        "role": assigned_role or "commercial",
+        "password": dto.password
+    }
+
+    synced = sync_profile_to_supabase_and_local(profile_data, db=db, client_ip=client_ip)
+
+    new_profile = db.query(CommercialProfile).filter(CommercialProfile.id == synced["id"]).first()
+    if not new_profile:
+        new_profile = db.query(CommercialProfile).filter(CommercialProfile.email.ilike(dto.email.strip())).first()
+
+    if new_profile and dto.password:
+        new_profile.password_hash = hash_password(dto.password)
+        db.commit()
+        db.refresh(new_profile)
+
+    # Actualizar cache local en employer_profiles.json
+    try:
+        path = os.path.join(DATA_DIR, "employer_profiles.json")
+        saved = []
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8-sig") as f:
+                saved = json.load(f) or []
+        updated = False
+        for i, p in enumerate(saved):
+            if (p.get("email") or "").lower() == dto.email.strip().lower():
+                saved[i] = synced
+                updated = True
+                break
+        if not updated:
+            saved.append(synced)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(saved, f, indent=2, ensure_ascii=False)
+    except Exception as e_cache:
+        print(f"[WARN] Error actualizando employer_profiles.json en create_commercial_profile: {e_cache}")
+
     return CommercialProfileAdminDTO(**new_profile.to_admin_dict())
 
 @app.put("/api/admin/commercial-profiles/{profile_id}", response_model=CommercialProfileAdminDTO)
@@ -1950,8 +2445,51 @@ def update_commercial_profile(
                         print(f"[WARN] Error actualizando clave en Supabase Auth: {e_supa}")
         except Exception:
             pass
+
+    # Sincronizar actualización de campos en Supabase public.profiles
+    try:
+        admin_client = get_supabase_admin_client()
+        if admin_client:
+            supa_fields = {}
+            if dto.cargo is not None: supa_fields["cargo"] = dto.cargo.strip()
+            if dto.nombre is not None: supa_fields["nombre"] = dto.nombre.strip()
+            if dto.apellido is not None: supa_fields["apellido"] = dto.apellido.strip()
+            if dto.profile_name is not None: supa_fields["display_name"] = dto.profile_name.strip()
+            if dto.celular is not None: supa_fields["celular"] = dto.celular.strip()
+            if dto.ciudad is not None: supa_fields["ciudad"] = dto.ciudad.strip()
+            if dto.tipo_documento is not None: supa_fields["tipo_documento"] = dto.tipo_documento
+            if dto.documento_identidad is not None: supa_fields["documento_identidad"] = dto.documento_identidad.strip()
+            if dto.is_active is not None: supa_fields["is_active"] = dto.is_active
+            if supa_fields:
+                try:
+                    admin_client.table("profiles").update(supa_fields).eq("id", profile.id).execute()
+                except Exception:
+                    admin_client.table("profiles").update(supa_fields).eq("email", profile.email).execute()
+    except Exception as e_supa_up:
+        print(f"[WARN] Error actualizando public.profiles en Supabase: {e_supa_up}")
+
     db.commit()
     db.refresh(profile)
+
+    # Actualizar employer_profiles.json cache
+    try:
+        path = os.path.join(DATA_DIR, "employer_profiles.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8-sig") as f:
+                saved = json.load(f) or []
+            for i, p in enumerate(saved):
+                if p.get("id") == profile.id or (p.get("email") or "").lower() == profile.email.lower():
+                    saved[i]["profileName"] = profile.profile_name
+                    saved[i]["nombre"] = profile.nombre
+                    saved[i]["apellido"] = profile.apellido
+                    saved[i]["cargo"] = profile.cargo
+                    saved[i]["celular"] = profile.celular
+                    break
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(saved, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
     return CommercialProfileAdminDTO(**profile.to_admin_dict())
 
 @app.delete("/api/admin/commercial-profiles/{profile_id}")
@@ -1967,6 +2505,30 @@ def delete_commercial_profile(
         raise HTTPException(status_code=404, detail="Perfil no encontrado.")
     profile.is_active = False
     db.commit()
+
+    # Desactivar también en Supabase
+    try:
+        admin_client = get_supabase_admin_client()
+        if admin_client:
+            try:
+                admin_client.table("profiles").update({"is_active": False}).eq("id", profile_id).execute()
+            except Exception:
+                admin_client.table("profiles").update({"is_active": False}).eq("email", profile.email).execute()
+    except Exception as e_supa_del:
+        print(f"[WARN] Error desactivando en Supabase: {e_supa_del}")
+
+    # Remover o marcar inactivo en employer_profiles.json
+    try:
+        path = os.path.join(DATA_DIR, "employer_profiles.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8-sig") as f:
+                saved = json.load(f) or []
+            saved = [p for p in saved if p.get("id") != profile_id and (p.get("email") or "").lower() != profile.email.lower()]
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(saved, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
     return {"status": "success", "message": f"Perfil {profile.profile_name} desactivado."}
 
 

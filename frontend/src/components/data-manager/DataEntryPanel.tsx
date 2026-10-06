@@ -65,6 +65,7 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
   const [profileName, setProfileName] = useState<string>('');
   const [nombre, setNombre] = useState<string>('');
   const [apellido, setApellido] = useState<string>('');
+  const [cargo, setCargo] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [celular, setCelular] = useState<string>('');
   const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>([]);
@@ -96,11 +97,11 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
       setProfileName(`Representante Legal (${repFull})`);
       setNombre(repNombre);
       setApellido(repApellido);
+      setCargo('Representante Legal');
       setEmail(repEmail);
       setCelular(repCel);
 
       const fields: { key: string; value: string }[] = [
-        { key: 'Cargo', value: 'Representante Legal' },
         { key: 'Tipo Documento', value: repTipoDoc },
         { key: 'Cédula', value: repCedula },
       ];
@@ -118,13 +119,11 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
       setProfileName(pName);
       setNombre(found.nombre || '');
       setApellido(found.apellido || '');
+      setCargo(found.cargo || 'Asesor Comercial');
       setEmail(found.email || '');
       setCelular(found.celular || '');
 
       const fields: { key: string; value: string }[] = [];
-      if (found.cargo) {
-        fields.push({ key: 'Cargo', value: found.cargo });
-      }
       if (found.tipo_documento && found.documento_identidad) {
         fields.push({ key: 'Tipo Documento', value: found.tipo_documento });
         fields.push({ key: 'Documento', value: found.documento_identidad });
@@ -191,6 +190,7 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
       profileName: cleanProfileName,
       nombre: nombre.trim(),
       apellido: apellido.trim(),
+      cargo: cargo.trim() || 'Asesor Comercial',
       email: email.trim(),
       celular: celular.trim(),
       customFields: filteredCustomFields,
@@ -206,7 +206,7 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
           profile_name: cleanProfileName,
           nombre: nombre.trim() || cleanProfileName,
           apellido: apellido.trim() || '',
-          cargo: cargoField?.value || 'Comercial',
+          cargo: cargo.trim() || cargoField?.value || 'Comercial',
           email: emailValue,
           celular: celular.trim() || '3000000000',
           documento_identidad: docField?.value || '',
@@ -226,6 +226,7 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
     setProfileName('');
     setNombre('');
     setApellido('');
+    setCargo('');
     setEmail('');
     setCelular('');
     setCustomFields([]);
@@ -434,6 +435,20 @@ export const DataEntryPanel: React.FC<DataEntryPanelProps> = ({
                 onChange={(e) => setApellido(e.target.value)}
               />
             </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="emp-cargo">
+              Cargo / Puesto de Trabajo
+            </label>
+            <input
+              id="emp-cargo"
+              type="text"
+              className="form-input"
+              placeholder="ej. Asesor Comercial, Director de Operaciones..."
+              value={cargo}
+              onChange={(e) => setCargo(e.target.value)}
+            />
           </div>
 
           <div className="form-group">

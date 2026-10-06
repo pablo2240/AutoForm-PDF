@@ -23,6 +23,7 @@ export interface EmployerProfile {
   profileName: string;
   nombre: string;
   apellido: string;
+  cargo?: string;
   email: string;
   celular: string;
   customFields: CustomFieldItem[];
