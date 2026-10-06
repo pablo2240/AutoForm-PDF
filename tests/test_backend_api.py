@@ -169,6 +169,10 @@ def test_ai_fill_endpoint_validation(monkeypatch):
     assert res2.status_code in [200, 500]
     print("[SUCCESS] AI Fill endpoint validation test passed!")
 
+@pytest.mark.skipif(
+    "tnhedxwbpqihlqbtzudt" in (os.getenv("SUPABASE_URL") or ""),
+    reason="Escribe documentos en Supabase real: solo ejecutar contra staging (nunca producción)."
+)
 def test_single_file_slot_atomic_replacement():
     """Valida que subir un nuevo PDF reemplace atómicamente el documento previo del slot único."""
     pdf_bytes = get_test_pdf_bytes()
